@@ -53,7 +53,11 @@ jobs:
       - name: 生成 Xcode 工程
         run: |
           xcodegen generate
-          cd Demo/PaginationDemo && xcodegen generate && cd ../..
+          if [ -d Demo/PaginationDemo ]; then
+            cd Demo/PaginationDemo && xcodegen generate && cd ../..
+          else
+            echo "⏭️  Demo/PaginationDemo 不存在，跳过"
+          fi
 
       # ── 关卡 3：编译 ───────────────────────────────────────────
       # ⚠️ 两个开关缺一不可（Xcode 16.4 / macos-15 实测）：
