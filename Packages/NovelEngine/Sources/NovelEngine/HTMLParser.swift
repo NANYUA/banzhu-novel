@@ -1,7 +1,7 @@
 import Foundation
 
 /// 轻量 HTML 提取工具（正则实现，避免引入第三方依赖，便于 GitHub 云端编译）。
-/// 规则与已验证的 Python 原型 (mumu_search.py / mumu_decode.py) 对齐。
+/// 规则与已验证的 Python 原型对齐。
 enum HTMLParser {
     private static func firstGroup(_ pattern: String, in html: String,
                                    opts: NSRegularExpression.Options = [.caseInsensitive, .dotMatchesLineSeparators]) -> String? {

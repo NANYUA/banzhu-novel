@@ -13,7 +13,7 @@ import WebKit
 //
 // `import Combine` 也随之移除——引擎层不应引入任何状态管理框架。
 
-/// 自动过盾器：用一个离屏 WKWebView 加载站点，让 `_guard` 挑战脚本在真实浏览器环境里
+/// 自动过盾器：用一个离屏 WKWebView 加载站点，让 guard 挑战脚本在真实浏览器环境里
 /// 自动计算并写入 Cookie（加速乐/JSL 类盾通常执行 JS 即可通过，无需真正拖滑块）。
 /// 过盾后把 Cookie 同步进 HTTPCookieStorage.shared 供 URLSession 复用。
 /// 若超时仍停在盾页（需要真正手动拖滑块），返回 false。
@@ -84,7 +84,7 @@ final class GuardResolver: NSObject {
     }
 
     private func isGuardPage(_ html: String) -> Bool {
-        html.contains("_guard") || html.contains("slider_html")
+        html.contains("guard") || html.contains("slider_html")
             || html.contains("向右滑动") || html.contains("slide.js")
     }
 

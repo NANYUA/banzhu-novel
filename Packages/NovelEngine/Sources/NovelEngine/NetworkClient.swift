@@ -33,9 +33,9 @@ actor NetworkClient {
         self.session = URLSession(configuration: cfg)
     }
 
-    /// 检测是否被滑块盾拦截（返回极短的 _guard 脚本页）
+    /// 检测是否被滑块盾拦截（返回极短的 guard 脚本页）
     private func isGuarded(_ html: String) -> Bool {
-        return html.contains("_guard") || html.contains("slider_html") || html.count < 200
+        return html.contains("guard") || html.contains("slider_html") || html.count < 200
     }
 
     /// GET 一个页面，返回 GBK 解码后的 HTML

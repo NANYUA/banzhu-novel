@@ -1,35 +1,73 @@
-# 版主小说
+# iOS Novel Reader
 
-iOS 单站点阅读器（`com.reader.bjvu`）—— 言璃版（mianmian111111.com 系，GBK + `_guard` 盾）。
+A modular iOS reading app built with SwiftUI, SwiftData, and the Composable Architecture.
 
-## 构建要求
+## Tech Stack
+
+- **Language**: Swift 5.9
+- **UI**: SwiftUI (iOS 17+)
+- **Persistence**: SwiftData
+- **State Management**: Composable Architecture (TCA)
+- **Build**: XcodeGen + SPM
+- **CI**: GitHub Actions
+
+## Requirements
 
 - Xcode 16.4+
 - iOS 17.0+ SDK
-- Swift 5.9
+- macOS 14+ (for CI)
 
-## 本地配置
-
-1. 复制 `.env.example` → `.env`
-2. 填入本地 secrets（见 `.env.example`）
-3. `.env` 已在 `.gitignore`，不会提交
-
-## 开发
+## Quick Start
 
 ```bash
-# 架构校验
+# Architecture check (runs locally without macOS)
 sh scripts/check-architecture.sh
 
-# 生成 Xcode 工程
+# Generate Xcode project
 xcodegen generate
 
-# 编译
-xcodebuild -project BanzhuNovel.xcodeproj -scheme BanzhuNovel -destination 'generic/platform=iOS Simulator' build
+# Build
+xcodebuild \
+  -project BanzhuNovel.xcodeproj \
+  -scheme BanzhuNovel \
+  -destination 'generic/platform=iOS Simulator' \
+  -skipMacroValidation \
+  -skipPackagePluginValidation \
+  build
 ```
 
-## 文档
+## Project Structure
 
-完整文档（需求、ADR、交接文档等）留在本地工作副本，不纳入公开仓库。
+```
+App/Sources/              # SwiftUI app entry + views
+Packages/NovelCore/       # Business logic, models, TCA features
+Packages/NovelEngine/     # Network, parsing, site-specific logic
+scripts/                  # Architecture constraints checker
+```
+
+## Architecture
+
+- `NovelEngine`: Pure logic layer (no UI imports). Handles networking, HTML parsing, and content decoding.
+- `NovelCore`: State management (TCA), persistence (SwiftData), and features.
+- `App`: SwiftUI views only. No business logic.
+
+Dependency direction: `App → NovelCore → NovelEngine` (strictly one-way).
+
+## Testing
+
+```bash
+swift test --package-path Packages/NovelCore
+swift test --package-path Packages/NovelEngine
+```
+
+## CI
+
+Five gates on every push:
+1. Architecture constraint check
+2. SwiftFormat
+3. SwiftLint strict
+4. Xcode build (unsigned)
+5. XCTest
 
 ## License
 

@@ -18,11 +18,7 @@ public actor NovelEngine {
     public func resolveCandidates(fromNav navURL: String) async throws -> [String] {
         guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
         let html = try await net.get(url)
-        let patterns = [
-            "https?://[\\w.-]*mumu\\d+\\.(?:com|net)",
-            "https?://[\\w.-]*banzhu\\d+\\.(?:com|net)",
-            "https?://[\\w.-]*bz\\d+\\.(?:com|net)"
-        ]
+        let patterns = SiteConfig.mirrorPatterns
         var found: [String] = []
         var seen = Set<String>()
         let ns = html as NSString
@@ -39,17 +35,12 @@ public actor NovelEngine {
     }
 
     /// 从导航页 HTML 里解析出真实的小说站域名。
-    /// 导航页通常列出若干镜像入口（如 www.mumuXXXXXX.com），取第一个指向小说站的链接。
+    /// 导航页通常列出若干镜像入口（如 www.mirrorXXXXXX.com），取第一个指向小说站的链接。
     public func resolveHost(fromNav navURL: String) async throws -> String {
         guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
         let html = try await net.get(url)
-        // 优先匹配 mumu 系 / banzhu 系 / bz 系镜像域名
-        let patterns = [
-            "https?://[\\w.-]*mumu\\d+\\.(?:com|net)",
-            "https?://[\\w.-]*banzhu\\d+\\.(?:com|net)",
-            "https?://[\\w.-]*bz\\d+\\.(?:com|net)"
-        ]
-        for p in patterns {
+        // 按配置的镜像域名正则依次匹配
+        for p in SiteConfig.mirrorPatterns {
             if let re = try? NSRegularExpression(pattern: p, options: [.caseInsensitive]) {
                 let ns = html as NSString
                 if let m = re.firstMatch(in: html, options: [], range: NSRange(location: 0, length: ns.length)) {
@@ -61,43 +52,5 @@ public actor NovelEngine {
             }
         }
         throw NetworkError.badResponse
-    }
-
-    // MARK: - 搜索
-    /// POST /s.php，body = s=<GBK>&page=N
-    public func search(keyword: String, page: Int = 1) async throws -> [Book] {
-        guard let url = config.url("/s.php") else { throw NetworkError.badResponse }
-        let body = "s=\(GBK.percentEncode(keyword))&page=\(page)"
-        let html = try await net.post(url, bodyString: body)
-        return HTMLParser.parseBookList(html)
-    }
-
-    // MARK: - 书城分类
-    public func explore(category: ExploreCategory, page: Int = 1) async throws -> [Book] {
-        guard let url = config.url(category.url(page: page)) else { throw NetworkError.badResponse }
-        let html = try await net.get(url)
-        return HTMLParser.parseBookList(html)
-    }
-
-    // MARK: - 详情
-    public func bookInfo(path: String) async throws -> Book {
-        guard let url = config.url(path) else { throw NetworkError.badResponse }
-        let html = try await net.get(url)
-        return HTMLParser.parseBookInfo(html, path: path)
-    }
-
-    // MARK: - 目录
-    public func chapters(bookPath: String) async throws -> [Chapter] {
-        guard let url = config.url(bookPath) else { throw NetworkError.badResponse }
-        let html = try await net.get(url)
-        return HTMLParser.parseChapters(html, baseURL: url)
-    }
-
-    // MARK: - 正文（含解码还原）
-    public func content(chapterPath: String) async throws -> String {
-        guard let url = config.url(chapterPath) else { throw NetworkError.badResponse }
-        let html = try await net.get(url)
-        let text = ContentDecoder.decode(html: html)
-        return text.isEmpty ? "（本章内容为空，可能需要重新过验证或稍后重试）" : text
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// 正文解码器 —— 移植自已验证的 prototype/mumu_decode.py
+/// 正文解码器（移植自已验证的 prototype）
 /// 原理：正文里敏感字被写成 <img src="/toimg/data/<编号>.png">，
 ///       先还原成 #编号#，再按映射表换成汉字，最后跑净化/排版正则。
 enum ContentDecoder {
@@ -261,9 +261,7 @@ enum ContentDecoder {
         s = sub("([^\\n]*使用chrome谷歌浏览[^\\n]*)", "", s, opts: i)
         s = sub("([^<\\n]*?手.机.看.小.[书说][^\\n]*)", "", s, opts: i)
         s = sub("(手机阅读小说：７７７８８７７[^\\n]*)", "", s)
-        s = sub("(diyibanzhu@gmail\\.com)", "", s)
         s = sub("（苹果手机使用.+", "", s)
-        s = s.replacingOccurrences(of: "www.diyibanzhu.net", with: "")
 
         // --- 分页断行哨兵 ---
         s = sub("([\\r\\n]?\\s*(hereispagebreak)[\\r\\n]?\\s*)", "", s, opts: i)

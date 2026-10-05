@@ -14,7 +14,7 @@ import os
 /// - 后续 Core 层若要做「全量日志收集/导出」，可在此加一个 hook 转发到自己的日志系统
 public enum EngineLog {
 
-    private static let logger = Logger(subsystem: "com.reader.bjvu", category: "Engine")
+    private static let logger = Logger(subsystem: "com.example.novelreader", category: "Engine")
 
     public enum Level: String {
         case info, warning, error
