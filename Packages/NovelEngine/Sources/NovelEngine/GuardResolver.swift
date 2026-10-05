@@ -1,22 +1,8 @@
 import Foundation
 import WebKit
 
-// ⚠️ `GuardState` 已从本文件移出（2026-10-05，T5 架构约束校验时发现）。
-//
-// 原因：它带 `ObservableObject` / `@Published`，是**状态管理**，而 D2 已定状态管理
-// 归 Core 层（TCA）。而且它承载的 `showManual`（要不要弹手动验证页）、
-// `reloadToken`（通知界面重载）都是**纯 UI 语义**，泄漏进了引擎层。
-//
-// 现拆分结果：
-//   Engine：GuardResolver 只回答「过盾成功与否」
-//   Core  ：过盾状态 → `NovelCore.GuardState`（后续改为 TCA 状态）
-//
-// `import Combine` 也随之移除——引擎层不应引入任何状态管理框架。
-
-/// 自动过盾器：用一个离屏 WKWebView 加载站点，让 guard 挑战脚本在真实浏览器环境里
-/// 自动计算并写入 Cookie（加速乐/JSL 类盾通常执行 JS 即可通过，无需真正拖滑块）。
-/// 过盾后把 Cookie 同步进 HTTPCookieStorage.shared 供 URLSession 复用。
-/// 若超时仍停在盾页（需要真正手动拖滑块），返回 false。
+/// 自动验证器：用离屏 WKWebView 执行挑战脚本并写入 Cookie。
+/// 支持并发调用（复用同一个 Task）。超时或需要手动操作时返回 false。
 @MainActor
 final class GuardResolver: NSObject {
     static let shared = GuardResolver()
@@ -24,7 +10,7 @@ final class GuardResolver: NSObject {
     private var webView: WKWebView?
     private var inFlight: Task<Bool, Never>?
 
-    /// 尝试自动过盾。返回是否成功。并发调用会复用同一个任务。
+    /// 尝试自动验证。返回是否成功。并发调用会复用同一个任务。
     func autoPass(urlString: String) async -> Bool {
         if let task = inFlight { return await task.value }
         let task = Task { await run(urlString: urlString) }

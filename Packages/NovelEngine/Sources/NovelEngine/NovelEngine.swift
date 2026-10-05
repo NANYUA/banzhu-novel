@@ -2,8 +2,6 @@ import Foundation
 
 /// 书源引擎：对上层 UI 暴露 搜索 / 详情 / 目录 / 正文 四个能力。
 ///
-/// 【与旧项目的唯一差异】`actor` 及其方法加了 `public` —— 旧项目所有代码在同一
-/// target，`internal` 就够；拆成 SPM 包后跨包访问必须是 `public`。
 /// 内部组合 NetworkClient + HTMLParser + ContentDecoder + GBK。
 public actor NovelEngine {
     public static let shared = NovelEngine()
@@ -14,7 +12,7 @@ public actor NovelEngine {
     public func setHost(_ host: String) { config = SiteConfig(host: host) }
     public func currentHost() -> String { config.host }
 
-    /// 从导航页抓取**所有**候选小说站域名（供用户选择）。
+    /// 从导航页抓取所有候选域名（供用户选择）。
     public func resolveCandidates(fromNav navURL: String) async throws -> [String] {
         guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
         let html = try await net.get(url)
@@ -34,12 +32,12 @@ public actor NovelEngine {
         return found
     }
 
-    /// 从导航页 HTML 里解析出真实的小说站域名。
-    /// 导航页通常列出若干镜像入口（如 www.mirrorXXXXXX.com），取第一个指向小说站的链接。
+    /// 从导航页 HTML 里解析出真实的域名。
+    /// 导航页通常列出若干入口，取第一个指向目标链接。
     public func resolveHost(fromNav navURL: String) async throws -> String {
         guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
         let html = try await net.get(url)
-        // 按配置的镜像域名正则依次匹配
+        // 按配置的域名正则依次匹配
         for p in SiteConfig.mirrorPatterns {
             if let re = try? NSRegularExpression(pattern: p, options: [.caseInsensitive]) {
                 let ns = html as NSString

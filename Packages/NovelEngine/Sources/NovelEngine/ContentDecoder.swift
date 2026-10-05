@@ -1,7 +1,7 @@
 import Foundation
 
 /// 正文解码器（移植自已验证的 prototype）
-/// 原理：正文里敏感字被写成 <img src="/toimg/data/<编号>.png">，
+/// 原理：正文里某些字符被写成 <img src="/toimg/data/<编号>.png">，
 ///       先还原成 #编号#，再按映射表换成汉字，最后跑净化/排版正则。
 enum ContentDecoder {
     // MARK: - ① 编号 -> 汉字 映射表（约 140 字，与 Python 版一致）

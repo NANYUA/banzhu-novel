@@ -10,7 +10,7 @@ public enum NetworkError: LocalizedError {
     /// SwiftPM 拆包后：`LocalizedError` 的协议要求必须 public，否则外层包拿不到错误文案
     public var errorDescription: String? {
         switch self {
-        case .guarded:      return "网站需要人机验证，请在「我的 → 过验证」中打开网页拖动滑块后重试。"
+        case .guarded:      return "需要人机验证，请完成验证后重试。"
         case .badResponse:  return "服务器响应异常。"
         case .decodeFailed: return "内容解码失败。"
         case .transport(let e): return "网络错误：\(e.localizedDescription)"
@@ -18,7 +18,7 @@ public enum NetworkError: LocalizedError {
     }
 }
 
-/// 网络客户端：GBK 编解码、移动 UA、Cookie 复用、GET/POST、重试退避、盾检测。
+/// 网络客户端：GBK 编解码、移动 UA、Cookie 复用、GET/POST、重试退避、人机验证检测。
 actor NetworkClient {
     static let shared = NetworkClient()
 
@@ -26,14 +26,14 @@ actor NetworkClient {
 
     init() {
         let cfg = URLSessionConfiguration.default
-        cfg.httpCookieStorage = HTTPCookieStorage.shared   // 与 WKWebView 过盾后共享 Cookie
+        cfg.httpCookieStorage = HTTPCookieStorage.shared   // 与 WKWebView 验证后共享 Cookie
         cfg.httpCookieAcceptPolicy = .always
         cfg.timeoutIntervalForRequest = 60
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = URLSession(configuration: cfg)
     }
 
-    /// 检测是否被滑块盾拦截（返回极短的 guard 脚本页）
+    /// 检测是否被人机验证页面拦截
     private func isGuarded(_ html: String) -> Bool {
         return html.contains("guard") || html.contains("slider_html") || html.count < 200
     }
@@ -48,17 +48,17 @@ actor NetworkClient {
         try await requestWithGuard(url: url, body: bodyString)
     }
 
-    /// 带自动过盾的请求：遇到盾 → 自动过盾一次 → 重试；仍失败才抛 .guarded。
+    /// 带自动验证的请求：遇到验证页 → 自动处理一次 → 重试；仍失败才抛 .guarded。
     private func requestWithGuard(url: URL, body: String?) async throws -> String {
         do {
             return try await request(url: url, body: body)
         } catch let e as NetworkError {
             guard case .guarded = e else { throw e }
-            // 自动过盾（离屏 WKWebView 执行挑战脚本写 Cookie）
+            // 自动处理验证（离屏 WKWebView 执行挑战脚本写 Cookie）
             let origin = (url.scheme.map { "\($0)://" } ?? "https://") + (url.host ?? "")
             let passed = await GuardResolver.shared.autoPass(urlString: origin + "/")
             if passed {
-                // 过盾后重试一次
+                // 验证后重试一次
                 return try await request(url: url, body: body)
             }
             throw NetworkError.guarded
