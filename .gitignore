@@ -1,0 +1,21 @@
+# 本地敏感信息
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# 构建产物
+.build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.xcarchive
+
+# 系统 / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

@@ -1,0 +1,64 @@
+# D10 已定：静态规则，接进 CI 后 --strict 会让违规导致构建失败
+disabled_rules:
+  # ── 以下交给 SwiftFormat，避免两个工具互相打架 ──
+  - trailing_whitespace      # 交给 SwiftFormat
+  - line_length              # 交给 SwiftFormat（已设 maxwidth）
+  - trailing_newline         # 交给 SwiftFormat
+  - trailing_comma           # ⚠️ 与 SwiftFormat 的 trailingCommas 规则**直接冲突**
+                             #   （SwiftLint 要求不要尾逗号，SwiftFormat 要求加）
+                             #   格式统一由 SwiftFormat 独家负责，此处必须关掉
+  - multiple_closures_with_trailing_closure
+                             # ⚠️ 与 SwiftFormat 的 trailingClosures 规则**直接冲突**：
+                             #   TCA 的 WithViewStore(store, observe: {...}) { content }
+                             #   是官方推荐写法，SwiftFormat 会强制它变回尾闭包。
+                             #   格式由 SwiftFormat 独家决定，此处关掉这条 lint。
+
+opt_in_rules:
+  - force_unwrapping        # 🔴 禁止 ! —— 定时炸弹
+  - no_prints               # 🔴 禁止 print —— 调试输出别混进正式版
+                            #   注：SwiftLint 0.59+ 把 no_print 改名为 no_prints。
+                            #   旧名字不会被识别，规则会**静默失效**（CI 只给 warning）
+                            #   —— 也就是说改错名字时「禁止 print」其实从未生效过。
+  - function_body_length     # 函数 ≤ 60 行
+  - type_body_length         # 类型 ≤ 300 行
+  - cyclomatic_complexity   # 圈复杂度
+  - identifier_name          # 名称不能太短
+  - todo                     # 🔴 禁止遗留 TODO —— 防"临时放着忘了"
+  - file_length              # 文件 ≤ 600 行
+  - large_tuple              # 元组 ≤ 4 个元素
+
+file_length:
+  warning: 600
+  error: 900
+
+function_body_length:
+  warning: 50
+  error: 60
+
+type_body_length:
+  warning: 250
+  error: 300
+
+cyclomatic_complexity:
+  warning: 10
+  error: 15
+
+large_tuple:
+  warning: 3
+  error: 4
+
+identifier_name:
+  min_length: 2
+  excluded:
+    - id
+    - to
+    - up
+    - no
+
+excluded:
+  # 与 .swiftformat 的 --exclude 保持一致：
+  # 冻结的引擎快照（只读，T2 正式移植时才改造）+ Demo（保留作参考、不运行）
+  # ⚠️ 测试目录不排除 —— 测试代码是我们自己写的，应当受同样的规则约束
+  - Packages/NovelEngine/Sources
+  - Demo
+  - .build

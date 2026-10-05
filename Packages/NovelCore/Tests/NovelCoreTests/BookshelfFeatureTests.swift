@@ -1,0 +1,116 @@
+import ComposableArchitecture
+import Foundation
+@testable import NovelCore
+import XCTest
+
+/// 书架 reducer 的测试。
+///
+/// D2 选 TCA 的理由之一是「喂一串 Action 断言状态，不用启动界面」——
+/// 这个文件就是那句话的兑现证明：全程没有 `ModelContainer`、没有 View、
+/// 没有真数据，只有「喂一串 Action → 断言状态」。
+@MainActor
+final class BookshelfFeatureTests: XCTestCase {
+    /// 固定时间戳，避免断言随 `Date()` 漂移
+    private static let readAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private static func makeRow(bookPath: String, title: String) -> ShelfRow {
+        ShelfRow(
+            bookPath: bookPath,
+            title: title,
+            author: "某某某",
+            coverUrl: "https://example.com/cover.jpg",
+            lastReadChapterName: "第 123 章 章节名",
+            latestChapterName: "第 131 章 章节名",
+            unreadCount: 8,
+            lastReadAt: readAt
+        )
+    }
+
+    func test加载成功填入行且结束加载态() async {
+        let rows = [Self.makeRow(bookPath: "/49/49034/", title: "楚香君游戏")]
+        let store = TestStore(initialState: BookshelfFeature.State()) {
+            BookshelfFeature()
+        } withDependencies: {
+            $0.shelfLoader.load = { rows }
+        }
+
+        await store.send(.onAppear) {
+            $0.isLoading = true
+        }
+        await store.receive(.loaded(rows)) {
+            $0.rows = rows
+            $0.isLoading = false
+        }
+        await store.finish()
+    }
+
+    func test加载失败记录原因且不假装空书架() async {
+        struct LoadFailed: Error {}
+
+        let store = TestStore(initialState: BookshelfFeature.State()) {
+            BookshelfFeature()
+        } withDependencies: {
+            $0.shelfLoader.load = { throw LoadFailed() }
+        }
+
+        await store.send(.onAppear) {
+            $0.isLoading = true
+        }
+        // rows 保持为空但 errorMessage 非空 —— 界面据此显示「加载失败」而不是「空书架」
+        await store.receive(.loadFailed("LoadFailed()")) {
+            $0.errorMessage = "LoadFailed()"
+            $0.isLoading = false
+        }
+        await store.finish()
+    }
+
+    func test加载中重复触发被忽略() async {
+        // 直接以「正在加载」为初值，模拟「视图已经发过一次 onAppear 又发了一次」
+        // （导航返回、scenePhase 变化都会造成这种重复触发）
+        let store = TestStore(initialState: BookshelfFeature.State(isLoading: true)) {
+            BookshelfFeature()
+        } withDependencies: {
+            $0.shelfLoader.load = { [] }
+        }
+
+        // 守卫生效 → 不产生任何 effect，也就没有后续 action 需要处理。
+        // 守卫若失效，这里会多出一个 .run 效果并拉一次数据，断言会失败。
+        await store.send(.onAppear)
+        await store.finish()
+    }
+}
+
+/// 书架排序。
+///
+/// 需求 docs/03 §2.1 只写了「按最近阅读时间倒序」，
+/// 另外两条（未读沉底、同档按加入时间）是在落地时补的，这里逐条钉住。
+final class ShelfOrderTests: XCTestCase {
+    func test最近读过的排最前() {
+        let old = BookRecord(bookPath: "/1/", title: "很久没读")
+        old.lastReadAt = Date(timeIntervalSince1970: 1000)
+        let recent = BookRecord(bookPath: "/2/", title: "刚读过")
+        recent.lastReadAt = Date(timeIntervalSince1970: 9000)
+
+        let sorted = [old, recent].sorted(by: ShelfOrder.isBefore)
+        XCTAssertEqual(sorted.map(\.bookPath), ["/2/", "/1/"])
+    }
+
+    func test没读过的排最后() {
+        let never = BookRecord(bookPath: "/1/", title: "没读过")
+        let read = BookRecord(bookPath: "/2/", title: "读过")
+        read.lastReadAt = Date(timeIntervalSince1970: 1000)
+
+        let sorted = [never, read].sorted(by: ShelfOrder.isBefore)
+        XCTAssertEqual(sorted.map(\.bookPath), ["/2/", "/1/"])
+    }
+
+    func test同一档按加入时间倒序() {
+        // 两本都没读过 → lastReadAt 都是 nil，必须靠 addedAt 分出先后，
+        // 否则每次 fetch 的返回顺序一变，书架就跟着抖
+        let older = BookRecord(bookPath: "/1/", title: "先加的", addedAt: Date(timeIntervalSince1970: 1000))
+        let newer = BookRecord(bookPath: "/2/", title: "后加的", addedAt: Date(timeIntervalSince1970: 2000))
+
+        let sorted = [older, newer].sorted(by: ShelfOrder.isBefore)
+        XCTAssertEqual(sorted.map(\.bookPath), ["/2/", "/1/"])
+    }
+}

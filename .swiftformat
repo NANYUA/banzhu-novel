@@ -1,0 +1,32 @@
+# D10 已定：格式统一，不靠自觉
+#
+# ⚠️ 调窄记录（本文件改过 4 次，全因凭印象写配置导致 CI 连续失败）：
+#   1) --wrapclosure      该选项已被移除
+#   2) --commas/--wrap     与实际写法强冲突，制造几十条无意义噪音
+#   3) --linebreaks        不接受 preserve（只认 cr/crlf/lf）
+#   4) --wrapenumcases     不接受 preserve（只认 always/with-values）
+#
+# 教训：**未写出的选项 = SwiftFormat 默认不干预**，
+# 所以「想让它别管某事」的正确写法是【不要写】，而不是写 preserve。
+# 下面只列要强制的基础项，其余一律不写。
+#
+# SwiftFormat 版本：CI 环境为 0.63.0
+
+--swiftversion 5.9
+--indent 4
+--trimwhitespace always
+--emptybraces no-space
+--ifdef no-indent
+--header ignore
+
+# ── 排除：冻结的引擎快照 ──────────────────────────────
+# Packages/NovelEngine/Sources 是从旧项目原样搬来的**只读快照**（884 行）。
+# 对它做格式化：
+#   1) 产生大量无意义 diff
+#   2) 破坏 docs 里记录的「与源逐行一致」这个属性
+#   3) 这些代码本来就要在 T2 正式移植时按新架构改造，格式届时统一
+# 正式移植完成后，应把该行删除并对改写后的代码正常格式化。
+#
+# Demo/ 是保留作参考的分页器实现（用户 2026-10-05 决定保留、不运行），
+# 同样不纳入格式管控；它要被搬进正式阅读页时再统一格式。
+--exclude Packages/NovelEngine/Sources,Demo

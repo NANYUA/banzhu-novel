@@ -1,0 +1,89 @@
+name: CI
+
+# 🔒 核心原则：任何一道关卡不过 → 整个构建失败 → 发不出包。
+#    本地检查可以 --no-verify 绕过，**只有 CI 跳不过**。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: 编译 / 测试 / Lint / 架构校验
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      # ── 关卡 0：架构约束（放在最前，架构违规没必要浪费编译时间）────
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 架构约束校验
+        run: sh scripts/check-architecture.sh
+
+      # ── 环境 ──────────────────────────────────────────────────
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 安装 SwiftFormat / SwiftLint
+        run: brew install swiftformat swiftlint
+
+      # ── 关卡 1：格式 ───────────────────────────────────────────
+      - name: 格式校验（SwiftFormat）
+        run: |
+          swiftformat .
+          if ! git diff --quiet; then
+            echo "❌ 以下文件不符合 SwiftFormat。"
+            echo "⬇️ 下面是【已格式化后的完整文件内容】，照此替换本地文件即可："
+            for f in $(git diff --name-only); do
+              echo "@@@@@ FILE:$f @@@@@"
+              cat "$f"
+              echo "@@@@@ ENDFILE:$f @@@@@"
+            done
+            exit 1
+          fi
+
+      # ── 关卡 2：静态规则 ───────────────────────────────────────
+      - name: 静态检查（SwiftLint）
+        run: swiftlint lint --strict
+
+      # ── 生成工程 ──────────────────────────────────────────────
+      - name: 生成 Xcode 工程
+        run: |
+          xcodegen generate
+          cd Demo/PaginationDemo && xcodegen generate && cd ../..
+
+      # ── 关卡 3：编译 ───────────────────────────────────────────
+      # ⚠️ 两个开关缺一不可（Xcode 16.4 / macos-15 实测）：
+      #    1) `-skipMacroValidation`：跳过 "Macro must be enabled" 指纹信任
+      #    2) `-skipPackagePluginValidation`：跳过包插件（宏插件）的沙盒执行校验
+      #       实测：光加 1）依然报 "malformed response / could not be found"，
+      #            这俩是两层独立的门。详见
+      #       https://forums.swift.org/t/ignore-macro-validation-using-xcodebuild-command/69033
+      #    TCA 及其 5 个依赖全带宏插件，App 编译关卡必须两个都加。
+      #    注：`swift test`（关卡 4）走 SwiftPM，不经过 Xcode 插件机制，无需这两个开关。
+      - name: 编译 App（不签名）
+        run: |
+          xcodebuild \
+            -project BanzhuNovel.xcodeproj \
+            -scheme BanzhuNovel \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      # ── 关卡 4：单元测试 ───────────────────────────────────────
+      - name: 单元测试（XCTest）
+        run: |
+          swift test --package-path Packages/NovelCore
+          swift test --package-path Packages/NovelEngine
+
+      - name: 结果
+        run: echo "✅ 全部关卡通过"
