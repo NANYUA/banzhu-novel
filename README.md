@@ -72,3 +72,21 @@ Five gates on every push:
 ## License
 
 MIT
+
+## 🚨 铁律：公开版零容忍
+
+**公开版（GitHub）不允许包含任何敏感信息：**
+- ❌ 站点域名、URL、标识
+- ❌ 历史项目名称、关系
+- ❌ API key、token、密码
+- ❌ 个人路径、邮箱
+- ❌ Bundle ID、应用名称（如有必要可保留）
+
+**本地敏感信息管理：**
+- 所有 secrets 写在 `.env`（已加入 `.gitignore`）
+- 模板见 `.env.example`
+- 完整文档（需求、ADR、交接）留在本地，不纳入公开版
+
+**提交前自动检查：**
+- pre-commit hook 自动扫描敏感词 + 硬编码 URL
+- 发现敏感信息会阻止提交
