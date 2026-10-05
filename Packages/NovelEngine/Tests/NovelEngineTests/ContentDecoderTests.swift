@@ -103,7 +103,7 @@ final class ContentDecoderTests: XCTestCase {
     /// 这也印证 docs/07 记的那条：合成 fixture 有局限，
     /// 迟早要换成线上真实样本做快照测试。
     func testclean_删除手机看小书广告() {
-        let cleaned = ContentDecoder.clean("正文开始\n手机看小书 www.diyibanzhu.net\n正文结束")
+        let cleaned = ContentDecoder.clean("正文开始\n手机看小书 www.example.com\n正文结束")
         XCTAssertFalse(cleaned.contains("手机看小书"), "广告行未删除：\(cleaned)")
         XCTAssertTrue(cleaned.contains("正文开始"))
         XCTAssertTrue(cleaned.contains("正文结束"))
@@ -116,7 +116,7 @@ final class ContentDecoderTests: XCTestCase {
     }
 
     func testclean_删除站长邮箱() {
-        let cleaned = ContentDecoder.clean("正文\ndiyibanzhu@gmail.com\n正文继续")
+        let cleaned = ContentDecoder.clean("正文\ntest@example.com\n正文继续")
         XCTAssertFalse(cleaned.contains("gmail.com"), "邮箱未删除：\(cleaned)")
     }
 
