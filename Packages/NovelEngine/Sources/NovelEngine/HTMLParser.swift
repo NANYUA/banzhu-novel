@@ -159,3 +159,28 @@ enum HTMLParser {
         return out
     }
 }
+
+// MARK: - 快照测试接口
+
+/// 解析搜索页（返回简化视图）
+static func parseSearch(_ html: String) -> [(title: String, path: String)] {
+    let books = parseBookList(html)
+    return books.map { (title: $0.title, path: $0.path) }
+}
+
+/// 解析目录页（返回简化视图）
+static func parseTOC(_ html: String) -> [(name: String, path: String)] {
+    let chapters = parseChapters(html, baseURL: nil)
+    return chapters.map { (name: $0.name, path: $0.path) }
+}
+
+/// 解析正文页（返回纯文本）
+static func parseContent(_ html: String) -> String {
+    var s = html
+    s = s.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+    s = s.replacingOccurrences(of: "&nbsp;", with: " ")
+    s = s.replacingOccurrences(of: "&amp;", with: "&")
+    s = s.replacingOccurrences(of: "&lt;", with: "<")
+    s = s.replacingOccurrences(of: "&gt;", with: ">")
+    return s.trimmingCharacters(in: .whitespacesAndNewlines)
+}
