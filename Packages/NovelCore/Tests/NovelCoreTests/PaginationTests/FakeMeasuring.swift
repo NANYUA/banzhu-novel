@@ -19,8 +19,8 @@ struct FakeMeasuring: TextMeasuring {
     let widthBudget: Int
 
     /// 单字符宽度
-    private static func charWidth(_ c: Character) -> Int {
-        let scalar = c.unicodeScalars[c.unicodeScalars.startIndex].value
+    private static func charWidth(_ ch: Character) -> Int {
+        let scalar = ch.unicodeScalars[ch.unicodeScalars.startIndex].value
         switch scalar {
         case 0x1F000 ... 0x1FFFF:
             return 3 // emoji / 辅助平面
@@ -36,12 +36,12 @@ struct FakeMeasuring: TextMeasuring {
         var width = 0
         var count = 0
 
-        for i in from ..< chars.count {
-            let w = Self.charWidth(chars[i])
-            if width + w > widthBudget {
+        for idx in from ..< chars.count {
+            let cw = Self.charWidth(chars[idx])
+            if width + cw > widthBudget {
                 break
             }
-            width += w
+            width += cw
             count += 1
         }
         return count
