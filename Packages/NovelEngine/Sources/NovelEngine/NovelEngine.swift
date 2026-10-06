@@ -16,7 +16,7 @@ public actor NovelEngine {
     public func resolveCandidates(fromNav navURL: String) async throws -> [String] {
         guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
         let html = try await net.get(url)
-        let patterns = SiteConfig.default.mirrorPatterns
+        let patterns = SiteConfig.mirrorPatterns
         var found: [String] = []
         var seen = Set<String>()
         let ns = html as NSString
@@ -38,7 +38,7 @@ public actor NovelEngine {
         guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
         let html = try await net.get(url)
         // 按配置的域名格式依次匹配
-        for p in SiteConfig.default.mirrorPatterns {
+        for p in SiteConfig.mirrorPatterns {
             if let re = try? NSRegularExpression(pattern: p, options: [.caseInsensitive]) {
                 let ns = html as NSString
                 if let m = re.firstMatch(in: html, options: [], range: NSRange(location: 0, length: ns.length)) {
