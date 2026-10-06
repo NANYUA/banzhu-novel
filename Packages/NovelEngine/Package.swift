@@ -31,7 +31,12 @@ let package = Package(
         .testTarget(
             name: "NovelEngineTests",
             dependencies: ["NovelEngine"],
-            path: "Tests/NovelEngineTests"
+            path: "Tests/NovelEngineTests",
+            resources: [
+                // 🔴 必须声明！否则 Fixtures/ 不会被打进测试 bundle，
+                //    测试运行时读到空字符串 → 0 结果 → 数组越界崩溃。
+                .copy("Fixtures")
+            ]
         ),
     ]
 )
