@@ -43,6 +43,19 @@ public struct SiteConfig: Codable, Equatable {
         return URL(string: host + path)
     }
 
+    /// 域名匹配正则（导航页里找出候选镜像用）。
+    /// 默认给一条通用数字模式，覆盖常见的 `xxx001.com` 形式。
+    /// 本地开发可在 `.env` 的 `SITE_MIRROR_PATTERNS` 里覆盖。
+    public static var mirrorPatterns: [String] {
+        #if DEBUG
+        if let env = ProcessInfo.processInfo.environment["SITE_MIRROR_PATTERNS"],
+           !env.isEmpty {
+            return env.components(separatedBy: ",").filter { !$0.isEmpty }
+        }
+        #endif
+        return ["https?://[\\w.-]*\\d+\\.(?:com|net)"]
+    }
+
     /// 书城分类。
     /// 路径模板从环境变量读取（`标题=模板` 以逗号分隔），未设置时为空。
     public static var exploreCategories: [ExploreCategory] {
