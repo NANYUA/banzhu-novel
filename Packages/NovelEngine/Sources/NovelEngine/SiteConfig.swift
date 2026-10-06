@@ -1,29 +1,61 @@
 import Foundation
 
-/// 站点配置（参数通过环境变量注入，不硬编码）。
-public struct SiteConfig {
-    /// 默认配置（从环境变量读取）
-    public static let `default`: SiteConfig = {
-        let host = ProcessInfo.processInfo.environment["SITE_HOST"] ?? "https://example.com"
-        return SiteConfig(host: host)
-    }()
+/// 配置（域名可切换）。参数通过环境变量注入，不硬编码。
+public struct SiteConfig: Codable, Equatable {
+    /// 当前使用的 host（含协议）
+    public var host: String
 
-    public let host: String
-    public var mirrorPatterns: [String] = []
+    public init(host: String) { self.host = host }
 
-    /// 移动端 User-Agent
-    public static let userAgent: String = {
+    /// 候选域名列表，主域名被盾时可切换。
+    /// 从环境变量读取，未设置时为空数组（由调用方决定如何处理）。
+    public static var mirrors: [String] {
+        #if DEBUG
+        if let env = ProcessInfo.processInfo.environment["SITE_MIRRORS"],
+           !env.isEmpty {
+            return env.components(separatedBy: ",").filter { !$0.isEmpty }
+        }
+        #endif
+        return []
+    }
+
+    public static var `default`: SiteConfig {
+        SiteConfig(host: mirrors.first ?? "https://example.com")
+    }
+
+    /// 移动端 User-Agent。
+    /// 从环境变量读取，未设置时用通用移动 UA。
+    public static var userAgent: String {
         #if DEBUG
         if let env = ProcessInfo.processInfo.environment["SITE_USER_AGENT"],
            !env.isEmpty {
             return env
         }
         #endif
-        return "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-    }()
+        return "Mozilla/5.0 (Linux; U; Android 8.1.0; zh-CN; MI 8 Lite Build/OPM1.171019.019) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/78.0.3904.108 " +
+            "Mobile Safari/537.36"
+    }
 
-    public init(host: String, mirrorPatterns: [String] = []) {
-        self.host = host
-        self.mirrorPatterns = mirrorPatterns
+    /// 把路径拼成完整 URL。已是完整 URL 的直接返回。
+    public func url(_ path: String) -> URL? {
+        if path.hasPrefix("http") { return URL(string: path) }
+        return URL(string: host + path)
+    }
+
+    /// 书城分类。
+    /// 路径模板从环境变量读取（`标题=模板` 以逗号分隔），未设置时为空。
+    public static var exploreCategories: [ExploreCategory] {
+        #if DEBUG
+        if let env = ProcessInfo.processInfo.environment["SITE_EXPLORE_CATEGORIES"],
+           !env.isEmpty {
+            return env.components(separatedBy: ",").compactMap { pair in
+                let parts = pair.components(separatedBy: "=")
+                guard parts.count == 2 else { return nil }
+                return ExploreCategory(title: parts[0], urlTemplate: parts[1])
+            }
+        }
+        #endif
+        return []
     }
 }

@@ -51,4 +51,41 @@ public actor NovelEngine {
         }
         throw NetworkError.badResponse
     }
+
+    /// POST 搜索请求，body 为 GBK 百分号编码的 keyword
+    public func search(keyword: String, page: Int = 1) async throws -> [Book] {
+        guard let url = config.url("/s.php") else { throw NetworkError.badResponse }
+        let body = "s=\(GBK.percentEncode(keyword))&page=\(page)"
+        let html = try await net.post(url, bodyString: body)
+        return HTMLParser.parseBookList(html)
+    }
+
+    // MARK: - 书城分类
+    public func explore(category: ExploreCategory, page: Int = 1) async throws -> [Book] {
+        guard let url = config.url(category.url(page: page)) else { throw NetworkError.badResponse }
+        let html = try await net.get(url)
+        return HTMLParser.parseBookList(html)
+    }
+
+    // MARK: - 详情
+    public func bookInfo(path: String) async throws -> Book {
+        guard let url = config.url(path) else { throw NetworkError.badResponse }
+        let html = try await net.get(url)
+        return HTMLParser.parseBookInfo(html, path: path)
+    }
+
+    // MARK: - 目录
+    public func chapters(bookPath: String) async throws -> [Chapter] {
+        guard let url = config.url(bookPath) else { throw NetworkError.badResponse }
+        let html = try await net.get(url)
+        return HTMLParser.parseChapters(html, baseURL: url)
+    }
+
+    // MARK: - 正文（含解码还原）
+    public func content(chapterPath: String) async throws -> String {
+        guard let url = config.url(chapterPath) else { throw NetworkError.badResponse }
+        let html = try await net.get(url)
+        let text = ContentDecoder.decode(html: html)
+        return text.isEmpty ? "（本章内容为空，可能需要重新过验证或稍后重试）" : text
+    }
 }
