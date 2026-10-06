@@ -1,5 +1,5 @@
-import XCTest
 @testable import NovelEngine
+import XCTest
 
 /// HTML 解析器快照测试。
 ///
@@ -13,7 +13,7 @@ final class HTMLParserSnapshotTests: XCTestCase {
         return (try? String(contentsOf: url)) ?? ""
     }
 
-    func testParseSearch() throws {
+    func testParseSearch() {
         let html = fixture("search.html")
         let results = HTMLParser.parseSearch(html)
         XCTAssertEqual(results.count, 2)
@@ -21,7 +21,7 @@ final class HTMLParserSnapshotTests: XCTestCase {
         XCTAssertEqual(results[0].path, "/1/1.html")
     }
 
-    func testParseTOC() throws {
+    func testParseTOC() {
         let html = fixture("toc.html")
         let chapters = HTMLParser.parseTOC(html)
         XCTAssertEqual(chapters.count, 3)
@@ -29,7 +29,7 @@ final class HTMLParserSnapshotTests: XCTestCase {
         XCTAssertEqual(chapters[0].path, "/1/1.html")
     }
 
-    func testParseContent() throws {
+    func testParseContent() {
         let html = fixture("content.html")
         let text = HTMLParser.parseContent(html)
         XCTAssertTrue(text.contains("This is the first chapter."))
