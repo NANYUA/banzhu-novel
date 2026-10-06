@@ -22,21 +22,21 @@ struct FakeMeasuring: TextMeasuring {
     private static func charWidth(_ c: Character) -> Int {
         let scalar = c.unicodeScalars[c.unicodeScalars.startIndex].value
         switch scalar {
-        case 0x1F000...0x1FFFF:
+        case 0x1F000 ... 0x1FFFF:
             return 3 // emoji / 辅助平面
-        case 0x2E80...0x9FFF, 0xF900...0xFAFF, 0xFF00...0xFFEF:
+        case 0x2E80 ... 0x9FFF, 0xF900 ... 0xFAFF, 0xFF00 ... 0xFFEF:
             return 2 // 中文 / 全角 / CJK
         default:
             return 1 // ASCII / 其他
         }
     }
 
-    func measurePageLength(text: String, from: Int, configuration: PaginationConfiguration) -> Int {
+    func measurePageLength(text: String, from: Int, configuration _: PaginationConfiguration) -> Int {
         let chars = Array(text)
         var width = 0
         var count = 0
 
-        for i in from..<chars.count {
+        for i in from ..< chars.count {
             let w = Self.charWidth(chars[i])
             if width + w > widthBudget {
                 break

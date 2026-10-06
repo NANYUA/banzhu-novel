@@ -27,7 +27,7 @@ final class PaginatorTests: XCTestCase {
     func test页起始位置单调递增() {
         let text = "abcdefghijklmnopqrstuvwxyz0123456789"
         let pages = paginator(width: 6).paginate(text: text, configuration: config())
-        for i in 1..<pages.count {
+        for i in 1 ..< pages.count {
             XCTAssertGreaterThan(pages[i].location, pages[i - 1].location)
         }
     }
@@ -36,7 +36,7 @@ final class PaginatorTests: XCTestCase {
     func test页首尾相接连续() {
         let text = "中英混合 Hello 世界 123 abc 测试"
         let pages = paginator(width: 5).paginate(text: text, configuration: config())
-        for i in 1..<pages.count {
+        for i in 1 ..< pages.count {
             XCTAssertEqual(pages[i].location, pages[i - 1].location + pages[i - 1].length)
         }
     }
@@ -47,7 +47,7 @@ final class PaginatorTests: XCTestCase {
         let pages = paginator(width: 10).paginate(text: text, configuration: config())
         let chars = Array(text)
         let rebuilt = pages.flatMap { p in
-            chars[p.location..<(p.location + p.length)]
+            chars[p.location ..< (p.location + p.length)]
         }
         XCTAssertEqual(String(rebuilt), text)
     }
