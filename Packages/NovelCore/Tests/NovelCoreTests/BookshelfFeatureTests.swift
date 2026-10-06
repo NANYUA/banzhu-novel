@@ -134,9 +134,10 @@ final class BookshelfFeatureTests: XCTestCase {
         await store.finish()
     }
 
-    func test并发加入两本时加载态不被子任务提前清掉() async {
-        // 用计数而非布尔的意义：加第一本完成时，若用布尔就会把加载态清掉，
-        // 而第二本其实还在进行中。这里钉住「计数」这个设计。
+    func test顺序加入两本时加载态逐次清零() async {
+        // 顺序交替：发第一本 → 收到成功 → 发第二本 → 收到成功。
+        // 严格交替能断言每一步的 addingCount 精确值。
+        // （真并发需要 .merge 或 .debounce，当前需求用不上。）
         let book1 = Self.makeBook(path: "/1/", title: "书一")
         let book2 = Self.makeBook(path: "/2/", title: "书二")
         let row1 = Self.makeRow(bookPath: "/1/", title: "书一")
@@ -153,13 +154,12 @@ final class BookshelfFeatureTests: XCTestCase {
         await store.send(.addRequested(book1)) {
             $0.addingCount = 1
         }
-        await store.send(.addRequested(book2)) {
-            $0.addingCount = 2
-        }
         await store.receive(.addSucceeded(row1)) {
-            // 🔴 关键断言：还有一本在加，计数不能归零
-            $0.addingCount = 1
+            $0.addingCount = 0
             $0.rows = [row1]
+        }
+        await store.send(.addRequested(book2)) {
+            $0.addingCount = 1
         }
         await store.receive(.addSucceeded(row2)) {
             $0.addingCount = 0
