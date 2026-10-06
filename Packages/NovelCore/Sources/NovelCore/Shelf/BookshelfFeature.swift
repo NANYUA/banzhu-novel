@@ -27,11 +27,15 @@ public struct BookshelfFeature: Reducer {
         public init(
             rows: [ShelfRow] = [],
             isLoading: Bool = false,
-            errorMessage: String? = nil
+            errorMessage: String? = nil,
+            addingCount: Int = 0,
+            addNotice: String? = nil
         ) {
             self.rows = rows
             self.isLoading = isLoading
             self.errorMessage = errorMessage
+            self.addingCount = addingCount
+            self.addNotice = addNotice
         }
 
         /// 书架行，已按「最近阅读倒序」排好（排序在 `ShelfLoaderLive` 里做）
@@ -44,6 +48,15 @@ public struct BookshelfFeature: Reducer {
         /// 🔴 `rows` 为空**不等于**空书架 —— 必须结合本字段判断，
         /// 否则加载失败会被渲染成「书架空空如也」。
         public var errorMessage: String?
+
+        /// 正在加入书架的书数（同时可能加多本）。
+        /// 用计数而非布尔：并发加两本时，第一本完成不该把加载态清掉。
+        public var addingCount = 0
+
+        /// 加入书架失败/重复的提示（可关闭的横幅，不阻断列表）。
+        /// 🔴 与 `errorMessage` 分开：那个是「整页加载失败」，这个是「某次操作失败」，
+        /// 两者在界面上的呈现完全不同。
+        public var addNotice: String?
     }
 
     /// 🔴 必须显式 `: Equatable`：`TestStore.receive(_:)` 活在
@@ -55,9 +68,19 @@ public struct BookshelfFeature: Reducer {
         case loaded([ShelfRow])
         /// 拉取失败
         case loadFailed(String)
+
+        /// 请求把某本书加入书架（搜索结果点「加入书架」时发）
+        case addRequested(Book)
+        /// 加入成功。带 `ShelfRow` 便于直接插进列表，不用重新拉全量
+        case addSucceeded(ShelfRow)
+        /// 加入失败（含「已在书架里」）
+        case addFailed(String)
+        /// 关闭提示横幅
+        case noticeDismissed
     }
 
     @Dependency(\.shelfLoader) var shelfLoader
+    @Dependency(\.shelfAdder) var shelfAdder
 
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -84,6 +107,43 @@ public struct BookshelfFeature: Reducer {
             case let .loadFailed(message):
                 state.errorMessage = message
                 state.isLoading = false
+                return .none
+
+            case let .addRequested(book):
+                state.addingCount += 1
+                state.addNotice = nil
+                let adder = shelfAdder
+                return .run { send in
+                    do {
+                        let row = try await adder.add(book)
+                        await send(.addSucceeded(row))
+                    } catch {
+                        // 用 `localizedDescription` 而非 `String(describing:)`：
+                        // `ShelfAdderError` 实现了 `LocalizedError`，
+                        // 前者给出「《X》已经在书架里了」这种人话，
+                        // 后者会打印成 `alreadyExists(title: "X")` 这种代码腔。
+                        await send(.addFailed(error.localizedDescription))
+                    }
+                }
+
+            case let .addSucceeded(row):
+                state.addingCount = max(0, state.addingCount - 1)
+                // 🔴 去重后再插：并发加同一本时可能收到两次成功
+                if !state.rows.contains(where: { $0.bookPath == row.bookPath }) {
+                    state.rows.insert(row, at: 0)
+                }
+                // 重排：新书 `lastReadAt` 为 nil 应沉底，
+                // 但用户刚加完就想看到它 —— 需求是「最近阅读倒序」，
+                // 从未读过的按加入时间倒序，故直接插到最前符合语义。
+                return .none
+
+            case let .addFailed(message):
+                state.addingCount = max(0, state.addingCount - 1)
+                state.addNotice = message
+                return .none
+
+            case .noticeDismissed:
+                state.addNotice = nil
                 return .none
             }
         }

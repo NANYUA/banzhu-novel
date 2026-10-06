@@ -1,9 +1,8 @@
 import ComposableArchitecture
 import Foundation
+import NovelEngine
 @testable import NovelCore
-import XCTest
-
-/// 书架 reducer 的测试。
+import XCTest/// 书架 reducer 的测试。
 ///
 /// D2 选 TCA 的理由之一是「喂一串 Action 断言状态，不用启动界面」——
 /// 这个文件就是那句话的兑现证明：全程没有 `ModelContainer`、没有 View、
@@ -76,6 +75,130 @@ final class BookshelfFeatureTests: XCTestCase {
         // 守卫生效 → 不产生任何 effect，也就没有后续 action 需要处理。
         // 守卫若失效，这里会多出一个 .run 效果并拉一次数据，断言会失败。
         await store.send(.onAppear)
+        await store.finish()
+    }
+
+    // MARK: - 加入书架
+
+    private static func makeBook(path: String, title: String) -> Book {
+        Book(path: path, title: title)
+    }
+
+    func test加入书架成功后插到列表最前() async {
+        let existing = Self.makeRow(bookPath: "/1/", title: "已有的书")
+        let newRow = Self.makeRow(bookPath: "/2/", title: "新加的书")
+        let book = Self.makeBook(path: "/2/", title: "新加的书")
+
+        let store = TestStore(initialState: BookshelfFeature.State(rows: [existing])) {
+            BookshelfFeature()
+        } withDependencies: {
+            $0.shelfAdder.add = { _ in newRow }
+        }
+
+        await store.send(.addRequested(book)) {
+            $0.addingCount = 1
+        }
+        await store.receive(.addSucceeded(newRow)) {
+            $0.addingCount = 0
+            $0.rows = [newRow, existing]
+        }
+        await store.finish()
+    }
+
+    func test加入已存在的书给出人话提示() async {
+        let book = Self.makeBook(path: "/1/", title: "已有的书")
+
+        let store = TestStore(initialState: BookshelfFeature.State()) {
+            BookshelfFeature()
+        } withDependencies: {
+            $0.shelfAdder.add = { _ in
+                throw ShelfAdderError.alreadyExists(title: "已有的书")
+            }
+        }
+
+        await store.send(.addRequested(book)) {
+            $0.addingCount = 1
+        }
+        // 用 localizedDescription：错误信息必须是「《X》已经在书架里了」这种用户能读的话，
+        // 而不是 `alreadyExists(title: "X")` 这种代码腔
+        await store.receive(.addFailed("《已有的书》已经在书架里了。")) {
+            $0.addingCount = 0
+            $0.addNotice = "《已有的书》已经在书架里了。"
+        }
+
+        await store.send(.noticeDismissed) {
+            $0.addNotice = nil
+        }
+        await store.finish()
+    }
+
+    func test并发加入两本时加载态不被子任务提前清掉() async {
+        // 用计数而非布尔的意义：加第一本完成时，若用布尔就会把加载态清掉，
+        // 而第二本其实还在进行中。这里钉住「计数」这个设计。
+        let book1 = Self.makeBook(path: "/1/", title: "书一")
+        let book2 = Self.makeBook(path: "/2/", title: "书二")
+        let row1 = Self.makeRow(bookPath: "/1/", title: "书一")
+        let row2 = Self.makeRow(bookPath: "/2/", title: "书二")
+
+        let store = TestStore(initialState: BookshelfFeature.State()) {
+            BookshelfFeature()
+        } withDependencies: {
+            $0.shelfAdder.add = { book in
+                book.path == "/1/" ? row1 : row2
+            }
+        }
+
+        await store.send(.addRequested(book1)) {
+            $0.addingCount = 1
+        }
+        await store.send(.addRequested(book2)) {
+            $0.addingCount = 2
+        }
+        await store.receive(.addSucceeded(row1)) {
+            // 🔴 关键断言：还有一本在加，计数不能归零
+            $0.addingCount = 1
+            $0.rows = [row1]
+        }
+        await store.receive(.addSucceeded(row2)) {
+            $0.addingCount = 0
+            $0.rows = [row2, row1]
+        }
+        await store.finish()
+    }
+
+    func test重复收到同一本的成功不会插重复() async {
+        // 并发场景下同一本书可能被加两次，第二次不应在列表里出现两行
+        let row = Self.makeRow(bookPath: "/1/", title: "书一")
+
+        let store = TestStore(initialState: BookshelfFeature.State(rows: [row])) {
+            BookshelfFeature()
+        }
+
+        await store.send(.addSucceeded(row))
+        await store.finish()
+        XCTAssertEqual(store.state.rows.count, 1, "重复加入产生了重复行")
+    }
+
+    func test新请求会清掉上一次的提示() async {
+        let book = Self.makeBook(path: "/1/", title: "书一")
+        let row = Self.makeRow(bookPath: "/1/", title: "书一")
+
+        let store = TestStore(
+            initialState: BookshelfFeature.State(addNotice: "上一次的提示")
+        ) {
+            BookshelfFeature()
+        } withDependencies: {
+            $0.shelfAdder.add = { _ in row }
+        }
+
+        await store.send(.addRequested(book)) {
+            $0.addingCount = 1
+            $0.addNotice = nil
+        }
+        await store.receive(.addSucceeded(row)) {
+            $0.addingCount = 0
+            $0.rows = [row]
+        }
         await store.finish()
     }
 }
