@@ -1,8 +1,10 @@
 import ComposableArchitecture
 import Foundation
-import NovelEngine
 @testable import NovelCore
-import XCTest/// 书架 reducer 的测试。
+import NovelEngine
+import XCTest
+
+/// 书架 reducer 的测试。
 ///
 /// D2 选 TCA 的理由之一是「喂一串 Action 断言状态，不用启动界面」——
 /// 这个文件就是那句话的兑现证明：全程没有 `ModelContainer`、没有 View、

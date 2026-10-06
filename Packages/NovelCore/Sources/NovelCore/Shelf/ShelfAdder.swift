@@ -30,7 +30,7 @@ public enum ShelfAdderError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case let .alreadyExists(title):
-            return "《\(title)》已经在书架里了。"
+            "《\(title)》已经在书架里了。"
         }
     }
 }
