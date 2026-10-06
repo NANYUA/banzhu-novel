@@ -37,7 +37,7 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
     }
 
     /// 复用 `bookPath` 作唯一标识。
-    /// 单站点前提下它全局唯一（换镜像域名时也不变），见 `BookRecord` 注释。
+    /// 全局唯一（换域名时也不变），见 `BookRecord` 注释。
     public var id: String {
         bookPath
     }
