@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Dependencies
 import Foundation
+import NovelEngine
 
 /// 书架（docs/03 §二 · §三）。
 ///
