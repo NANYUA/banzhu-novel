@@ -41,7 +41,9 @@ final class ChapterListFeatureTests: XCTestCase {
 
     func test加载失败记录原因() async {
         struct LoadFailed: Error, LocalizedError {
-            var errorDescription: String? { "目录加载失败" }
+            var errorDescription: String? {
+                "目录加载失败"
+            }
         }
         let store = TestStore(
             initialState: ChapterListFeature.State(bookPath: "/1/1/", bookTitle: "书")

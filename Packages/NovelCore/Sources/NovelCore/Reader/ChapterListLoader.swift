@@ -16,7 +16,9 @@ struct ChapterListLoader: Sendable {
 ///
 /// 从 `ChapterRecord` 投影而来，把「本地是否有正文」翻译成界面需要的状态。
 struct ChapterItem: Equatable, Sendable, Identifiable {
-    var id: String { path }
+    var id: String {
+        path
+    }
 
     let number: Int
     let name: String

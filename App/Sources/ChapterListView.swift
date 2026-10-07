@@ -15,7 +15,7 @@ struct ChapterListView: View {
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             Group {
-                if viewStore.isLoading && viewStore.chapters.isEmpty {
+                if viewStore.isLoading, viewStore.chapters.isEmpty {
                     ProgressView("加载中…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let message = viewStore.errorMessage, viewStore.chapters.isEmpty {
