@@ -15,17 +15,20 @@ import Foundation
 /// 度量返回 0 时（一页连一个字符都放不下，比如容器宽度为 0），
 /// 若不加保护会 `from` 永不前进 → 死循环。此时强制本页 `length = 1`，
 /// 让至少能推进一个字符。
-struct Paginator: Sendable {
+///
+/// ## 可见性
+/// `public`：`ReaderFeature`（NovelCore）和 App 层阅读器要用它分页，必须跨包可见。
+public struct Paginator: Sendable {
     private let measurer: any TextMeasuring
 
-    init(measurer: any TextMeasuring) {
+    public init(measurer: any TextMeasuring) {
         self.measurer = measurer
     }
 
     /// 把 `text` 按 `configuration` 切成页。
     ///
     /// - Returns: 有序的 `[PageRange]`。空文本返回空数组。
-    func paginate(text: String, configuration: PaginationConfiguration) -> [PageRange] {
+    public func paginate(text: String, configuration: PaginationConfiguration) -> [PageRange] {
         let chars = Array(text)
         let count = chars.count
         guard count > 0 else { return [] }

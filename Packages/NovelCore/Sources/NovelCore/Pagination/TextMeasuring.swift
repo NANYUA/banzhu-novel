@@ -15,7 +15,10 @@ import Foundation
 ///
 /// ## 语义
 /// 给定一段文字和一个起点，度量「从 `from` 开始能塞进一页多少个字符」。
-protocol TextMeasuring: Sendable {
+///
+/// ## 可见性
+/// `public`：`TextKitMeasuring`（NovelPagination 包）要实现本协议，必须跨包可见。
+public protocol TextMeasuring: Sendable {
     /// 度量从 `from` 起的 `text` 中，一页能放多少字符。
     ///
     /// - Parameters:

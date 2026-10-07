@@ -11,6 +11,8 @@ packages:
     path: Packages/NovelEngine
   NovelCore:
     path: Packages/NovelCore
+  NovelPagination:
+    path: Packages/NovelPagination
 
 settings:
   base:
@@ -32,6 +34,7 @@ targets:
       # 🔒 依赖方向：App → NovelCore → NovelEngine（单向）
       - package: NovelCore
       - package: NovelEngine
+      - package: NovelPagination
     info:
       path: App/Resources/Info.plist
       properties:

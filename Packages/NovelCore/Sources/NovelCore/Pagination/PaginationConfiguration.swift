@@ -5,13 +5,17 @@ import Foundation
 ///
 /// 不用 `UIEdgeInsets`（UIKit，macOS host 上不存在）也不用 SwiftUI `EdgeInsets`
 /// （把纯逻辑层跟 UI 框架绑死）。自定义结构体，四个 CGFloat。
-struct PageInset: Equatable, Sendable {
-    var top: CGFloat
-    var leading: CGFloat
-    var bottom: CGFloat
-    var trailing: CGFloat
+///
+/// ## 可见性
+/// `public`：`TextKitMeasuring`（NovelPagination 包）要实现分页时需要这些类型，
+/// 跨包可见才能用它。
+public struct PageInset: Equatable, Sendable {
+    public var top: CGFloat
+    public var leading: CGFloat
+    public var bottom: CGFloat
+    public var trailing: CGFloat
 
-    init(top: CGFloat = 0, leading: CGFloat = 0, bottom: CGFloat = 0, trailing: CGFloat = 0) {
+    public init(top: CGFloat = 0, leading: CGFloat = 0, bottom: CGFloat = 0, trailing: CGFloat = 0) {
         self.top = top
         self.leading = leading
         self.bottom = bottom
@@ -32,46 +36,46 @@ struct PageInset: Equatable, Sendable {
 /// `containerSize`（页面几何）+ `fontSize`（字号）+ `lineSpacing`（行距）
 /// + `inset`（页边距）—— 这是 `Paginator` 算每页字符数的输入。
 /// 其余字段（段间距/首行缩进/字间距/字体等）定义了但不读，留待后续。
-struct PaginationConfiguration: Equatable, Sendable {
+public struct PaginationConfiguration: Equatable, Sendable {
     // MARK: - 本轮参与分页的最小字段
 
     /// 一页可排文字的容器尺寸（不含内边距的净宽高）
-    var containerSize: CGSize
+    public var containerSize: CGSize
 
     /// 字号（pt）
-    var fontSize: CGFloat
+    public var fontSize: CGFloat
 
     /// 行距（行与行的额外距离）
-    var lineSpacing: CGFloat
+    public var lineSpacing: CGFloat
 
     /// 页边距（上下左右留白）
-    var inset: PageInset
+    public var inset: PageInset
 
     // MARK: - 已定义但本轮不参与分页的字段（占位，留待后续迭代）
 
     /// 字体名。nil = 系统字体
-    var fontName: String?
+    public var fontName: String?
 
     /// 段间距
-    var paragraphSpacing: CGFloat
+    public var paragraphSpacing: CGFloat
 
     /// 字间距
-    var characterSpacing: CGFloat
+    public var characterSpacing: CGFloat
 
     /// 字体加粗
-    var isBold: Bool
+    public var isBold: Bool
 
     /// 字体倾斜
-    var isItalic: Bool
+    public var isItalic: Bool
 
     /// 首行缩进
-    var firstLineHeadIndent: CGFloat
+    public var firstLineHeadIndent: CGFloat
 
     // MARK: - init
 
     /// 全字段初始化（结构体一次定型）。
     /// 本轮从最小字段开始，其余给默认值。
-    init(
+    public init(
         containerSize: CGSize,
         fontSize: CGFloat = 17,
         lineSpacing: CGFloat = 4,

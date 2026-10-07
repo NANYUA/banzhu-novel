@@ -22,12 +22,18 @@ fail=0
 # ── 规则 1：Packages/ 内禁止引用 UI 框架 ─────────────────────────────
 # 注：WebKit **不在禁列** —— GuardResolver 需要 WKWebView 跑盾页挑战脚本，
 #     WebKit 是网页引擎而非 UI 框架，属有意豁免。
-echo "▸ 规则 1：Packages/ 禁止 import SwiftUI / UIKit（WebKit 有意豁免）"
-h=$(find Packages -name "*.swift" ! -name "Package.swift" -type f \
-  -exec grep -HnE "^[[:space:]]*(@_exported[[:space:]]+)?import[[:space:]]+(SwiftUI|UIKit|AppKit)\b" {} + 2>/dev/null || true)
+# 注：NovelPagination **不在禁列** —— 它专门实现真实排版度量（TextKitMeasuring，
+#     用 NSTextStorage/NSLayoutManager/NSTextContainer），是「UI 框架 + 布局引擎」，
+#     属有意豁免。这是**包级白名单**：NovelPagination 包整体放行 UIKit，
+#     其余包仍禁止。分页算法本身（Paginator）在 NovelCore 里，不 import UIKit。
+echo "▸ 规则 1：Packages/ 禁止 import SwiftUI / UIKit（WebKit + NovelPagination 包有意豁免）"
+h=$(find Packages \
+  -path "Packages/NovelPagination" -prune -o \
+  -name "*.swift" ! -name "Package.swift" -type f -print \
+  | xargs grep -HnE "^[[:space:]]*(@_exported[[:space:]]+)?import[[:space:]]+(SwiftUI|UIKit|AppKit)\b" 2>/dev/null || true)
 if [ -n "$h" ]; then
   echo "$h" | sed 's/^/  ❌ /'
-  echo "     Packages/ 是纯逻辑层，不得依赖 UI"
+  echo "     Packages/ 是纯逻辑层，不得依赖 UI（NovelPagination 除外）"
   fail=1
 else
   echo "  ✅ 通过"
