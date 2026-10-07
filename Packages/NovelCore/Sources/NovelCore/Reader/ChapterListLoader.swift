@@ -15,20 +15,34 @@ struct ChapterListLoader: Sendable {
 /// 目录页一行的数据（只读投影）。
 ///
 /// 从 `ChapterRecord` 投影而来，把「本地是否有正文」翻译成界面需要的状态。
-struct ChapterItem: Equatable, Sendable, Identifiable {
-    var id: String {
+public struct ChapterItem: Equatable, Sendable, Identifiable {
+    public init(
+        number: Int,
+        name: String,
+        path: String,
+        hasLocalText: Bool,
+        isDownloaded: Bool
+    ) {
+        self.number = number
+        self.name = name
+        self.path = path
+        self.hasLocalText = hasLocalText
+        self.isDownloaded = isDownloaded
+    }
+
+    public var id: String {
         path
     }
 
-    let number: Int
-    let name: String
-    let path: String
+    public let number: Int
+    public let name: String
+    public let path: String
 
     /// 本地是否有正文（缓存或下载）
-    let hasLocalText: Bool
+    public let hasLocalText: Bool
 
     /// 是否用户主动下载（永久保留，不可被缓存淘汰）
-    let isDownloaded: Bool
+    public let isDownloaded: Bool
 }
 
 extension DependencyValues {
