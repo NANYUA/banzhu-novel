@@ -109,7 +109,32 @@ final class PaginatorTests: XCTestCase {
         XCTAssertGreaterThan(bigFont.count, smallFont.count)
     }
 
-    /// ⑪ 防死循环：度量返回 0 时强制推进
+    /// ⑫ 排版类设置变化会影响分页。
+    func test排版设置影响分页() {
+        let base = config()
+        var typography = base
+        typography.characterSpacing = 2
+        XCTAssertTrue(typography.affectsPagination(comparedTo: base))
+
+        var bold = base
+        bold.isBold = true
+        XCTAssertTrue(bold.affectsPagination(comparedTo: base))
+    }
+
+    /// ⑬ 外观 / 翻页类设置不影响分页。
+    func test外观设置不影响分页() {
+        let base = config()
+        var appearance = base
+        appearance.backgroundStyle = .black
+        appearance.textColorMode = .custom
+        appearance.followsSystemBrightness = false
+        appearance.pageTurnMode = .tap
+        appearance.pageTurnAnimation = .cover
+        appearance.appearanceMode = .dark
+        XCTAssertFalse(appearance.affectsPagination(comparedTo: base))
+    }
+
+    /// ⑭ 防死循环：度量返回 0 时强制推进
     func test度量返回零时强制推进防死循环() {
         let text = String(repeating: "字", count: 5)
         // 宽度预算 0 → 一页都塞不进任何字符 → 强制每页 1 个
@@ -118,7 +143,7 @@ final class PaginatorTests: XCTestCase {
         XCTAssertEqual(pages.map(\.length), Array(repeating: 1, count: 5))
     }
 
-    /// ⑫ 单字符文本
+    /// ⑮ 单字符文本
     func test单字符() {
         let text = "字"
         let pages = paginator(width: 10).paginate(text: text, configuration: config())

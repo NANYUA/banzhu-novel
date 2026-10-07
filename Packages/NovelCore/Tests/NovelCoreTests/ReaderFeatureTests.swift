@@ -148,6 +148,33 @@ final class ReaderFeatureTests: XCTestCase {
         XCTAssertEqual(store.state.currentOffset, 5, "改配置后 offset 不应丢")
     }
 
+    /// 外观类设置只更新配置，不触发重新分页，offset 同样不丢。
+    func test改外观设置保留分页和offset() async {
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
+        await store.send(.nextPage) { $0.currentOffset = 5 }
+
+        var appearance = store.state.config
+        appearance.backgroundStyle = .black
+        appearance.pageTurnMode = .scroll
+        appearance.appearanceMode = .dark
+
+        await store.send(.configChanged(appearance)) {
+            $0.config.backgroundStyle = .black
+            $0.config.pageTurnMode = .scroll
+            $0.config.appearanceMode = .dark
+        }
+        await store.finish()
+        XCTAssertEqual(store.state.currentOffset, 5)
+        XCTAssertEqual(
+            store.state.pages,
+            [
+                PageRange(location: 0, length: 5),
+                PageRange(location: 5, length: 5),
+            ]
+        )
+    }
+
     /// 加载失败：errorMessage 记录，isLoading 结束
     func test加载失败() async {
         struct LoadErr: Error, LocalizedError {

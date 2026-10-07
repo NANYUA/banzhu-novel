@@ -150,16 +150,12 @@ public struct ReaderFeature: Reducer {
 
             case let .configChanged(newConfig):
                 guard newConfig != state.config else { return .none }
-                let currentOffset = state.currentOffset
+                let shouldRepaginate = newConfig.affectsPagination(comparedTo: state.config)
                 state.config = newConfig
-                // 配置变化 → 重新分页
-                state.pages = paginationService.paginate(state.text, newConfig)
-                // 🔴 数据契约：改设置后用 offset 重新定位，不丢位置
-                // 重新定位到「当前 offset 现在落在哪一页」，若落点因分页变化
-                // 跑到末尾，保持 offset 不变（用户位置优先）
-                let maxOffset = max(0, state.text.count)
-                if currentOffset <= maxOffset {
-                    state.currentOffset = currentOffset
+                // 只有影响排版的设置才重新分页；背景色 / 翻页方式等直接生效。
+                if shouldRepaginate {
+                    state.pages = paginationService.paginate(state.text, newConfig)
+                    // 🔴 数据契约：改设置后用 offset 重新定位，不丢位置。
                 }
                 return .none
             }

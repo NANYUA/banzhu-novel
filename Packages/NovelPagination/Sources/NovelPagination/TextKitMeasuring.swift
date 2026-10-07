@@ -32,8 +32,7 @@ public struct TextKitMeasuring: TextMeasuring {
         let tail = String(chars[from...])
 
         // 构建带样式的文字
-        let font = configuration.fontName.flatMap { UIFont(name: $0, size: configuration.fontSize) }
-            ?? UIFont.systemFont(ofSize: configuration.fontSize)
+        let font = ReadingFontFactory.makeFont(configuration: configuration)
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = configuration.lineSpacing
@@ -43,6 +42,7 @@ public struct TextKitMeasuring: TextMeasuring {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .paragraphStyle: paragraphStyle,
+            .kern: configuration.characterSpacing,
         ]
         let attributed = NSAttributedString(string: tail, attributes: attributes)
 
