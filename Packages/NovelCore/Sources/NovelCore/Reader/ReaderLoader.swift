@@ -37,14 +37,18 @@ extension DependencyValues {
 /// 所以「分页」这个能力通过依赖注入：
 /// - 测试：注入 `Paginator(measurer: FakeMeasuring())`
 /// - 真机：App 层注入 `Paginator(measurer: TextKitMeasuring())`
-struct PaginationService: Sendable {
+public struct PaginationService: Sendable {
     /// 把 `text` 按 `configuration` 切成页
-    var paginate: @Sendable (String, PaginationConfiguration) -> [PageRange]
+    public var paginate: @Sendable (String, PaginationConfiguration) -> [PageRange]
+
+    public init(paginate: @escaping @Sendable (String, PaginationConfiguration) -> [PageRange]) {
+        self.paginate = paginate
+    }
 }
 
 extension DependencyValues {
     /// 分页服务。测试注入 FakeMeasuring，真机注入 TextKitMeasuring。
-    var paginationService: PaginationService {
+    public var paginationService: PaginationService {
         get { self[PaginationServiceKey.self] }
         set { self[PaginationServiceKey.self] = newValue }
     }

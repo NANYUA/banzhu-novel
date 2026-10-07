@@ -89,7 +89,7 @@ struct ReaderView: View {
         let text = viewStore.text
 
         guard !pages.isEmpty, !text.isEmpty else { return text }
-        guard let page = pages.first(where: { offset >= $0.location, offset < $0.location + $0.length }) else {
+        guard let page = pages.first(where: { offset >= $0.location && offset < $0.location + $0.length }) else {
             return text
         }
         let chars = Array(text)
