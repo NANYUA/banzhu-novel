@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import NovelCore
+import NovelEngine
 import SwiftUI
 
 /// 搜索页 —— 输入关键词、展示结果、把书加入书架。
