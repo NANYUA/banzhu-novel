@@ -56,10 +56,10 @@ public struct ReaderFeature: Reducer {
 
         /// 分页结果（每次内容/配置变化后重算）。
         /// `pages` 不持久化、不直接进 App —— App 用 `currentOffset` 定位。
-        var pages: [PageRange] = []
+        public var pages: [PageRange] = []
 
         /// 当前 offset 落在第几页。`-1` 表示还没分页（空文本）
-        var currentPageIndex: Int {
+        public var currentPageIndex: Int {
             guard !pages.isEmpty else { return -1 }
             // pages 按 location 升序，二分或线性找 currentOffset 落在哪页
             for (index, page) in pages.enumerated() {
