@@ -51,9 +51,23 @@ struct BookshelfView: View {
                     } else {
                         // 有数据（或加载失败但有旧数据）—— 正常列表
                         List(viewStore.rows) { row in
-                            BookRow(row: row)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            // 点书 → 目录页（章节列表）
+                            NavigationLink {
+                                ChapterListView(
+                                    store: Store(
+                                        initialState: ChapterListFeature.State(
+                                            bookPath: row.bookPath,
+                                            bookTitle: row.title
+                                        )
+                                    ) {
+                                        ChapterListFeature()
+                                    }
+                                )
+                            } label: {
+                                BookRow(row: row)
+                            }
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
                         }
                         .listStyle(.plain)
                         .refreshable {
