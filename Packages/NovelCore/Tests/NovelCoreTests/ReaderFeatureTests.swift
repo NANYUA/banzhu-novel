@@ -9,6 +9,9 @@ import XCTest
 /// 钉住翻页和 characterOffset 数据契约。
 @MainActor
 final class ReaderFeatureTests: XCTestCase {
+    /// 样本正文：10 个中文，宽预算 10 → 每页 5 字 → 2 页
+    private static let sampleText = "一二三四五六七八九十"
+
     private func makeStore(
         text: String,
         loader: @escaping @Sendable (String) async throws -> String
@@ -24,10 +27,11 @@ final class ReaderFeatureTests: XCTestCase {
         }
     }
 
-    /// 每页 5 个中文：10 字 = 2 页，每页 range 正确
-    func test加载后分页正确() async {
-        let store = makeStore(text: "一二三四五六七八九十") { _ in "一二三四五六七八九十" }
-
+    /// 公共前导：加载样本 → 断言分页成 2 页、offset 归零。
+    ///
+    /// `send`/`receive` 都改了状态，必须带断言闭包，
+    /// 否则 TestStore 会报「State was not expected to change」。
+    private func loadSample(into store: TestStore<ReaderFeature.State, ReaderFeature.Action>) async {
         await store.send(.loadChapter("/1/1.html")) {
             $0.chapterPath = "/1/1.html"
             $0.isLoading = true
@@ -35,8 +39,8 @@ final class ReaderFeatureTests: XCTestCase {
             $0.pages = []
             $0.currentOffset = 0
         }
-        await store.receive(.contentLoaded("一二三四五六七八九十")) {
-            $0.text = "一二三四五六七八九十"
+        await store.receive(.contentLoaded(Self.sampleText)) {
+            $0.text = Self.sampleText
             $0.isLoading = false
             // 10 字，每页 5 字 → 2 页：page0 = {0,5}, page1 = {5,5}
             $0.pages = [
@@ -45,14 +49,22 @@ final class ReaderFeatureTests: XCTestCase {
             ]
             $0.currentOffset = 0
         }
+    }
+
+    // MARK: - 测试
+
+    /// 每页 5 个中文：10 字 = 2 页，每页 range 正确
+    func test加载后分页正确() async {
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
         await store.finish()
+        XCTAssertEqual(store.state.pages.count, 2)
     }
 
     /// 下一页：offset 从 0 → 5（第二页起点）
     func test下一页移动offset() async {
-        let store = makeStore(text: "一二三四五六七八九十") { _ in "一二三四五六七八九十" }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded("一二三四五六七八九十"))
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
 
         await store.send(.nextPage) {
             $0.currentOffset = 5
@@ -62,9 +74,8 @@ final class ReaderFeatureTests: XCTestCase {
 
     /// 上一页：从第二页回到第一页
     func test上一页移动offset() async {
-        let store = makeStore(text: "一二三四五六七八九十") { _ in "一二三四五六七八九十" }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded("一二三四五六七八九十"))
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
         await store.send(.nextPage) { $0.currentOffset = 5 }
 
         await store.send(.prevPage) {
@@ -75,9 +86,8 @@ final class ReaderFeatureTests: XCTestCase {
 
     /// 最后一页再下一页：不越界
     func test最后一页下一页不动() async {
-        let store = makeStore(text: "一二三四五六七八九十") { _ in "一二三四五六七八九十" }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded("一二三四五六七八九十"))
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
         await store.send(.nextPage) { $0.currentOffset = 5 }
 
         // 已在最后一页（第 2 页），再下一页无变化
@@ -88,9 +98,8 @@ final class ReaderFeatureTests: XCTestCase {
 
     /// 第一页上一页：不动
     func test第一页上一页不动() async {
-        let store = makeStore(text: "一二三四五六七八九十") { _ in "一二三四五六七八九十" }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded("一二三四五六七八九十"))
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
 
         await store.send(.prevPage)
         await store.finish()
@@ -99,9 +108,8 @@ final class ReaderFeatureTests: XCTestCase {
 
     /// jumpToOffset：跳到一个位置，随后 nextPage 从那里继续
     func test跳转到指定offset() async {
-        let store = makeStore(text: "一二三四五六七八九十") { _ in "一二三四五六七八九十" }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded("一二三四五六七八九十"))
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
 
         await store.send(.jumpToOffset(3)) {
             $0.currentOffset = 3
@@ -115,9 +123,8 @@ final class ReaderFeatureTests: XCTestCase {
 
     /// jumpToOffset 越界 clamp
     func test跳转越界clamp() async {
-        let store = makeStore(text: "一二三四五六七八九十") { _ in "一二三四五六七八九十" }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded("一二三四五六七八九十"))
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
 
         await store.send(.jumpToOffset(999)) {
             $0.currentOffset = 10 // 文本 10 字符，clamp 到 10
@@ -127,26 +134,16 @@ final class ReaderFeatureTests: XCTestCase {
 
     /// 🔴 数据契约：改配置重新分页，但 currentOffset 不丢
     func test改配置重新分页且offset不丢() async {
-        // 文本 10 字。宽预算 10 → 每页 5 字 → 2 页。
-        // 读到第 2 页（offset=5），然后改配置为宽预算 5 → 每页 2~3 字 → 页数变多。
-        // 关键断言：currentOffset 仍是 5（不因重新分页跳走）。
-        let store = TestStore(initialState: ReaderFeature.State(chapterPath: "/1/1.html")) {
-            ReaderFeature()
-        } withDependencies: {
-            $0.readerLoader.load = { _ in "一二三四五六七八九十" }
-            $0.paginationService.paginate = { text, _ in
-                Paginator(measurer: FakeMeasuring(widthBudget: 10))
-                    .paginate(text: text, configuration: PaginationConfiguration(containerSize: CGSize(width: 320, height: 480)))
-            }
-        }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded("一二三四五六七八九十"))
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
         await store.send(.nextPage) { $0.currentOffset = 5 }
 
-        // 改配置（容器尺寸变 → 重新分页）
+        // 改配置（容器尺寸变 → 重新分页，页数可能变）
         await store.send(.configChanged(PaginationConfiguration(
             containerSize: CGSize(width: 400, height: 480)
-        )))
+        ))) {
+            $0.config.containerSize = CGSize(width: 400, height: 480)
+        }
         await store.finish()
         XCTAssertEqual(store.state.currentOffset, 5, "改配置后 offset 不应丢")
     }
@@ -174,8 +171,19 @@ final class ReaderFeatureTests: XCTestCase {
     /// 空文本：pages 空，翻页无效果
     func test空文本() async {
         let store = makeStore(text: "") { _ in "" }
-        await store.send(.loadChapter("/1/1.html"))
-        await store.receive(.contentLoaded(""))
+        await store.send(.loadChapter("/1/1.html")) {
+            $0.chapterPath = "/1/1.html"
+            $0.isLoading = true
+            $0.text = ""
+            $0.pages = []
+            $0.currentOffset = 0
+        }
+        await store.receive(.contentLoaded("")) {
+            $0.text = ""
+            $0.isLoading = false
+            $0.pages = []
+            $0.currentOffset = 0
+        }
 
         await store.send(.nextPage)
         await store.send(.prevPage)
