@@ -64,8 +64,8 @@ final class PaginatorTests: XCTestCase {
     func test超长段落正常分页() {
         let text = String(repeating: "字", count: 1000)
         let pages = paginator(width: 10).paginate(text: text, configuration: config())
-        // 每页 10 个宽 2 的字符 = 20 宽度，1000 字应分 50 页
-        XCTAssertEqual(pages.count, 50)
+        // 中文宽 2、宽预算 10 → 每页 5 字，1000 字应分 200 页
+        XCTAssertEqual(pages.count, 200)
     }
 
     /// ⑦ 中英混排
