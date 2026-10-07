@@ -1,7 +1,7 @@
 import ComposableArchitecture
+@testable import NovelCore
 import NovelEngine
 import XCTest
-@testable import NovelCore
 
 @MainActor
 final class SearchFeatureTests: XCTestCase {
