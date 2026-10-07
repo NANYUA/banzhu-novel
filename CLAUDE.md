@@ -2,7 +2,7 @@
 
 ## Status
 
-业务开发阶段。骨架完成，CI 五道关卡全绿，第一个 feature（书架）已落地。
+业务开发阶段。骨架完成；书架、目录、阅读、搜索链路已落地。本轮搜索改动待 CI 复验。
 
 ## 技术栈
 
@@ -62,7 +62,10 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   └── Sources/
 │       ├── AppMain.swift
 │       ├── RootView.swift
-│       └── BookshelfView.swift
+│       ├── BookshelfView.swift
+│       ├── ChapterListView.swift
+│       ├── ReaderView.swift
+│       └── SearchView.swift
 ├── Packages/
 │   ├── NovelEngine/             # 纯逻辑层
 │   │   ├── Sources/NovelEngine/ # 9 个文件
@@ -71,7 +74,8 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       ├── Sources/NovelCore/
 │       │   ├── Models/          # BookRecord / ChapterRecord / BookGroup / DownloadTask
 │       │   ├── Storage/         # NovelStore (SwiftData)
-│       │   └── Shelf/           # BookshelfFeature / ShelfRow / ShelfLoader
+│       │   ├── Shelf/           # BookshelfFeature / ShelfRow / ShelfLoader / ShelfAdder
+│       │   └── Search/          # SearchFeature
 │       └── Tests/
 ├── scripts/
 │   └── check-architecture.sh    # 5 条架构约束
