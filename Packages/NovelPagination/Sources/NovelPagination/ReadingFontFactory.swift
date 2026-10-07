@@ -35,10 +35,10 @@ public enum ReadingFontFactory {
         if let font = UIFont(name: fontName, size: size) {
             return font
         }
-        if let postScriptName = UIFont.fontNames(forFamilyName: fontName).first,
-           let font = UIFont(name: postScriptName, size: size)
-        {
-            return font
+        if let postScriptName = UIFont.fontNames(forFamilyName: fontName).first {
+            if let font = UIFont(name: postScriptName, size: size) {
+                return font
+            }
         }
         return UIFont.systemFont(ofSize: size)
     }
