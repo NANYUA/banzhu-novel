@@ -63,7 +63,7 @@ public struct ReaderFeature: Reducer {
             guard !pages.isEmpty else { return -1 }
             // pages 按 location 升序，二分或线性找 currentOffset 落在哪页
             for (index, page) in pages.enumerated() {
-                if currentOffset >= page.location && currentOffset < page.location + page.length {
+                if currentOffset >= page.location, currentOffset < page.location + page.length {
                     return index
                 }
             }

@@ -154,7 +154,9 @@ final class ReaderFeatureTests: XCTestCase {
     /// 加载失败：errorMessage 记录，isLoading 结束
     func test加载失败() async {
         struct LoadErr: Error, LocalizedError {
-            var errorDescription: String? { "网络错误" }
+            var errorDescription: String? {
+                "网络错误"
+            }
         }
         let store = makeStore(text: "") { _ in throw LoadErr() }
 

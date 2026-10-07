@@ -73,7 +73,9 @@ private struct FakeMeasuringForLive: TextMeasuring {
         for index in from ..< chars.count {
             // 简化：汉字按 2、ASCII 按 1
             let charWidth = (chars[index].unicodeScalars.first?.value ?? 0) > 0x2E80 ? 2 : 1
-            if width + charWidth > 10 { break }
+            if width + charWidth > 10 {
+                break
+            }
             width += charWidth
             count += 1
         }
