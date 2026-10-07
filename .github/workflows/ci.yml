@@ -69,7 +69,9 @@ jobs:
       #    TCA 及其 5 个依赖全带宏插件，App 编译关卡必须两个都加。
       #    注：`swift test`（关卡 4）走 SwiftPM，不经过 Xcode 插件机制，无需这两个开关。
       - name: 编译 App（不签名）
+        id: build
         run: |
+          set -o pipefail
           xcodebuild \
             -project BanzhuNovel.xcodeproj \
             -scheme BanzhuNovel \
@@ -81,7 +83,16 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee build.log
+
+      - name: 输出编译错误
+        if: always() && steps.build.outcome == 'failure'
+        run: |
+          if [ -f build.log ]; then
+            grep -E "error: |fatal error: " build.log | head -n 30 | while IFS= read -r line; do
+              echo "::error title=Xcode::$line"
+            done
+          fi
 
       # ── 关卡 4：单元测试 ───────────────────────────────────────
       - name: 单元测试（XCTest）
