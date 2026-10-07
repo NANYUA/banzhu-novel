@@ -23,7 +23,7 @@ struct ReaderView: View {
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
     init(chapterPath: String) {
-        self.store = Store(
+        store = Store(
             initialState: ReaderFeature.State(chapterPath: chapterPath)
         ) {
             ReaderFeature()
@@ -43,7 +43,7 @@ struct ReaderView: View {
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             ZStack {
-                if viewStore.isLoading && viewStore.text.isEmpty {
+                if viewStore.isLoading, viewStore.text.isEmpty {
                     ProgressView("加载中…")
                 } else if let message = viewStore.errorMessage, viewStore.text.isEmpty {
                     VStack(spacing: 12) {
@@ -96,7 +96,7 @@ struct ReaderView: View {
         let start = min(page.location, chars.count)
         let end = min(page.location + page.length, chars.count)
         guard start < end else { return "" }
-        return String(chars[start..<end])
+        return String(chars[start ..< end])
     }
 }
 
@@ -106,7 +106,7 @@ private struct PageTextView: UIViewRepresentable {
     let fontSize: CGFloat
     let lineSpacing: CGFloat
 
-    func makeUIView(context: Context) -> UITextView {
+    func makeUIView(context _: Context) -> UITextView {
         let textView = UITextView()
         textView.isEditable = false
         textView.isSelectable = false
@@ -116,7 +116,7 @@ private struct PageTextView: UIViewRepresentable {
         return textView
     }
 
-    func updateUIView(_ uiView: UITextView, context: Context) {
+    func updateUIView(_ uiView: UITextView, context _: Context) {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = lineSpacing
 
