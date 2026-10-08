@@ -249,6 +249,7 @@ public actor NovelEngine {
         var lastError: Error = NetworkError.badResponse
         var guardedQueue: [String] = []
         var enterGuardImmediately = false
+        var attemptedFirstVerification: String?
         let candidates = routing.autoSwitchHost
             ? orderedCandidates(startingHost: startingHost)
             : [startingHost]
@@ -284,19 +285,55 @@ public actor NovelEngine {
 
         if routing.autoSwitchHost, !enterGuardImmediately {
             let rest = Array(candidates.dropFirst().prefix(6))
-            let probeResults = await probeBatch(rest, path: path, body: body)
-            for (host, result) in probeResults {
-                switch result {
-                case let .success(html):
-                    markHost(host, status: .unguarded)
-                    routing.onHostChanged?(host)
+            let firstBatch = Array(rest.prefix(3))
+            let firstResults = await probeBatch(firstBatch, path: path, body: body)
+            if let html = applyProbeResults(
+                firstResults,
+                guardedQueue: &guardedQueue,
+                lastError: &lastError
+            ) {
+                return html
+            }
+
+            let remaining = Array(rest.dropFirst(3).prefix(3))
+            if let firstGuarded = guardedQueue.first, !remaining.isEmpty {
+                attemptedFirstVerification = firstGuarded
+                let verificationTask = Task {
+                    try? await self.fetchFromHostWithGuard(
+                        firstGuarded,
+                        path: path,
+                        body: body,
+                        notifyHostChange: true
+                    )
+                }
+                let secondResults = await probeBatch(remaining, path: path, body: body)
+                if let html = applyProbeResults(
+                    secondResults,
+                    guardedQueue: &guardedQueue,
+                    lastError: &lastError
+                ) {
+                    verificationTask.cancel()
                     return html
-                case .guarded:
-                    markHost(host, status: .guarded)
-                    guardedQueue.append(host)
-                case .unavailable:
-                    markHost(host, status: .unavailable)
-                    lastError = NetworkError.badResponse
+                }
+                if let html = await verificationTask.value {
+                    markHost(firstGuarded, status: .unguarded)
+                    return html
+                }
+                markHost(
+                    firstGuarded,
+                    status: .guarded,
+                    coolingUntil: Date().addingTimeInterval(
+                        TimeInterval(max(routing.hostCooldownSeconds, 60))
+                    )
+                )
+            } else if !remaining.isEmpty {
+                let secondResults = await probeBatch(remaining, path: path, body: body)
+                if let html = applyProbeResults(
+                    secondResults,
+                    guardedQueue: &guardedQueue,
+                    lastError: &lastError
+                ) {
+                    return html
                 }
             }
         }
@@ -353,7 +390,7 @@ public actor NovelEngine {
             }
         }
 
-        for host in guardedQueue.prefix(2) {
+        for host in guardedQueue.prefix(2) where host != attemptedFirstVerification {
             do {
                 let html = try await fetchFromHostWithGuard(
                     host,
@@ -377,6 +414,28 @@ public actor NovelEngine {
 
         config = SiteConfig(host: startingHost)
         throw lastError
+    }
+
+    private func applyProbeResults(
+        _ results: [(String, ProbeResult)],
+        guardedQueue: inout [String],
+        lastError: inout Error
+    ) -> String? {
+        for (host, result) in results {
+            switch result {
+            case let .success(html):
+                markHost(host, status: .unguarded)
+                routing.onHostChanged?(host)
+                return html
+            case .guarded:
+                markHost(host, status: .guarded)
+                guardedQueue.append(host)
+            case .unavailable:
+                markHost(host, status: .unavailable)
+                lastError = NetworkError.badResponse
+            }
+        }
+        return nil
     }
 
     private enum ProbeResult: Sendable {
