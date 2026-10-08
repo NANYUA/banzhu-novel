@@ -47,7 +47,7 @@ jobs:
 
       # ── 关卡 2：静态规则 ───────────────────────────────────────
       - name: 静态检查（SwiftLint）
-        run: swiftlint lint --strict
+        run: swiftlint lint --strict --reporter github-actions-logging
 
       # ── 生成工程 ──────────────────────────────────────────────
       - name: 生成 Xcode 工程
