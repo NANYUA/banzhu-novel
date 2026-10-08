@@ -73,6 +73,8 @@ enum ShelfAdderLive {
             throw ShelfAdderError.alreadyExists(title: found.title)
         }
 
+        let detail = try await loadDetail(fallback: book)
+
         // ── 2. 抓目录（联网） ────────────────────────────────────
         // 失败就直接抛，不落库 —— 半成品条目（有书没目录）会让书架显示「0 章」，
         // 用户点进去才发现是坏的，比直接失败更糟。
@@ -80,16 +82,16 @@ enum ShelfAdderLive {
 
         // ── 3. 落库 ──────────────────────────────────────────────
         let record = BookRecord(
-            bookPath: book.path,
-            title: book.title,
-            author: book.author,
-            intro: book.intro,
-            coverUrl: book.coverUrl,
-            wordCount: book.wordCount,
-            status: book.status,
-            category: book.category,
-            tags: book.tags.joined(separator: ","),
-            lastUpdated: book.lastUpdated
+            bookPath: detail.path,
+            title: detail.title,
+            author: detail.author,
+            intro: detail.intro,
+            coverUrl: detail.coverUrl,
+            wordCount: detail.wordCount,
+            status: detail.status,
+            category: detail.category,
+            tags: detail.tags.joined(separator: ","),
+            lastUpdated: detail.lastUpdated
         )
         // 目录快照：需求要求离线也能显示「最新章节」与「未读章数」
         record.latestChapterName = chapters.last?.name
@@ -118,5 +120,47 @@ enum ShelfAdderLive {
             unreadCount: chapters.count,
             lastReadAt: nil
         )
+    }
+
+    private static func loadDetail(fallback: Book) async throws -> Book {
+        do {
+            let detail = try await NovelEngine.shared.bookInfo(path: fallback.path)
+            var merged = fallback
+            if !detail.title.isEmpty {
+                merged.title = detail.title
+            }
+            if !detail.author.isEmpty {
+                merged.author = detail.author
+            }
+            if !detail.intro.isEmpty {
+                merged.intro = detail.intro
+            }
+            if !detail.coverUrl.isEmpty {
+                merged.coverUrl = detail.coverUrl
+            }
+            if !detail.wordCount.isEmpty {
+                merged.wordCount = detail.wordCount
+            }
+            if !detail.status.isEmpty {
+                merged.status = detail.status
+            }
+            if !detail.category.isEmpty {
+                merged.category = detail.category
+            }
+            if !detail.tags.isEmpty {
+                merged.tags = detail.tags
+            }
+            if !detail.lastChapter.isEmpty {
+                merged.lastChapter = detail.lastChapter
+            }
+            if !detail.lastUpdated.isEmpty {
+                merged.lastUpdated = detail.lastUpdated
+            }
+            return merged
+        } catch let error as NetworkError where error.isGuardRequired {
+            throw error
+        } catch {
+            return fallback
+        }
     }
 }

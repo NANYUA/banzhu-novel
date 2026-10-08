@@ -316,6 +316,27 @@ extension SiteSettings {
                 self.currentHostID = hosts.first { !$0.isCooling() }?.id ?? currentHostID
             }
         }
+        ensureStandbyHost()
+    }
+
+    private mutating func ensureStandbyHost() {
+        let hasUsableStandby = hosts.contains {
+            $0.isStandby
+                && $0.id != currentHostID
+                && $0.hostStatus == .unguarded
+                && !$0.isCooling()
+        }
+        guard !hasUsableStandby else { return }
+        for index in hosts.indices {
+            hosts[index].isStandby = false
+        }
+        if let index = hosts.firstIndex(where: {
+            $0.id != currentHostID
+                && $0.hostStatus == .unguarded
+                && !$0.isCooling()
+        }) {
+            hosts[index].isStandby = true
+        }
     }
 
     public mutating func recordHost(

@@ -101,7 +101,7 @@ struct SiteSettingsView: View {
                 Button {
                     viewStore.send(.selectNavigationURL(entry.id))
                 } label: {
-                    entryRow(
+                    navigationEntryRow(
                         entry,
                         isSelected: entry.id == viewStore.settings.currentNavigationID
                     )
@@ -218,6 +218,24 @@ struct SiteSettingsView: View {
                 Image(systemName: "checkmark")
                     .foregroundStyle(.tint)
             }
+        }
+    }
+
+    private func navigationEntryRow(_ entry: SiteEntry, isSelected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            entryRow(entry, isSelected: isSelected)
+            Text("\(navigationStatusText(entry)) · 失败 \(entry.consecutiveFailures) 次")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func navigationStatusText(_ entry: SiteEntry) -> String {
+        switch entry.resolvedNavigationStatus() {
+        case .active: "正常"
+        case .cooling: "暂缓"
+        case .frozen: "冻结"
+        case .disabled: "关闭"
         }
     }
 }
