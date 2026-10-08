@@ -92,6 +92,13 @@ struct SiteSettingsView: View {
     private func hostSections(
         _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
     ) -> some View {
+        userHostSection(viewStore)
+        navigationHostSection(viewStore)
+    }
+
+    private func userHostSection(
+        _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
+    ) -> some View {
         Section("用户添加的 host") {
             ForEach(viewStore.settings.userHosts) { entry in
                 Button {
@@ -121,7 +128,11 @@ struct SiteSettingsView: View {
                 .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+    }
 
+    private func navigationHostSection(
+        _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
+    ) -> some View {
         Section {
             if viewStore.settings.navigationHosts.isEmpty {
                 Text("暂无导航发现的 host")
