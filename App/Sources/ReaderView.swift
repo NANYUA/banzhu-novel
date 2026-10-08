@@ -476,27 +476,27 @@ private extension ReaderView {
         }
         switch animation {
         case .none:
-            .identity
+            return .identity
         case .cover:
             if direction == .forward {
-                .asymmetric(
+                return .asymmetric(
                     insertion: .move(edge: .trailing),
                     removal: .move(edge: .leading)
                 )
             } else {
-                .asymmetric(
+                return .asymmetric(
                     insertion: .move(edge: .leading),
                     removal: .move(edge: .trailing)
                 )
             }
         case .curl:
             if direction == .forward {
-                .asymmetric(
+                return .asymmetric(
                     insertion: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity),
                     removal: .scale(scale: 0.94, anchor: .leading).combined(with: .opacity)
                 )
             } else {
-                .asymmetric(
+                return .asymmetric(
                     insertion: .scale(scale: 0.94, anchor: .leading).combined(with: .opacity),
                     removal: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity)
                 )
