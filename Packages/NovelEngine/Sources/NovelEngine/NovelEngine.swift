@@ -585,9 +585,15 @@ public actor NovelEngine {
 
     private func shouldAutoFetchNavigation() -> Bool {
         let navigationHostCount = routing.hostStates
-            .filter { !$0.isUser && $0.status != .unavailable }
+            .filter {
+                !$0.isUser
+                    && $0.status != .unavailable
+                    && !isCooling(Self.normalizedHost($0.value))
+            }
             .count
-        let hasStandby = routing.hostStates.contains(where: { $0.isStandby })
+        let hasStandby = routing.hostStates.contains {
+            $0.isStandby && !isCooling(Self.normalizedHost($0.value))
+        }
         let hasActiveNavigation = routing.navigationURLs.contains {
             navigationRouteStates[$0, default: .active] == .active
         }

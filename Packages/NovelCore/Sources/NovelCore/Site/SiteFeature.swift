@@ -100,7 +100,13 @@ public struct SiteFeature: Reducer {
                 return configureAndSave(state.settings, store: siteStore, router: siteRouter)
 
             case let .deleteHost(id):
-                state.settings.hosts.removeAll { $0.id == id }
+                if let index = state.settings.hosts.firstIndex(where: { $0.id == id }) {
+                    if state.settings.hosts[index].isNavigationHost {
+                        state.settings.hosts[index].sources.remove(.user)
+                    } else {
+                        state.settings.hosts.remove(at: index)
+                    }
+                }
                 state.settings.normalize()
                 return configureAndSave(state.settings, store: siteStore, router: siteRouter)
 
