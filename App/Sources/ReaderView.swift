@@ -22,6 +22,7 @@ struct ReaderView: View {
     let store: StoreOf<ReaderFeature>
 
     @State private var isShowingSettings = false
+    @AppStorage("reader.precacheCount") private var precacheCount = ReaderFeature.defaultPrecacheCount
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
     init(chapterPath: String) {
@@ -64,12 +65,28 @@ struct ReaderView: View {
                 }
             }
             .sheet(isPresented: $isShowingSettings) {
-                ReaderSettingsView(configuration: viewStore.config) { newConfiguration in
-                    viewStore.send(.configChanged(newConfiguration))
-                }
+                ReaderSettingsView(
+                    configuration: viewStore.config,
+                    precacheCount: precacheCount,
+                    onPrecacheCountChange: { newCount in
+                        precacheCount = newCount
+                        viewStore.send(.precacheCountChanged(newCount))
+                    },
+                    onChange: { newConfiguration in
+                        viewStore.send(.configChanged(newConfiguration))
+                    }
+                )
             }
             .preferredColorScheme(viewStore.config.appearanceMode.preferredColorScheme)
             .task {
+                let normalizedCount = min(
+                    max(precacheCount, 0),
+                    ReaderFeature.maxPrecacheCount
+                )
+                if normalizedCount != precacheCount {
+                    precacheCount = normalizedCount
+                }
+                viewStore.send(.precacheCountChanged(normalizedCount))
                 viewStore.send(.loadChapter(viewStore.chapterPath))
             }
         }

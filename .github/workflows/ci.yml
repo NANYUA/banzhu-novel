@@ -120,3 +120,78 @@ jobs:
 
       - name: 结果
         run: echo "✅ 全部关卡通过"
+
+  package-unsigned:
+    name: 打包未签名 iOS App
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 归档 Release App（不签名）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project BanzhuNovel.xcodeproj \
+            -scheme BanzhuNovel \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/BanzhuNovel.xcarchive" \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive 2>&1 | tee package-build.log
+
+      - name: 输出打包错误
+        if: failure()
+        run: |
+          if [ -f package-build.log ]; then
+            grep -E "error: |fatal error: " package-build.log | head -n 30 | while IFS= read -r line; do
+              echo "::error title=Xcode::$line"
+            done
+          fi
+
+      - name: 制作 IPA / App / Archive
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/BanzhuNovel.xcarchive"
+          APP_PATH="$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$APP_PATH"
+          APP_NAME="$(basename "$APP_PATH" .app)"
+
+          mkdir -p artifacts/Payload
+          cp -R "$APP_PATH" artifacts/Payload/
+          (
+            cd artifacts
+            zip -qry "${APP_NAME}-unsigned.ipa" Payload
+          )
+          rm -rf artifacts/Payload
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$APP_PATH" \
+            "artifacts/${APP_NAME}-unsigned.app.zip"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$ARCHIVE" \
+            "artifacts/${APP_NAME}-unsigned.xcarchive.zip"
+          shasum -a 256 artifacts/* > artifacts/SHA256SUMS.txt
+          ls -lh artifacts
+
+      - name: 上传未签名构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: BanzhuNovel-unsigned-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

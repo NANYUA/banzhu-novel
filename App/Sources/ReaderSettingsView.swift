@@ -9,6 +9,8 @@ import UIKit
 /// 通过 `onChange` 交还给 `ReaderFeature`；不直接持有业务状态。
 struct ReaderSettingsView: View {
     let configuration: PaginationConfiguration
+    let precacheCount: Int
+    let onPrecacheCountChange: (Int) -> Void
     let onChange: (PaginationConfiguration) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -155,6 +157,13 @@ struct ReaderSettingsView: View {
 
             Toggle("首行缩进", isOn: firstLineIndentBinding)
 
+            Stepper(
+                value: precacheCountBinding,
+                in: 0 ... ReaderFeature.maxPrecacheCount
+            ) {
+                Text("预缓存 \(precacheCount) 章")
+            }
+
             Picker("夜间模式", selection: binding(\.appearanceMode)) {
                 ForEach(ReadingAppearanceMode.allCases, id: \.self) { mode in
                     Text(mode.displayName).tag(mode)
@@ -236,6 +245,13 @@ private extension ReaderSettingsView {
                 next.firstLineHeadIndent = isOn ? configuration.fontSize * 2 : 0
                 onChange(next)
             }
+        )
+    }
+
+    var precacheCountBinding: Binding<Int> {
+        Binding(
+            get: { precacheCount },
+            set: { onPrecacheCountChange($0) }
         )
     }
 

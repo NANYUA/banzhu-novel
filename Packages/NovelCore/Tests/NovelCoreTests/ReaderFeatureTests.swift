@@ -257,6 +257,28 @@ final class ReaderFeatureTests: XCTestCase {
         XCTAssertEqual(records.first?.text, Self.sampleText)
         XCTAssertEqual(records.first?.count, 3)
     }
+
+    /// 预缓存章数会 clamp 到 0...20，并使用最新值触发后续章节缓存。
+    func test修改预缓存章数并用于自动缓存() async {
+        let recorder = CacheRecorder()
+        let store = makeStore(text: Self.sampleText) { _ in
+            Self.sampleText
+        } cache: { path, text, count in
+            await recorder.record(path: path, text: text, count: count)
+        }
+
+        await store.send(.precacheCountChanged(-1)) {
+            $0.precacheCount = 0
+        }
+        await store.send(.precacheCountChanged(99)) {
+            $0.precacheCount = 20
+        }
+        await loadSample(into: store)
+        await store.finish()
+
+        let records = await recorder.allRecords()
+        XCTAssertEqual(records.first?.count, 20)
+    }
 }
 
 /// 记录阅读进度调用，供 reducer 测试断言。

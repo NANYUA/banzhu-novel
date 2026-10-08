@@ -16,6 +16,10 @@ import Foundation
 public struct ReaderFeature: Reducer {
     public init() {}
 
+    /// 自动预缓存后续章节数的默认值与上限。
+    public static let defaultPrecacheCount = 3
+    public static let maxPrecacheCount = 20
+
     public struct State: Equatable {
         public init(
             chapterPath: String,
@@ -26,7 +30,7 @@ public struct ReaderFeature: Reducer {
             currentOffset: Int = 0,
             isLoading: Bool = false,
             errorMessage: String? = nil,
-            precacheCount: Int = 3
+            precacheCount: Int = ReaderFeature.defaultPrecacheCount
         ) {
             self.chapterPath = chapterPath
             self.text = text
@@ -93,6 +97,8 @@ public struct ReaderFeature: Reducer {
         case jumpToOffset(Int)
         /// 分页配置变化（触发重算分页 + 按 offset 重新定位）
         case configChanged(PaginationConfiguration)
+        /// 自动预缓存后续章节数变化
+        case precacheCountChanged(Int)
     }
 
     @Dependency(\.readerLoader) var readerLoader
@@ -172,6 +178,12 @@ public struct ReaderFeature: Reducer {
                     state.pages = paginationService.paginate(state.text, newConfig)
                     // 🔴 数据契约：改设置后用 offset 重新定位，不丢位置。
                 }
+                return .none
+
+            case let .precacheCountChanged(count):
+                let clamped = min(max(0, count), Self.maxPrecacheCount)
+                guard clamped != state.precacheCount else { return .none }
+                state.precacheCount = clamped
                 return .none
             }
         }
