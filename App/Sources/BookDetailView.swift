@@ -9,6 +9,7 @@ struct BookDetailView: View {
     let downloadStore: StoreOf<DownloadFeature>
 
     @State private var isIntroExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(book: Book, downloadStore: StoreOf<DownloadFeature>) {
         self.downloadStore = downloadStore
@@ -106,8 +107,6 @@ struct BookDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
@@ -123,15 +122,13 @@ struct BookDetailView: View {
                     .lineLimit(isIntroExpanded ? nil : 4)
 
                 Button(isIntroExpanded ? "收起" : "展开") {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                         isIntroExpanded.toggle()
                     }
                 }
                 .font(.caption)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -143,7 +140,6 @@ struct BookDetailView: View {
             DetailInfoRow(title: "标签", value: detail.tags.joined(separator: " · "))
         }
         .padding(.horizontal, 14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
