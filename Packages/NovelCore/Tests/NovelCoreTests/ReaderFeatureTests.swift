@@ -420,6 +420,6 @@ private final class SettingsRecorder: @unchecked Sendable {
     func latest() -> ReadingSettings? {
         lock.lock()
         defer { lock.unlock() }
-        latestSaved
+        return latestSaved
     }
 }
