@@ -25,7 +25,8 @@ public struct ReaderFeature: Reducer {
             ),
             currentOffset: Int = 0,
             isLoading: Bool = false,
-            errorMessage: String? = nil
+            errorMessage: String? = nil,
+            precacheCount: Int = 3
         ) {
             self.chapterPath = chapterPath
             self.text = text
@@ -33,6 +34,7 @@ public struct ReaderFeature: Reducer {
             self.currentOffset = currentOffset
             self.isLoading = isLoading
             self.errorMessage = errorMessage
+            self.precacheCount = precacheCount
         }
 
         /// 当前章节路径（如 `/49/49034/123.html`）
@@ -53,6 +55,9 @@ public struct ReaderFeature: Reducer {
 
         /// 加载失败原因
         public var errorMessage: String?
+
+        /// 自动预缓存后续章节数；默认 3，0 表示只缓存当前章。
+        public var precacheCount: Int
 
         /// 分页结果（每次内容/配置变化后重算）。
         /// `pages` 不持久化、不直接进 App —— App 用 `currentOffset` 定位。
@@ -93,6 +98,7 @@ public struct ReaderFeature: Reducer {
     @Dependency(\.readerLoader) var readerLoader
     @Dependency(\.paginationService) var paginationService
     @Dependency(\.readingProgressStore) var readingProgressStore
+    @Dependency(\.chapterCacheStore) var chapterCacheStore
 
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -122,9 +128,12 @@ public struct ReaderFeature: Reducer {
                 state.currentOffset = 0
                 let chapterPath = state.chapterPath
                 let progressStore = readingProgressStore
+                let cacheStore = chapterCacheStore
+                let precacheCount = state.precacheCount
                 return .run { _ in
                     // 进度写入失败不应阻断阅读；书架排序与 LRU 会在下次成功时刷新。
                     try? await progressStore.markRead(chapterPath, Date())
+                    await cacheStore.cacheCurrentAndFollowing(chapterPath, text, precacheCount)
                 }
 
             case let .loadFailed(message):

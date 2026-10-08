@@ -1,6 +1,7 @@
 import Dependencies
 import Foundation
 import NovelEngine
+import SwiftData
 
 /// 章节正文加载器（依赖）。
 ///
@@ -21,11 +22,39 @@ extension DependencyValues {
 
     private enum ReaderLoaderKey: DependencyKey {
         static let liveValue = ReaderLoader { chapterPath in
+            if let localText = try? await ReaderLoaderLive.load(chapterPath: chapterPath) {
+                return localText
+            }
             try await NovelEngine.shared.content(chapterPath: chapterPath)
         }
 
         /// 测试默认值：返回空串，避免忘记注入桩的测试意外联网。
         static let testValue = ReaderLoader { _ in "" }
+    }
+}
+
+/// 阅读正文的本地缓存读取。
+///
+/// 已缓存或用户下载的章节直接读文件，离线也能打开；
+/// 没有本地正文时再由依赖调用网络加载。
+@MainActor
+enum ReaderLoaderLive {
+    static func load(chapterPath: String) throws -> String? {
+        let context = try ModelContext(NovelStore.makeContainer())
+        return try load(chapterPath: chapterPath, in: context)
+    }
+
+    static func load(chapterPath: String, in context: ModelContext) throws -> String? {
+        let descriptor = FetchDescriptor<ChapterRecord>(
+            predicate: #Predicate { $0.path == chapterPath }
+        )
+        guard let chapter = try context.fetch(descriptor).first, chapter.hasLocalText else {
+            return nil
+        }
+        return try NovelStore.loadChapterText(
+            bookPath: chapter.bookPath,
+            number: chapter.number
+        )
     }
 }
 

@@ -15,13 +15,15 @@ final class ReaderFeatureTests: XCTestCase {
     private func makeStore(
         text: String,
         loader: @escaping @Sendable (String) async throws -> String,
-        progress: @escaping @Sendable (String, Date) async throws -> Void = { _, _ in }
+        progress: @escaping @Sendable (String, Date) async throws -> Void = { _, _ in },
+        cache: @escaping @Sendable (String, String, Int) async -> Void = { _, _, _ in }
     ) -> TestStore<ReaderFeature.State, ReaderFeature.Action> {
         TestStore(initialState: ReaderFeature.State(chapterPath: "/1/1.html")) {
             ReaderFeature()
         } withDependencies: {
             $0.readerLoader.load = loader
             $0.readingProgressStore.markRead = progress
+            $0.chapterCacheStore.cacheCurrentAndFollowing = cache
             $0.paginationService.paginate = { text, config in
                 Paginator(measurer: FakeMeasuring(widthBudget: 10))
                     .paginate(text: text, configuration: config)
@@ -237,6 +239,24 @@ final class ReaderFeatureTests: XCTestCase {
         XCTAssertEqual(records.map(\.path), ["/1/1.html"])
         XCTAssertNotNil(records.first?.date)
     }
+
+    /// 正文加载成功后必须触发当前章与后续章节的自动缓存。
+    func test加载成功触发自动缓存() async {
+        let recorder = CacheRecorder()
+        let store = makeStore(text: Self.sampleText) { _ in
+            Self.sampleText
+        } cache: { path, text, count in
+            await recorder.record(path: path, text: text, count: count)
+        }
+
+        await loadSample(into: store)
+        await store.finish()
+
+        let records = await recorder.allRecords()
+        XCTAssertEqual(records.map(\.path), ["/1/1.html"])
+        XCTAssertEqual(records.first?.text, Self.sampleText)
+        XCTAssertEqual(records.first?.count, 3)
+    }
 }
 
 /// 记录阅读进度调用，供 reducer 测试断言。
@@ -253,6 +273,25 @@ private actor ReadRecorder {
     }
 
     func allRecords() -> [Reading] {
+        records
+    }
+}
+
+/// 记录自动缓存调用，供 reducer 测试断言。
+private actor CacheRecorder {
+    struct Request: Sendable {
+        let path: String
+        let text: String
+        let count: Int
+    }
+
+    private var records: [Request] = []
+
+    func record(path: String, text: String, count: Int) {
+        records.append(Request(path: path, text: text, count: count))
+    }
+
+    func allRecords() -> [Request] {
         records
     }
 }
