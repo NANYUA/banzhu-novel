@@ -29,6 +29,7 @@ struct ReaderView: View {
     @State private var isShowingSearch = false
     @State private var isChromeVisible = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
     init(
@@ -182,7 +183,7 @@ private extension ReaderView {
         }
         .contentShape(Rectangle())
         .animation(
-            configuration.pageTurnMode == .scroll
+            reduceMotion || configuration.pageTurnMode == .scroll
                 ? nil
                 : pageAnimation(for: configuration.pageTurnAnimation),
             value: viewStore.currentPageIndex
@@ -193,7 +194,7 @@ private extension ReaderView {
             viewStore: viewStore,
             availableWidth: availableWidth,
             onCenterTap: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 1)) {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
                     isChromeVisible.toggle()
                 }
             }
@@ -470,6 +471,9 @@ private extension ReaderView {
         for animation: PageTurnAnimation,
         direction: PageTurnDirection
     ) -> AnyTransition {
+        if reduceMotion {
+            return .opacity
+        }
         switch animation {
         case .none:
             .identity
