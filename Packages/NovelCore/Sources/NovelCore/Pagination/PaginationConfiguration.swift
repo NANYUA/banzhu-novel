@@ -5,7 +5,7 @@ import Foundation
 ///
 /// `PaginationConfiguration` 位于纯逻辑层，不能依赖 UIKit / SwiftUI 的颜色类型。
 /// 这里用红绿蓝加透明度四个通道保存，由 App 层负责映射成具体平台颜色。
-public struct ReadingColor: Hashable, Sendable {
+public struct ReadingColor: Hashable, Sendable, Codable {
     public var red: Double
     public var green: Double
     public var blue: Double
@@ -83,7 +83,7 @@ public enum PageTurnAnimation: String, CaseIterable, Hashable, Sendable, Codable
 /// ## 可见性
 /// `public`：`TextKitMeasuring`（NovelPagination 包）要实现分页时需要这些类型，
 /// 跨包可见才能用它。
-public struct PageInset: Equatable, Sendable {
+public struct PageInset: Equatable, Sendable, Codable {
     public var top: CGFloat
     public var leading: CGFloat
     public var bottom: CGFloat

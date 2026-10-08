@@ -114,10 +114,6 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     }
 }
 
-// 纯逻辑层不依赖 UI 框架，颜色/内边距的编解码在这里补上即可。
-extension PageInset: Codable {}
-extension ReadingColor: Codable {}
-
 /// 阅读设置读写依赖。
 ///
 /// 与其它 IO 依赖同理：reducer 不直接碰 `UserDefaults`，
