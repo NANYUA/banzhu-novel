@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import NovelCore
+import NovelEngine
 import SwiftUI
 
 /// 站点入口管理页。
@@ -21,8 +22,19 @@ struct SiteSettingsView: View {
                                 set: { viewStore.send(.setAutoSwitch($0)) }
                             )
                         )
+                        Picker(
+                            "验证触发时机",
+                            selection: Binding(
+                                get: { viewStore.settings.verificationStartTier },
+                                set: { viewStore.send(.setVerificationStartTier($0)) }
+                            )
+                        ) {
+                            Text("第一梯队").tag(VerificationStartTier.first)
+                            Text("第二梯队").tag(VerificationStartTier.second)
+                        }
+                        .pickerStyle(.segmented)
                     } footer: {
-                        Text("当前 host 不可用时，按已保存 host 顺序切换；全部失败后再用导航网址解析新 host。")
+                        Text("第一梯队：当前 host 被盾就验证。第二梯队：先尝试无需验证的 host，再验证。")
                     }
 
                     navigationSection(viewStore)

@@ -45,13 +45,15 @@ public struct SiteSettings: Codable, Equatable, Sendable {
         hosts: [SiteEntry] = [],
         currentNavigationID: UUID? = nil,
         currentHostID: UUID? = nil,
-        autoSwitchHost: Bool = true
+        autoSwitchHost: Bool = true,
+        verificationStartTier: VerificationStartTier = .second
     ) {
         self.navigationURLs = navigationURLs
         self.hosts = hosts
         self.currentNavigationID = currentNavigationID
         self.currentHostID = currentHostID
         self.autoSwitchHost = autoSwitchHost
+        self.verificationStartTier = verificationStartTier
         normalize()
     }
 
@@ -60,6 +62,40 @@ public struct SiteSettings: Codable, Equatable, Sendable {
     public var currentNavigationID: UUID?
     public var currentHostID: UUID?
     public var autoSwitchHost: Bool
+    public var verificationStartTier: VerificationStartTier
+
+    private enum CodingKeys: String, CodingKey {
+        case navigationURLs
+        case hosts
+        case currentNavigationID
+        case currentHostID
+        case autoSwitchHost
+        case verificationStartTier
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        navigationURLs = try container.decodeIfPresent([SiteEntry].self, forKey: .navigationURLs) ?? []
+        hosts = try container.decodeIfPresent([SiteEntry].self, forKey: .hosts) ?? []
+        currentNavigationID = try container.decodeIfPresent(UUID.self, forKey: .currentNavigationID)
+        currentHostID = try container.decodeIfPresent(UUID.self, forKey: .currentHostID)
+        autoSwitchHost = try container.decodeIfPresent(Bool.self, forKey: .autoSwitchHost) ?? true
+        verificationStartTier = try container.decodeIfPresent(
+            VerificationStartTier.self,
+            forKey: .verificationStartTier
+        ) ?? .second
+        normalize()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(navigationURLs, forKey: .navigationURLs)
+        try container.encode(hosts, forKey: .hosts)
+        try container.encodeIfPresent(currentNavigationID, forKey: .currentNavigationID)
+        try container.encodeIfPresent(currentHostID, forKey: .currentHostID)
+        try container.encode(autoSwitchHost, forKey: .autoSwitchHost)
+        try container.encode(verificationStartTier, forKey: .verificationStartTier)
+    }
 
     public var currentNavigationURL: String? {
         navigationURLs.first { $0.id == currentNavigationID }?.value
@@ -91,7 +127,8 @@ public struct SiteSettings: Codable, Equatable, Sendable {
             hosts: hosts,
             currentNavigationID: navigationURLs.first?.id,
             currentHostID: hosts.first?.id,
-            autoSwitchHost: true
+            autoSwitchHost: true,
+            verificationStartTier: .second
         )
     }
 

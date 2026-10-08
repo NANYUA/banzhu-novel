@@ -1,5 +1,13 @@
 import Foundation
 
+/// 验证流程的触发梯队。
+public enum VerificationStartTier: String, Codable, Equatable, Sendable {
+    /// 第一梯队（当前 host）被盾时立即进入验证。
+    case first
+    /// 先试第二梯队中无需验证的 host；都不可用时再进入验证。
+    case second
+}
+
 /// 引擎的站点路由配置。
 ///
 /// `hosts` 与 `navigationURLs` 都只描述同一个站点的入口，不做多站适配。
@@ -7,6 +15,7 @@ public struct SiteRoutingConfiguration: Sendable {
     public var hosts: [String]
     public var navigationURLs: [String]
     public var autoSwitchHost: Bool
+    public var verificationStartTier: VerificationStartTier
     public var currentHost: String?
     public var guardPass: (@Sendable (String) async -> Bool)?
     public var onHostChanged: (@Sendable (String) -> Void)?
@@ -15,6 +24,7 @@ public struct SiteRoutingConfiguration: Sendable {
         hosts: [String] = [],
         navigationURLs: [String] = [],
         autoSwitchHost: Bool = true,
+        verificationStartTier: VerificationStartTier = .second,
         currentHost: String? = nil,
         guardPass: (@Sendable (String) async -> Bool)? = nil,
         onHostChanged: (@Sendable (String) -> Void)? = nil
@@ -22,6 +32,7 @@ public struct SiteRoutingConfiguration: Sendable {
         self.hosts = hosts
         self.navigationURLs = navigationURLs
         self.autoSwitchHost = autoSwitchHost
+        self.verificationStartTier = verificationStartTier
         self.currentHost = currentHost
         self.guardPass = guardPass
         self.onHostChanged = onHostChanged
@@ -37,6 +48,8 @@ public actor NovelEngine {
 
     private var config = SiteConfig.default
     private var routing = SiteRoutingConfiguration()
+    private var unguardedHosts = Set<String>()
+    private var guardedHosts = Set<String>()
     private let net: any NetworkTransport
 
     public init() {
@@ -130,30 +143,38 @@ public actor NovelEngine {
     // MARK: - 路由
 
     private func fetch(path: String, body: String?) async throws -> String {
-        let startingHost = config.host
+        let startingHost = Self.normalizedHost(config.host)
         var attempted = Set<String>()
         var lastError: Error = NetworkError.badResponse
         var guardedHost: String?
-
-        var candidates = [startingHost]
-        if routing.autoSwitchHost {
-            candidates.append(contentsOf: routing.hosts)
-        }
+        var enterGuardImmediately = false
+        let candidates = routing.autoSwitchHost
+            ? orderedCandidates(startingHost: startingHost)
+            : [startingHost]
 
         for candidate in candidates {
             let host = Self.normalizedHost(candidate)
             guard !host.isEmpty, attempted.insert(host).inserted else { continue }
             do {
-                return try await fetchFromHostWithoutGuard(
+                let html = try await fetchFromHostWithoutGuard(
                     host,
                     path: path,
                     body: body,
                     notifyHostChange: true
                 )
+                unguardedHosts.insert(host)
+                guardedHosts.remove(host)
+                return html
             } catch let error as NetworkError {
                 if error.isGuardRequired {
+                    guardedHosts.insert(host)
+                    unguardedHosts.remove(host)
                     if guardedHost == nil {
                         guardedHost = host
+                    }
+                    if routing.verificationStartTier == .first, host == startingHost {
+                        enterGuardImmediately = true
+                        break
                     }
                     continue
                 }
@@ -165,7 +186,7 @@ public actor NovelEngine {
             }
         }
 
-        if routing.autoSwitchHost {
+        if routing.autoSwitchHost, !enterGuardImmediately {
             for navURL in routing.navigationURLs {
                 do {
                     let resolvedHosts = try await resolveCandidatesRaw(
@@ -176,14 +197,19 @@ public actor NovelEngine {
                         let host = Self.normalizedHost(candidate)
                         guard !host.isEmpty, attempted.insert(host).inserted else { continue }
                         do {
-                            return try await fetchFromHostWithoutGuard(
+                            let html = try await fetchFromHostWithoutGuard(
                                 host,
                                 path: path,
                                 body: body,
                                 notifyHostChange: true
                             )
+                            unguardedHosts.insert(host)
+                            guardedHosts.remove(host)
+                            return html
                         } catch let error as NetworkError {
                             if error.isGuardRequired {
+                                guardedHosts.insert(host)
+                                unguardedHosts.remove(host)
                                 if guardedHost == nil {
                                     guardedHost = host
                                 }
@@ -198,8 +224,13 @@ public actor NovelEngine {
                     }
                 } catch let error as NetworkError {
                     if error.isGuardRequired {
-                        if guardedHost == nil {
-                            guardedHost = URL(string: navURL).flatMap(\.host)
+                        if let navHost = URL(string: navURL).flatMap(\.host) {
+                            let host = Self.normalizedHost(navHost)
+                            guardedHosts.insert(host)
+                            unguardedHosts.remove(host)
+                            if guardedHost == nil {
+                                guardedHost = host
+                            }
                         }
                     } else if error.isHostUnavailable {
                         lastError = error
@@ -227,6 +258,24 @@ public actor NovelEngine {
 
         config = SiteConfig(host: startingHost)
         throw lastError
+    }
+
+    private func orderedCandidates(startingHost: String) -> [String] {
+        let hosts = routing.hosts
+            .map(Self.normalizedHost)
+            .filter { !$0.isEmpty }
+        let unguarded = hosts.filter { unguardedHosts.contains($0) }
+        let unknown = hosts.filter {
+            !unguardedHosts.contains($0) && !guardedHosts.contains($0)
+        }
+        let guarded = hosts.filter { guardedHosts.contains($0) }
+
+        var result = [startingHost]
+        var seen = Set([startingHost])
+        for host in unguarded + unknown + guarded where seen.insert(host).inserted {
+            result.append(host)
+        }
+        return result
     }
 
     private func fetchFromHostWithoutGuard(

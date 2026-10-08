@@ -94,6 +94,9 @@ final class SiteFeatureTests: XCTestCase {
         await store.send(.setAutoSwitch(false)) {
             $0.settings.autoSwitchHost = false
         }
+        await store.send(.setVerificationStartTier(.first)) {
+            $0.settings.verificationStartTier = .first
+        }
         await store.finish()
     }
 
@@ -108,6 +111,7 @@ final class SiteFeatureTests: XCTestCase {
         let decoded = try JSONDecoder().decode(SiteSettings.self, from: data)
 
         XCTAssertEqual(decoded, settings)
+        XCTAssertEqual(decoded.verificationStartTier, .second)
         XCTAssertEqual(decoded.currentNavigationURL, "https://nav.example")
         XCTAssertEqual(decoded.currentHost, "https://host.example")
     }

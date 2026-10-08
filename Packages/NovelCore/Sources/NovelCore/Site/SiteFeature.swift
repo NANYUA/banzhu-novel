@@ -33,6 +33,7 @@ public struct SiteFeature: Reducer {
         case deleteHost(UUID)
         case selectHost(UUID)
         case setAutoSwitch(Bool)
+        case setVerificationStartTier(VerificationStartTier)
         case failed(String)
         case noticeDismissed
     }
@@ -109,6 +110,10 @@ public struct SiteFeature: Reducer {
                 state.settings.autoSwitchHost = enabled
                 return configureAndSave(state.settings, store: siteStore, router: siteRouter)
 
+            case let .setVerificationStartTier(tier):
+                state.settings.verificationStartTier = tier
+                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
+
             case let .failed(message):
                 state.isLoading = false
                 state.notice = message
@@ -140,6 +145,7 @@ extension DependencyValues {
                     hosts: settings.hosts.map(\.value),
                     navigationURLs: settings.navigationURLs.map(\.value),
                     autoSwitchHost: settings.autoSwitchHost,
+                    verificationStartTier: settings.verificationStartTier,
                     currentHost: settings.currentHost,
                     guardPass: { url in
                         await GuardCoordinator.shared.requestPass(siteURL: url)

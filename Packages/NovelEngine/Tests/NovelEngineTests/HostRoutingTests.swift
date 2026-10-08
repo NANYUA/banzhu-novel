@@ -15,6 +15,7 @@ final class HostRoutingTests: XCTestCase {
             SiteRoutingConfiguration(
                 hosts: ["https://two.example"],
                 autoSwitchHost: true,
+                verificationStartTier: .second,
                 currentHost: "https://one.example",
                 onHostChanged: { host in
                     changes.record(host)
@@ -90,6 +91,44 @@ final class HostRoutingTests: XCTestCase {
         XCTAssertEqual(passCount, 0)
         let recorded = changes.values()
         XCTAssertEqual(recorded, ["https://two.example"])
+    }
+
+    func test第一梯队触发模式在当前host被盾时立即验证() async throws {
+        let gate = GuardGate()
+        let transport = FakeTransport { url in
+            if url.host == "one.example" {
+                let shouldPass = await gate.consumePass()
+                if !shouldPass {
+                    throw NetworkError.guarded
+                }
+                return "after-guard"
+            }
+            if url.host == "two.example" {
+                return "two-ok"
+            }
+            throw NetworkError.badResponse
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: ["https://two.example"],
+                autoSwitchHost: true,
+                verificationStartTier: .first,
+                currentHost: "https://one.example",
+                guardPass: { _ in
+                    await gate.markPassed()
+                    return true
+                }
+            )
+        )
+
+        let html = try await engine.requestForTesting(path: "/chapter.html")
+
+        XCTAssertEqual(html, "after-guard")
+        let hosts = await transport.requestedHosts()
+        XCTAssertEqual(hosts, ["one.example", "one.example", "one.example"])
+        let passCount = await gate.passCount()
+        XCTAssertEqual(passCount, 1)
     }
 
     func test已保存host全失败后从导航网址解析新host() async throws {
