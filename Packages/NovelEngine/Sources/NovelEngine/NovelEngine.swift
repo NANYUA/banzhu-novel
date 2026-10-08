@@ -270,9 +270,7 @@ public actor NovelEngine {
                     guardedQueue.append(host)
                     if routing.verificationStartTier == .first, host == startingHost {
                         enterGuardImmediately = true
-                        break
                     }
-                    continue
                 }
                 guard error.isHostUnavailable else {
                     config = SiteConfig(host: startingHost)
