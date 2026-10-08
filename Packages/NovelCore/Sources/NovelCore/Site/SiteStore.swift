@@ -87,10 +87,10 @@ public struct SiteSettings: Codable, Equatable, Sendable {
 
     private static func environmentNavigationURLs() -> [String] {
         #if DEBUG
-        if let env = ProcessInfo.processInfo.environment["SITE_NAVIGATION_URLS"],
-           !env.isEmpty
-        {
-            return env.components(separatedBy: ",").filter { !$0.isEmpty }
+        if let env = ProcessInfo.processInfo.environment["SITE_NAVIGATION_URLS"] {
+            if !env.isEmpty {
+                return env.components(separatedBy: ",").filter { !$0.isEmpty }
+            }
         }
         #endif
         return []
