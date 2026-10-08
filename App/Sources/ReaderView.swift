@@ -122,7 +122,9 @@ struct ReaderView: View {
             .preferredColorScheme(viewStore.config.appearanceMode.preferredColorScheme)
         }
     }
+}
 
+private extension ReaderView {
     // MARK: - 内容
 
     @ViewBuilder
@@ -271,10 +273,10 @@ struct ReaderView: View {
         content.gesture(
             SpatialTapGesture()
                 .onEnded { value in
-                    let x = value.location.x
-                    if isCenterTap(x, width: availableWidth) {
+                    let locationX = value.location.x
+                    if isCenterTap(locationX, width: availableWidth) {
                         onCenterTap()
-                    } else if x < availableWidth / 2 {
+                    } else if locationX < availableWidth / 2 {
                         viewStore.send(.prevPage)
                     } else {
                         viewStore.send(.nextPage)
@@ -298,8 +300,8 @@ struct ReaderView: View {
         )
     }
 
-    private func isCenterTap(_ x: CGFloat, width: CGFloat) -> Bool {
-        x >= width / 3 && x <= width * 2 / 3
+    private func isCenterTap(_ locationX: CGFloat, width: CGFloat) -> Bool {
+        locationX >= width / 3 && locationX <= width * 2 / 3
     }
 
     private func readerChrome(

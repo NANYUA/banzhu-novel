@@ -55,7 +55,9 @@ final class HostRoutingTests: XCTestCase {
         let hosts = await transport.requestedHosts()
         XCTAssertEqual(hosts, ["one.example"])
     }
+}
 
+extension HostRoutingTests {
     func test当前host被盾时优先切换未验证host() async throws {
         let gate = GuardGate()
         let changes = HostChangeRecorder()
