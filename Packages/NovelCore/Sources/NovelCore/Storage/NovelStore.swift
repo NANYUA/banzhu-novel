@@ -14,6 +14,9 @@ import SwiftData
 /// 全塞进数据库会让查询、迁移、备份、内存全部变慢。
 /// 只把**文件名**入库、正文存文件，数据库体积就与下载量无关。
 public enum NovelStore {
+    /// 自动缓存默认最多保留 10 本。用户主动下载不计入该上限。
+    static let defaultMaxCachedBooks = 10
+
     /// 数据库 schema —— **新增模型必须登记在这里，漏了会编译报错**
     static let schema = Schema([
         BookRecord.self,
@@ -91,5 +94,36 @@ public enum NovelStore {
     /// 误删用户下载的章节是本项目最严重的潜在事故（docs/03 §1.3）。
     static func deleteChapterText(bookPath: String, number: Int) {
         try? FileManager.default.removeItem(at: chapterFile(bookPath: bookPath, number: number))
+    }
+
+    /// 按书执行 LRU 缓存淘汰，只清除可淘汰的 `.cached` 章节。
+    ///
+    /// 返回实际规划被淘汰的书与章节，便于调用方测试和后续汇报。
+    @discardableResult
+    static func evictCachedChapters(
+        in context: ModelContext,
+        maxCachedBooks: Int = NovelStore.defaultMaxCachedBooks
+    ) throws -> [CacheEvictionPlan] {
+        let books = try context.fetch(FetchDescriptor<BookRecord>())
+        let chapters = try context.fetch(FetchDescriptor<ChapterRecord>())
+        let plans = CacheEvictionPlanner.plan(
+            books: books,
+            chapters: chapters,
+            maxCachedBooks: maxCachedBooks
+        )
+        guard !plans.isEmpty else { return [] }
+
+        let chaptersByID = Dictionary(uniqueKeysWithValues: chapters.map { ($0.id, $0) })
+        for plan in plans {
+            for chapterID in plan.chapterIDs {
+                guard let chapter = chaptersByID[chapterID], chapter.source.isEvictable else {
+                    continue
+                }
+                deleteChapterText(bookPath: chapter.bookPath, number: chapter.number)
+                chapter.source = .notDownloaded
+            }
+        }
+        try context.save()
+        return plans
     }
 }
