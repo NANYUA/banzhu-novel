@@ -126,7 +126,9 @@ final class BookshelfFeatureTests: XCTestCase {
         await store.receive(.groupsLoaded([]))
         await store.finish()
 
-        await store.send(.groupSelected(groupID))
+        await store.send(.groupSelected(groupID)) {
+            $0.selectedGroupID = groupID
+        }
         XCTAssertEqual(store.state.visibleRows.map(\.bookPath), ["/1/"])
     }
 
@@ -154,9 +156,7 @@ final class BookshelfFeatureTests: XCTestCase {
             return group
         }))
 
-        await store.send(.createGroup(" 玄幻 ")) {
-            $0.groupNotice = nil
-        }
+        await store.send(.createGroup(" 玄幻 "))
         await store.receive(.groupCreated(group)) {
             $0.groups = [group]
             $0.selectedGroupID = group.id
@@ -185,9 +185,7 @@ final class BookshelfFeatureTests: XCTestCase {
             })
         )
 
-        await store.send(.renameGroup(groupID, "新名")) {
-            $0.groupNotice = nil
-        }
+        await store.send(.renameGroup(groupID, "新名"))
         await store.receive(.groupRenamed(groupID, "新名")) {
             $0.groups = [Self.makeGroup(id: groupID, name: "新名", sortIndex: 0)]
         }

@@ -205,7 +205,7 @@ public struct BookshelfFeature: Reducer {
                 return .none
 
             case let .assignSelectedBooks(groupID):
-                let paths = Array(state.selectedBookPaths)
+                let paths = state.selectedBookPaths.sorted()
                 guard !paths.isEmpty else { return .none }
                 state.groupNotice = nil
                 return assignSelectedBooks(paths: paths, groupID: groupID, store: shelfGroupStore)
@@ -218,7 +218,7 @@ public struct BookshelfFeature: Reducer {
                 return .none
 
             case .deleteSelectedBooks:
-                let paths = Array(state.selectedBookPaths)
+                let paths = state.selectedBookPaths.sorted()
                 guard !paths.isEmpty else { return .none }
                 state.groupNotice = nil
                 return deleteSelectedBooks(paths: paths, store: shelfGroupStore)
