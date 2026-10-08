@@ -249,6 +249,7 @@ public actor NovelEngine {
         var lastError: Error = NetworkError.badResponse
         var guardedQueue: [String] = []
         var enterGuardImmediately = false
+        var attemptedFirstVerification: String?
         let candidates = routing.autoSwitchHost
             ? orderedCandidates(startingHost: startingHost)
             : [startingHost]
@@ -284,10 +285,24 @@ public actor NovelEngine {
 
         if routing.autoSwitchHost, !enterGuardImmediately {
             let rest = Array(candidates.dropFirst().prefix(6))
-            let probeResults = await probeBatch(rest, path: path, body: body)
+            let firstVerificationHost = guardedQueue.first
+            attemptedFirstVerification = firstVerificationHost
+            let probeTask = Task { await self.probeBatch(rest, path: path, body: body) }
+            let verificationTask: Task<String?, Never>? = firstVerificationHost.map { host in
+                Task {
+                    try? await self.fetchFromHostWithGuard(
+                        host,
+                        path: path,
+                        body: body,
+                        notifyHostChange: true
+                    )
+                }
+            }
+            let probeResults = await probeTask.value
             for (host, result) in probeResults {
                 switch result {
                 case let .success(html):
+                    verificationTask?.cancel()
                     markHost(host, status: .unguarded)
                     routing.onHostChanged?(host)
                     return html
@@ -298,6 +313,19 @@ public actor NovelEngine {
                     markHost(host, status: .unavailable)
                     lastError = NetworkError.badResponse
                 }
+            }
+            if let verificationTask, let html = await verificationTask.value {
+                markHost(firstVerificationHost ?? "", status: .unguarded)
+                return html
+            }
+            if let firstVerificationHost {
+                markHost(
+                    firstVerificationHost,
+                    status: .guarded,
+                    coolingUntil: Date().addingTimeInterval(
+                        TimeInterval(max(routing.hostCooldownSeconds, 60))
+                    )
+                )
             }
         }
 
@@ -353,7 +381,7 @@ public actor NovelEngine {
             }
         }
 
-        for host in guardedQueue.prefix(2) {
+        for host in guardedQueue.prefix(2) where host != attemptedFirstVerification {
             do {
                 let html = try await fetchFromHostWithGuard(
                     host,
