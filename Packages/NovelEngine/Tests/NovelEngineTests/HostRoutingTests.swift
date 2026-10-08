@@ -164,8 +164,8 @@ extension HostRoutingTests {
                 autoSwitchHost: true,
                 currentHost: "https://start.example",
                 hostStates: [
-                    HostRouteState(value: "https://one.example", status: .unavailable),
-                    HostRouteState(value: "https://two.example", status: .unavailable),
+                    HostRouteState(value: "https://one.example", status: .unknown),
+                    HostRouteState(value: "https://two.example", status: .unknown),
                 ]
             )
         )
