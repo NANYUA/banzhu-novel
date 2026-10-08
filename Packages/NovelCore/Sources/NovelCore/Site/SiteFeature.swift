@@ -63,7 +63,7 @@ public struct SiteFeature: Reducer {
                     state.notice = "导航网址不能为空。"
                     return .none
                 }
-                let entry = SiteEntry(value: trimmed)
+                let entry = SiteEntry(value: trimmed, source: .user)
                 state.settings.navigationURLs.append(entry)
                 state.settings.currentNavigationID = entry.id
                 state.settings.normalize()

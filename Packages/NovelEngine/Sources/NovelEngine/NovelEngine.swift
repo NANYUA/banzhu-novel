@@ -134,7 +134,6 @@ public actor NovelEngine {
         var attempted = Set<String>()
         var lastError: Error = NetworkError.badResponse
         var guardedHost: String?
-        var guardedHostIsSaved = true
 
         var candidates = [startingHost]
         if routing.autoSwitchHost {
@@ -155,7 +154,6 @@ public actor NovelEngine {
                 if error.isGuardRequired {
                     if guardedHost == nil {
                         guardedHost = host
-                        guardedHostIsSaved = true
                     }
                     continue
                 }
@@ -182,13 +180,12 @@ public actor NovelEngine {
                                 host,
                                 path: path,
                                 body: body,
-                                notifyHostChange: false
+                                notifyHostChange: true
                             )
                         } catch let error as NetworkError {
                             if error.isGuardRequired {
                                 if guardedHost == nil {
                                     guardedHost = host
-                                    guardedHostIsSaved = false
                                 }
                                 continue
                             }
@@ -203,7 +200,6 @@ public actor NovelEngine {
                     if error.isGuardRequired {
                         if guardedHost == nil {
                             guardedHost = URL(string: navURL).flatMap(\.host)
-                            guardedHostIsSaved = false
                         }
                     } else if error.isHostUnavailable {
                         lastError = error
@@ -221,7 +217,7 @@ public actor NovelEngine {
                     guardedHost,
                     path: path,
                     body: body,
-                    notifyHostChange: guardedHostIsSaved
+                    notifyHostChange: true
                 )
             } catch {
                 config = SiteConfig(host: startingHost)

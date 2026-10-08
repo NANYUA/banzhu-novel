@@ -125,7 +125,7 @@ final class HostRoutingTests: XCTestCase {
         let hosts = await transport.requestedHosts()
         XCTAssertEqual(hosts, ["one.example", "two.example", "nav.example.com", "mirror001.com"])
         let recorded = changes.values()
-        XCTAssertTrue(recorded.isEmpty)
+        XCTAssertEqual(recorded, ["https://mirror001.com"])
     }
 
     func test遇盾通过后重放原请求() async throws {

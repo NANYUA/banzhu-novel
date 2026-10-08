@@ -26,7 +26,7 @@ struct SiteSettingsView: View {
                     }
 
                     navigationSection(viewStore)
-                    hostSection(viewStore)
+                    hostSections(viewStore)
 
                     if let notice = viewStore.notice {
                         Section {
@@ -76,11 +76,12 @@ struct SiteSettingsView: View {
         }
     }
 
-    private func hostSection(
+    @ViewBuilder
+    private func hostSections(
         _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
     ) -> some View {
-        Section("host") {
-            ForEach(viewStore.settings.hosts) { entry in
+        Section("用户添加的 host") {
+            ForEach(viewStore.settings.userHosts) { entry in
                 Button {
                     viewStore.send(.selectHost(entry.id))
                 } label: {
@@ -107,6 +108,34 @@ struct SiteSettingsView: View {
                 }
                 .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+        }
+
+        Section {
+            if viewStore.settings.navigationHosts.isEmpty {
+                Text("暂无导航发现的 host")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(viewStore.settings.navigationHosts) { entry in
+                    Button {
+                        viewStore.send(.selectHost(entry.id))
+                    } label: {
+                        entryRow(
+                            entry,
+                            isSelected: entry.id == viewStore.settings.currentHostID
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions {
+                        Button("删除", role: .destructive) {
+                            viewStore.send(.deleteHost(entry.id))
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("导航发现的 host")
+        } footer: {
+            Text("导航页解析成功后会加入这里，和手动添加的 host 分开保存。")
         }
     }
 

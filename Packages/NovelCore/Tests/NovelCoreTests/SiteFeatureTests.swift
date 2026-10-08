@@ -111,4 +111,31 @@ final class SiteFeatureTests: XCTestCase {
         XCTAssertEqual(decoded.currentNavigationURL, "https://nav.example")
         XCTAssertEqual(decoded.currentHost, "https://host.example")
     }
+
+    func test导航发现的host与用户host分开保存() {
+        var settings = SiteSettings(
+            hosts: [SiteEntry(value: "https://user.example", source: .user)]
+        )
+
+        settings.recordHost("https://nav-one.example")
+        settings.recordHost("https://nav-two.example")
+
+        XCTAssertEqual(settings.userHosts.map(\.value), ["https://user.example"])
+        XCTAssertEqual(
+            settings.navigationHosts.map(\.value),
+            ["https://nav-one.example", "https://nav-two.example"]
+        )
+        XCTAssertEqual(settings.currentHost, "https://nav-two.example")
+    }
+
+    func test旧数据缺失来源时默认归为用户host() throws {
+        let data = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000001","value":"https://legacy.example"}"#
+                .utf8
+        )
+
+        let entry = try JSONDecoder().decode(SiteEntry.self, from: data)
+
+        XCTAssertEqual(entry.source, .user)
+    }
 }

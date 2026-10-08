@@ -4,13 +4,38 @@ import NovelEngine
 
 /// 一个站点入口。导航网址和 host 都是同一站点的入口，不做多站适配。
 public struct SiteEntry: Codable, Equatable, Identifiable, Sendable {
-    public init(id: UUID = UUID(), value: String) {
+    public init(
+        id: UUID = UUID(),
+        value: String,
+        source: SiteEntrySource = .user
+    ) {
         self.id = id
         self.value = value
+        self.source = source
     }
 
     public var id: UUID
     public var value: String
+    public var source: SiteEntrySource
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case value
+        case source
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        value = try container.decode(String.self, forKey: .value)
+        source = try container.decodeIfPresent(SiteEntrySource.self, forKey: .source) ?? .user
+    }
+}
+
+/// 入口来源。导航发现和用户手动添加分开管理。
+public enum SiteEntrySource: String, Codable, Equatable, Sendable {
+    case user
+    case navigation
 }
 
 /// 站点入口设置的持久化快照。
@@ -42,6 +67,14 @@ public struct SiteSettings: Codable, Equatable, Sendable {
 
     public var currentHost: String? {
         hosts.first { $0.id == currentHostID }?.value
+    }
+
+    public var userHosts: [SiteEntry] {
+        hosts.filter { $0.source == .user }
+    }
+
+    public var navigationHosts: [SiteEntry] {
+        hosts.filter { $0.source == .navigation }
     }
 
     /// 首次启动时的默认值：只从已有站点配置和环境变量读取。
@@ -81,7 +114,24 @@ public struct SiteSettings: Codable, Equatable, Sendable {
             guard !value.isEmpty else { return nil }
             let key = value.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             guard seen.insert(key).inserted else { return nil }
-            return SiteEntry(id: entry.id, value: value)
+            return SiteEntry(id: entry.id, value: value, source: entry.source)
+        }
+    }
+
+    public mutating func recordHost(
+        _ rawHost: String,
+        source: SiteEntrySource = .navigation
+    ) {
+        let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return }
+        if let existing = hosts.first(where: {
+            $0.value.caseInsensitiveCompare(host) == .orderedSame
+        }) {
+            currentHostID = existing.id
+        } else {
+            let entry = SiteEntry(value: host, source: source)
+            hosts.append(entry)
+            currentHostID = entry.id
         }
     }
 
@@ -152,18 +202,8 @@ actor SiteStorePersistence {
     }
 
     func recordHost(_ rawHost: String) {
-        let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty else { return }
         var settings = load()
-        if let existing = settings.hosts.first(where: {
-            $0.value.caseInsensitiveCompare(host) == .orderedSame
-        }) {
-            settings.currentHostID = existing.id
-        } else {
-            let entry = SiteEntry(value: host)
-            settings.hosts.append(entry)
-            settings.currentHostID = entry.id
-        }
+        settings.recordHost(rawHost)
         save(settings)
     }
 }
