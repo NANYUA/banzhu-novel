@@ -79,9 +79,7 @@ final class DownloadFeatureRaceTests: DownloadFeatureTestCase {
             $0.notice = "已取消《示例书》的下载。"
         }
         await store.receive(.reload)
-        await store.receive(.loaded([])) {
-            $0.tasks = []
-        }
+        await store.receive(.loaded([]))
 
         await gate.release("正文")
         await store.receive(.downloaderSucceeded(Self.chapterID, "正文")) {
