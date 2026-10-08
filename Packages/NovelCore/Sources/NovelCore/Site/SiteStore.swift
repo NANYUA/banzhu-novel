@@ -150,6 +150,25 @@ public struct SiteEntry: Codable, Equatable, Identifiable, Sendable {
         frozenUntil = try container.decodeIfPresent(Date.self, forKey: .frozenUntil)
         isDisabled = try container.decodeIfPresent(Bool.self, forKey: .isDisabled) ?? false
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(value, forKey: .value)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(originNavigationIDs, forKey: .originNavigationIDs)
+        try container.encode(hostStatus, forKey: .hostStatus)
+        try container.encodeIfPresent(coolingUntil, forKey: .coolingUntil)
+        try container.encodeIfPresent(lastProbedAt, forKey: .lastProbedAt)
+        try container.encodeIfPresent(lastVerifiedAt, forKey: .lastVerifiedAt)
+        try container.encodeIfPresent(lastSucceededAt, forKey: .lastSucceededAt)
+        try container.encode(isStandby, forKey: .isStandby)
+        try container.encode(navigationStatus, forKey: .navigationStatus)
+        try container.encode(consecutiveFailures, forKey: .consecutiveFailures)
+        try container.encodeIfPresent(navigationCoolingUntil, forKey: .navigationCoolingUntil)
+        try container.encodeIfPresent(frozenUntil, forKey: .frozenUntil)
+        try container.encode(isDisabled, forKey: .isDisabled)
+    }
 }
 
 /// 站点入口设置的持久化快照。
