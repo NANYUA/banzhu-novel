@@ -51,6 +51,10 @@ let package = Package(
                 "NovelCore",
                 // 测试要用 TestStore / withDependencies，就必须能 import ComposableArchitecture
                 .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
+                // 下载队列测试要构造**真实的** NetworkError（盾 / 403），
+                // 才能验证分类函数把二者分别映射成「自动暂停」和「不重试」。
+                // 方向仍是 NovelCore → NovelEngine，没有反向依赖。
+                .product(name: "NovelEngine", package: "NovelEngine"),
             ],
             path: "Tests/NovelCoreTests"
         ),

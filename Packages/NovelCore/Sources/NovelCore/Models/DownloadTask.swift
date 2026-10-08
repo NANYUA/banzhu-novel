@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 /// 下载任务状态。
-enum DownloadState: String, Codable, CaseIterable {
+public enum DownloadState: String, Codable, CaseIterable, Sendable {
     /// 已入队等待
     case queued
     /// 正在抓取
@@ -14,26 +14,25 @@ enum DownloadState: String, Codable, CaseIterable {
     /// 失败（可单独重试）
     case failed
 
-    var isFinished: Bool {
+    public var isFinished: Bool {
         self == .done
     }
 
     /// 是否还占用队列（决定它排在前面还是后面）
-    var isActive: Bool {
+    public var isActive: Bool {
         self == .queued || self == .downloading
     }
 }
 
 /// 单个章节的下载任务。
 ///
-/// ## 🔴 为什么要落库，而不是只放内存
-/// 需求明确：**保守速率下 5 本 × 200 章 ≈ 27 小时**。
-/// 27 小时里 App 必然被息屏、切后台、断网、甚至被系统杀进程。
-/// 队列若只活在内存，App 一重启就全丢，用户会以为「App 坏了」。
+/// ## 为什么要落库，而不是只放内存
+/// 保守速率下批量下载会持续很久，App 可能被息屏、切后台、断网甚至被杀进程，
+/// 队列只放内存会在重启后全部丢失。
 ///
-/// 另有一处必须记住：需求要求「**遇盾 / 403 自动暂停，不重试**」。
-/// 引擎旧代码是「失败重试 3 次」——**在盾页上反复重试恰恰是最招封禁的行为**。
-/// 故 `attempts` 只在**非盾类**失败时递增。
+/// ## 遇到验证拦截时为什么不能重试
+/// 遇到验证拦截时继续重试只会让情况更糟，因此 `attempts` 只在普通网络失败时递增，
+/// 拦截导致的是「暂停」而不是「重试」。
 @Model
 final class DownloadTask {
     /// 复合主键：`bookPath#chapterPath`
@@ -47,12 +46,12 @@ final class DownloadTask {
 
     var stateRaw: String
 
-    /// 已重试次数。**遇盾导致的暂停不计入**（停下不是重试）
+    /// 已重试次数。拦截导致的暂停不计入。
     var attempts: Int = 0
 
     var lastError: String?
 
-    /// 遇到盾 / 403 时置 true，UI 提示「已暂停，可能需要过验证」
+    /// 遇到验证拦截或 403 时置 true，界面据此提示用户需要处理验证。
     var blockedByGuard: Bool = false
 
     var createdAt: Date
@@ -63,9 +62,8 @@ final class DownloadTask {
         chapterName: String, chapterNumber: Int,
         state: DownloadState = .queued, createdAt: Date = Date()
     ) {
-        // ⚠️ 这里必须写 self.：本类是 SwiftData @Model，init 的形参与属性**同名**，
-        // 去掉 self. 会退化成「形参赋给形参」，属性实际根本没被赋值。
-        // 用内联指令豁免 SwiftFormat 的 redundantSelf 规则——这不是风格问题，是正确性问题。
+        // 本类是 SwiftData @Model，init 形参与属性同名；必须写 self.，
+        // 否则会退化成「形参赋给形参」，属性实际没有被赋值。
         // swiftformat:disable redundantSelf
         self.id = Self.makeId(bookPath: bookPath, chapterPath: chapterPath)
         self.bookPath = bookPath
@@ -95,14 +93,27 @@ final class DownloadTask {
         blockedByGuard = false
     }
 
-    /// 🔴 遇盾 / 403：**暂停，不重试**（停下不是重试，故不递增 attempts）
+    /// 开始抓取
+    func markDownloading() {
+        state = .downloading
+        finishedAt = nil
+    }
+
+    /// 用户主动暂停
+    func pauseByUser() {
+        state = .paused
+        blockedByGuard = false
+        lastError = nil
+    }
+
+    /// 遇到验证拦截 / 403：暂停，不重试（停下不是重试，故不递增 attempts）。
     func pauseBlocked(error: String) {
         state = .paused
         blockedByGuard = true
         lastError = error
     }
 
-    /// 普通失败（网络抖动、超时等）：计入重试次数
+    /// 普通失败（网络抖动、超时等）：计入重试次数。
     func markFailed(error: String) {
         state = .failed
         blockedByGuard = false
@@ -110,7 +121,7 @@ final class DownloadTask {
         attempts += 1
     }
 
-    /// 重新入队（只重试这一项）
+    /// 重新入队（只重试这一项）。
     func requeue() {
         state = .queued
         lastError = nil

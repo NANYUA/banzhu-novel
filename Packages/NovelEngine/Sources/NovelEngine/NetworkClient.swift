@@ -3,6 +3,7 @@ import Foundation
 /// 网络错误
 public enum NetworkError: LocalizedError {
     case guarded          // 被人机验证盾拦截
+    case httpStatus(Int)  // 明确的 HTTP 错误状态（如 403）
     case badResponse
     case decodeFailed
     case transport(any Error)
@@ -10,10 +11,25 @@ public enum NetworkError: LocalizedError {
     /// SwiftPM 拆包后：`LocalizedError` 的协议要求必须 public，否则外层包拿不到错误文案
     public var errorDescription: String? {
         switch self {
-        case .guarded:      return "需要人机验证，请完成验证后重试。"
-        case .badResponse:  return "服务器响应异常。"
-        case .decodeFailed: return "内容解码失败。"
-        case .transport(let e): return "网络错误：\(e.localizedDescription)"
+        case .guarded:            return "需要人机验证，请完成验证后重试。"
+        case .httpStatus(let code): return "服务器返回错误（HTTP \(code)）。"
+        case .badResponse:        return "服务器响应异常。"
+        case .decodeFailed:       return "内容解码失败。"
+        case .transport(let e):   return "网络错误：\(e.localizedDescription)"
+        }
+    }
+
+    /// 是否应让调用方再次重试。
+    ///
+    /// 盾与明确的 HTTP 状态错误都不重试：前者需要用户去处理验证，
+    /// 后者是服务器已经给出决定（如 403），继续重试只会加剧风险。
+    /// 解码失败和传输层抖动属瞬时问题，交由上层重试。
+    public var shouldRetry: Bool {
+        switch self {
+        case .guarded, .httpStatus:
+            return false
+        case .badResponse, .decodeFailed, .transport:
+            return true
         }
     }
 }
@@ -86,9 +102,13 @@ actor NetworkClient {
                 let tag = body == nil ? "GET" : "POST"
                 EngineLog.log(.info, tag, "\(url.absoluteString)\(body.map { " body=\($0)" } ?? "")")
                 let (data, response) = try await session.data(for: req)
-                guard let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) else {
-                    EngineLog.log(.error, tag, "HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) \(url.absoluteString)")
+                guard let http = response as? HTTPURLResponse else {
+                    EngineLog.log(.error, tag, "非 HTTP 响应 \(url.absoluteString)")
                     throw NetworkError.badResponse
+                }
+                guard (200..<400).contains(http.statusCode) else {
+                    EngineLog.log(.error, tag, "HTTP \(http.statusCode) \(url.absoluteString)")
+                    throw NetworkError.httpStatus(http.statusCode)
                 }
                 let html = GBK.decode(data)
                 if isGuarded(html) {
@@ -98,7 +118,9 @@ actor NetworkClient {
                 EngineLog.log(.info, tag, "HTTP \(http.statusCode) · \(html.count) 字节 · \(url.absoluteString)")
                 return html
             } catch let e as NetworkError {
-                if case .guarded = e { throw e }   // 盾不重试，直接上报让用户去过验证
+                // 盾与明确的 HTTP 状态错误不重试，直接上报；
+                // 否则 403 会被重试 3 次，正好撞在站方防护上。
+                if !e.shouldRetry { throw e }
                 lastError = e
             } catch {
                 lastError = NetworkError.transport(error)
