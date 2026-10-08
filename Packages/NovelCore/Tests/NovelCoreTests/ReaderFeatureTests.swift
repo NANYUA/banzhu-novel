@@ -296,11 +296,13 @@ final class ReaderFeatureTests: XCTestCase {
             pageTurnMode: .tap,
             precacheCount: 5
         )
-        let store = makeStore(text: Self.sampleText) { _ in
-            Self.sampleText
-        } settingsStore: ReadingSettingsStore(
-            load: { saved },
-            save: { _ in }
+        let store = makeStore(
+            text: Self.sampleText,
+            loader: { _ in Self.sampleText },
+            settingsStore: ReadingSettingsStore(
+                load: { saved },
+                save: { _ in }
+            )
         )
 
         await loadSample(into: store)
@@ -320,9 +322,13 @@ final class ReaderFeatureTests: XCTestCase {
 
     /// 没有持久化设置时保持默认配置，不产生恢复动作。
     func test无保存设置保持默认() async {
-        let store = makeStore(text: "") { _ in "" } settingsStore: ReadingSettingsStore(
-            load: { nil },
-            save: { _ in }
+        let store = makeStore(
+            text: "",
+            loader: { _ in "" },
+            settingsStore: ReadingSettingsStore(
+                load: { nil },
+                save: { _ in }
+            )
         )
 
         await store.send(.loadSavedSettings(CGSize(width: 400, height: 600)))
