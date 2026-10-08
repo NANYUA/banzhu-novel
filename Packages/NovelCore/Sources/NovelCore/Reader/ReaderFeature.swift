@@ -92,6 +92,7 @@ public struct ReaderFeature: Reducer {
 
     @Dependency(\.readerLoader) var readerLoader
     @Dependency(\.paginationService) var paginationService
+    @Dependency(\.readingProgressStore) var readingProgressStore
 
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -119,7 +120,12 @@ public struct ReaderFeature: Reducer {
                 // 内容变化 → 重新分页
                 state.pages = paginationService.paginate(text, state.config)
                 state.currentOffset = 0
-                return .none
+                let chapterPath = state.chapterPath
+                let progressStore = readingProgressStore
+                return .run { _ in
+                    // 进度写入失败不应阻断阅读；书架排序与 LRU 会在下次成功时刷新。
+                    try? await progressStore.markRead(chapterPath, Date())
+                }
 
             case let .loadFailed(message):
                 state.isLoading = false

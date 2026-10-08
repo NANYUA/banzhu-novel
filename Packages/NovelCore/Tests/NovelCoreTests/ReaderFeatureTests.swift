@@ -14,12 +14,14 @@ final class ReaderFeatureTests: XCTestCase {
 
     private func makeStore(
         text: String,
-        loader: @escaping @Sendable (String) async throws -> String
+        loader: @escaping @Sendable (String) async throws -> String,
+        progress: @escaping @Sendable (String, Date) async throws -> Void = { _, _ in }
     ) -> TestStore<ReaderFeature.State, ReaderFeature.Action> {
         TestStore(initialState: ReaderFeature.State(chapterPath: "/1/1.html")) {
             ReaderFeature()
         } withDependencies: {
             $0.readerLoader.load = loader
+            $0.readingProgressStore.markRead = progress
             $0.paginationService.paginate = { text, config in
                 Paginator(measurer: FakeMeasuring(widthBudget: 10))
                     .paginate(text: text, configuration: config)
@@ -217,5 +219,40 @@ final class ReaderFeatureTests: XCTestCase {
         await store.finish()
         XCTAssertTrue(store.state.pages.isEmpty)
         XCTAssertEqual(store.state.currentOffset, 0)
+    }
+
+    /// 内容加载成功后必须写入阅读进度，供书架排序与 LRU 淘汰使用。
+    func test加载成功写入阅读进度() async {
+        let recorder = ReadRecorder()
+        let store = makeStore(text: Self.sampleText) { _ in
+            Self.sampleText
+        } progress: { path, date in
+            await recorder.record(path: path, date: date)
+        }
+
+        await loadSample(into: store)
+        await store.finish()
+
+        let records = await recorder.allRecords()
+        XCTAssertEqual(records.map(\.path), ["/1/1.html"])
+        XCTAssertNotNil(records.first?.date)
+    }
+}
+
+/// 记录阅读进度调用，供 reducer 测试断言。
+private actor ReadRecorder {
+    struct Reading: Sendable {
+        let path: String
+        let date: Date
+    }
+
+    private var records: [Reading] = []
+
+    func record(path: String, date: Date) {
+        records.append(Reading(path: path, date: date))
+    }
+
+    func allRecords() -> [Reading] {
+        records
     }
 }
