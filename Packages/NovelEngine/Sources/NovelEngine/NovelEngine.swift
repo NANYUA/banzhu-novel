@@ -246,7 +246,6 @@ public actor NovelEngine {
 
     private func fetch(path: String, body: String?) async throws -> String {
         let startingHost = Self.normalizedHost(config.host)
-        var attempted = Set<String>()
         var lastError: Error = NetworkError.badResponse
         var guardedQueue: [String] = []
         var enterGuardImmediately = false
@@ -254,10 +253,8 @@ public actor NovelEngine {
             ? orderedCandidates(startingHost: startingHost)
             : [startingHost]
 
-        for candidate in candidates.prefix(6) {
-            let host = Self.normalizedHost(candidate)
-            guard !host.isEmpty, attempted.insert(host).inserted else { continue }
-            guard !isCooling(host) else { continue }
+        if let first = candidates.first {
+            let host = Self.normalizedHost(first)
             do {
                 let html = try await fetchFromHostWithoutGuard(
                     host,
@@ -286,6 +283,25 @@ public actor NovelEngine {
             }
         }
 
+        if routing.autoSwitchHost, !enterGuardImmediately {
+            let rest = Array(candidates.dropFirst().prefix(6))
+            let probeResults = await probeBatch(rest, path: path, body: body)
+            for (host, result) in probeResults {
+                switch result {
+                case let .success(html):
+                    markHost(host, status: .unguarded)
+                    routing.onHostChanged?(host)
+                    return html
+                case .guarded:
+                    markHost(host, status: .guarded)
+                    guardedQueue.append(host)
+                case .unavailable:
+                    markHost(host, status: .unavailable)
+                    lastError = NetworkError.badResponse
+                }
+            }
+        }
+
         if routing.autoSwitchHost,
            !enterGuardImmediately,
            shouldAutoFetchNavigation()
@@ -298,39 +314,28 @@ public actor NovelEngine {
                         fromNav: navURL,
                         allowGuard: false
                     )
+                    navigationRouteStates[navURL] = .active
                     routing.onNavigationOutcome?(navURL, .success)
-                    for candidate in resolvedHosts.prefix(6) {
-                        let host = Self.normalizedHost(candidate)
-                        guard !host.isEmpty,
-                              !isCooling(host),
-                              attempted.insert(host).inserted
-                        else {
-                            continue
-                        }
-                        do {
-                            let html = try await fetchFromHostWithoutGuard(
-                                host,
-                                path: path,
-                                body: body,
-                                notifyHostChange: true
-                            )
+                    let hosts = resolvedHosts
+                        .map(Self.normalizedHost)
+                        .filter { !$0.isEmpty && !isCooling($0) }
+                    let probeResults = await probeBatch(hosts, path: path, body: body)
+                    for (host, result) in probeResults {
+                        switch result {
+                        case let .success(html):
                             markHost(host, status: .unguarded)
+                            routing.onHostChanged?(host)
                             return html
-                        } catch let error as NetworkError {
-                            if error.isGuardRequired {
-                                markHost(host, status: .guarded)
-                                guardedQueue.append(host)
-                                continue
-                            }
-                            guard error.isHostUnavailable else {
-                                config = SiteConfig(host: startingHost)
-                                throw error
-                            }
+                        case .guarded:
+                            markHost(host, status: .guarded)
+                            guardedQueue.append(host)
+                        case .unavailable:
                             markHost(host, status: .unavailable)
-                            lastError = error
+                            lastError = NetworkError.badResponse
                         }
                     }
                 } catch let error as NetworkError {
+                    navigationRouteStates[navURL] = .cooling
                     routing.onNavigationOutcome?(navURL, .failure)
                     if error.isGuardRequired {
                         if let navHost = URL(string: navURL).flatMap(\.host) {
@@ -372,6 +377,62 @@ public actor NovelEngine {
 
         config = SiteConfig(host: startingHost)
         throw lastError
+    }
+
+    private enum ProbeResult: Sendable {
+        case success(String)
+        case guarded
+        case unavailable
+    }
+
+    private func probeBatch(
+        _ hosts: [String],
+        path: String,
+        body: String?
+    ) async -> [(String, ProbeResult)] {
+        var results: [(String, ProbeResult)] = []
+        var index = 0
+        while index < hosts.count {
+            let end = min(index + 3, hosts.count)
+            let batch = Array(hosts[index..<end])
+            let batchResults = await withTaskGroup(
+                of: (String, ProbeResult).self,
+                returning: [(String, ProbeResult)].self
+            ) { group in
+                for host in batch {
+                    group.addTask {
+                        (host, await self.probe(host, path: path, body: body))
+                    }
+                }
+                var collected: [(String, ProbeResult)] = []
+                for await result in group {
+                    collected.append(result)
+                }
+                return collected
+            }
+            results.append(contentsOf: batchResults)
+            if batchResults.contains(where: {
+                if case .success = $0.1 { return true }
+                return false
+            }) {
+                break
+            }
+            index = end
+        }
+        return results
+    }
+
+    private func probe(_ host: String, path: String, body: String?) async -> ProbeResult {
+        guard let url = SiteConfig(host: host).url(path) else {
+            return .unavailable
+        }
+        do {
+            return .success(try await perform(url: url, body: body))
+        } catch let error as NetworkError {
+            return error.isGuardRequired ? .guarded : .unavailable
+        } catch {
+            return .unavailable
+        }
     }
 
     private func orderedCandidates(startingHost: String) -> [String] {
