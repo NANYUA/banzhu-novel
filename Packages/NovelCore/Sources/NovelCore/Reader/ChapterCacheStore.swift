@@ -70,8 +70,7 @@ enum ChapterCacheStoreLive {
             chapterPath: chapterPath,
             currentText: currentText,
             followingCount: followingCount,
-            in: context,
-            intervalNanoseconds: defaultRequestIntervalNanoseconds
+            in: context
         ) { path in
             try await NovelEngine.shared.content(chapterPath: path)
         }
@@ -83,7 +82,6 @@ enum ChapterCacheStoreLive {
         currentText: String,
         followingCount: Int,
         in context: ModelContext,
-        intervalNanoseconds: UInt64,
         load: (String) async throws -> String
     ) async {
         let chapters = (try? context.fetch(FetchDescriptor<ChapterRecord>())) ?? []
@@ -98,8 +96,8 @@ enum ChapterCacheStoreLive {
         )
 
         for (index, chapter) in candidates.enumerated() {
-            if index > 0, intervalNanoseconds > 0 {
-                try? await Task.sleep(nanoseconds: intervalNanoseconds)
+            if index > 0 {
+                try? await Task.sleep(nanoseconds: defaultRequestIntervalNanoseconds)
             }
             do {
                 let text = try await load(chapter.path)

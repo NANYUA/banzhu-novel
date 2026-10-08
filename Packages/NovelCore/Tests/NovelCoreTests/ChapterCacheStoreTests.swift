@@ -48,8 +48,7 @@ final class ChapterCacheStoreTests: XCTestCase {
             chapterPath: chapter1.path,
             currentText: "当前章正文",
             followingCount: 3,
-            in: context,
-            intervalNanoseconds: 0
+            in: context
         ) { path in
             await recorder.record(path)
             return "正文：\(path)"
@@ -93,8 +92,7 @@ final class ChapterCacheStoreTests: XCTestCase {
             chapterPath: chapter.path,
             currentText: "当前章正文",
             followingCount: 0,
-            in: context,
-            intervalNanoseconds: 0
+            in: context
         ) { path in
             XCTFail("预缓存数量为零时不应请求 \(path)")
             return ""
