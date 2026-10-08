@@ -135,13 +135,10 @@ actor SiteStorePersistence {
         if let cached {
             return cached
         }
-        let settings: SiteSettings = if let data = UserDefaults.standard.data(forKey: storageKey),
-                                        let decoded = try? JSONDecoder().decode(SiteSettings.self, from: data)
-        {
-            decoded
-        } else {
-            .default
+        let decoded = UserDefaults.standard.data(forKey: storageKey).flatMap {
+            try? JSONDecoder().decode(SiteSettings.self, from: $0)
         }
+        let settings: SiteSettings = decoded ?? .default
         cached = settings
         return settings
     }
