@@ -28,7 +28,11 @@ final class DownloadFeatureRaceTests: DownloadFeatureTestCase {
         let queue = InMemoryDownloadQueueStore()
         let gate = DownloadGate()
         let store = makeStore(
-            initialState: DownloadFeature.State(allowsCellular: true, speed: .fast),
+            initialState: DownloadFeature.State(
+                allowsCellular: true,
+                speed: .fast,
+                networkKind: .wifi
+            ),
             queue: queue,
             gate: gate
         )
@@ -62,7 +66,11 @@ final class DownloadFeatureRaceTests: DownloadFeatureTestCase {
         let queue = InMemoryDownloadQueueStore()
         let gate = DownloadGate()
         let store = makeStore(
-            initialState: DownloadFeature.State(allowsCellular: true, speed: .fast),
+            initialState: DownloadFeature.State(
+                allowsCellular: true,
+                speed: .fast,
+                networkKind: .wifi
+            ),
             queue: queue,
             gate: gate
         )

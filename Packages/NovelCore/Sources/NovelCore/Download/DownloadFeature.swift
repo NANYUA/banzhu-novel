@@ -95,6 +95,8 @@ public struct DownloadFeature: Reducer {
         case cancelBook(String)
         /// 开关 WiFi 门控。
         case setAllowsCellular(Bool)
+        /// 系统网络状态变化。
+        case networkChanged(DownloadNetworkKind)
         /// 切换速率档位。
         case setSpeed(DownloadSpeed)
         /// 只重试失败的任务。
@@ -119,19 +121,25 @@ public struct DownloadFeature: Reducer {
 
     @Dependency(\.downloadQueueStore) var queue
     @Dependency(\.chapterDownloader) var downloader
+    @Dependency(\.downloadNetworkMonitor) var networkMonitor
 
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
-            case .task, .reload:
-                let store = queue
-                return .run { send in
-                    do {
-                        try await send(.loaded(store.load()))
-                    } catch {
-                        await send(.storeFailed(error.localizedDescription))
+            case .task:
+                let loadEffect = loadQueue(queue)
+                guard !state.isObservingNetwork else { return loadEffect }
+                state.isObservingNetwork = true
+                let monitor = networkMonitor
+                let monitorEffect = Effect<Action>.run { send in
+                    for await kind in monitor.updates() {
+                        await send(.networkChanged(kind))
                     }
                 }
+                return .merge(loadEffect, monitorEffect)
+
+            case .reload:
+                return loadQueue(queue)
 
             case let .loaded(tasks):
                 state.tasks = normalize(tasks)
@@ -206,9 +214,14 @@ public struct DownloadFeature: Reducer {
 
             case let .setAllowsCellular(enabled):
                 state.allowsCellular = enabled
-                if enabled == false, state.currentTask != nil || state.queuedCount > 0 {
+                if enabled == false, state.networkKind == .cellular, state.hasAutoWork {
                     state.notice = "当前仅在 WiFi 下下载。"
                 }
+                return startNextTask(state: &state, queue: queue, downloader: downloader)
+
+            case let .networkChanged(kind):
+                state.networkKind = kind
+                updateNetworkNotice(state: &state)
                 return startNextTask(state: &state, queue: queue, downloader: downloader)
 
             case let .setSpeed(speed):
@@ -312,6 +325,7 @@ public extension DownloadFeature {
             isPaused: Bool = false,
             allowsCellular: Bool = false,
             speed: DownloadSpeed = .conservative,
+            networkKind: DownloadNetworkKind = .unknown,
             isDownloading: Bool = false,
             notice: String? = nil
         ) {
@@ -319,6 +333,7 @@ public extension DownloadFeature {
             self.isPaused = isPaused
             self.allowsCellular = allowsCellular
             self.speed = speed
+            self.networkKind = networkKind
             self.isDownloading = isDownloading
             self.notice = notice
         }
@@ -334,6 +349,12 @@ public extension DownloadFeature {
 
         /// 速率档位；默认保守档。
         public var speed: DownloadSpeed = .conservative
+
+        /// 系统当前网络类型。
+        public var networkKind: DownloadNetworkKind = .unknown
+
+        /// 是否已经监听系统网络变化，防止多个视图重复启动监听。
+        var isObservingNetwork = false
 
         /// 当前是否有下载 Effect 在跑。
         public var isDownloading = false
@@ -386,7 +407,38 @@ public extension DownloadFeature {
 
 /// 是否允许启动下一章：未暂停、允许当前网络、且没有在跑的下载。
 private func shouldRun(_ state: DownloadFeature.State) -> Bool {
-    !state.isPaused && state.allowsCellular && !state.isDownloading
+    !state.isPaused
+        && !state.isDownloading
+        && state.networkKind.permitsDownload(allowingCellular: state.allowsCellular)
+}
+
+/// 网络状态变化时更新用户提示。
+private func updateNetworkNotice(state: inout DownloadFeature.State) {
+    switch state.networkKind {
+    case .offline where state.hasAutoWork:
+        state.notice = "网络不可用，联网后会自动继续。"
+    case .cellular where state.hasAutoWork && !state.allowsCellular:
+        state.notice = "当前为蜂窝网络，已等待 WiFi。"
+    case .unknown:
+        break
+    default:
+        if state.notice == "网络不可用，联网后会自动继续。"
+            || state.notice == "当前为蜂窝网络，已等待 WiFi。"
+        {
+            state.notice = nil
+        }
+    }
+}
+
+/// 读取持久化队列。
+private func loadQueue(_ store: DownloadQueueStore) -> Effect<DownloadFeature.Action> {
+    .run { send in
+        do {
+            try await send(.loaded(store.load()))
+        } catch {
+            await send(.storeFailed(error.localizedDescription))
+        }
+    }
 }
 
 /// 把重启后残留的「下载中」任务恢复为「排队中」。

@@ -25,6 +25,7 @@ import SwiftUI
 /// ```
 struct BookshelfView: View {
     let store: StoreOf<BookshelfFeature>
+    let downloadStore: StoreOf<DownloadFeature>
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -61,7 +62,8 @@ struct BookshelfView: View {
                                         )
                                     ) {
                                         ChapterListFeature()
-                                    }
+                                    },
+                                    downloadStore: downloadStore
                                 )
                             } label: {
                                 BookRow(row: row)
@@ -188,5 +190,8 @@ private struct BookRow: View {
     )) {
         BookshelfFeature()
     }
-    BookshelfView(store: store)
+    let downloadStore = Store(initialState: DownloadFeature.State()) {
+        DownloadFeature()
+    }
+    BookshelfView(store: store, downloadStore: downloadStore)
 }

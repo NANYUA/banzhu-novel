@@ -10,7 +10,11 @@ final class DownloadFeatureTests: DownloadFeatureTestCase {
         let queue = InMemoryDownloadQueueStore()
         let gate = DownloadGate()
         let store = makeStore(
-            initialState: DownloadFeature.State(allowsCellular: true, speed: .fast),
+            initialState: DownloadFeature.State(
+                allowsCellular: true,
+                speed: .fast,
+                networkKind: .wifi
+            ),
             queue: queue,
             gate: gate
         )
@@ -46,7 +50,11 @@ final class DownloadFeatureTests: DownloadFeatureTestCase {
         let queue = InMemoryDownloadQueueStore()
         let gate = DownloadGate()
         let store = makeStore(
-            initialState: DownloadFeature.State(allowsCellular: false, speed: .fast),
+            initialState: DownloadFeature.State(
+                allowsCellular: false,
+                speed: .fast,
+                networkKind: .cellular
+            ),
             queue: queue,
             gate: gate
         )
@@ -60,6 +68,40 @@ final class DownloadFeatureTests: DownloadFeatureTestCase {
         let started = await gate.hasStarted()
         XCTAssertFalse(started)
         XCTAssertFalse(store.state.isDownloading)
+        await store.finish()
+    }
+
+    func test网络切换到WiFi后自动开始下载() async {
+        let queued = snapshot(state: .queued)
+        let queue = InMemoryDownloadQueueStore(initialTasks: [queued])
+        let gate = DownloadGate()
+        let store = makeStore(
+            initialState: DownloadFeature.State(
+                tasks: [queued],
+                allowsCellular: false,
+                speed: .fast,
+                networkKind: .cellular
+            ),
+            queue: queue,
+            gate: gate
+        )
+
+        await store.send(.networkChanged(.wifi)) {
+            $0.networkKind = .wifi
+            $0.tasks = [self.snapshot(state: .downloading)]
+            $0.isDownloading = true
+        }
+        await gate.waitUntilStarted()
+        await gate.release("正文")
+        await store.receive(.downloaderSucceeded(Self.chapterID, "正文")) {
+            $0.isDownloading = false
+        }
+        await store.receive(.reload)
+
+        let done = snapshot(state: .done)
+        await store.receive(.loaded([done])) {
+            $0.tasks = [done]
+        }
         await store.finish()
     }
 
@@ -102,6 +144,7 @@ final class DownloadFeatureTests: DownloadFeatureTestCase {
                 tasks: [downloading],
                 allowsCellular: true,
                 speed: .fast,
+                networkKind: .wifi,
                 isDownloading: true
             ),
             queue: queue
@@ -126,6 +169,7 @@ final class DownloadFeatureTests: DownloadFeatureTestCase {
                 tasks: [downloading],
                 allowsCellular: true,
                 speed: .fast,
+                networkKind: .wifi,
                 isDownloading: true
             ),
             queue: queue
@@ -159,6 +203,7 @@ final class DownloadFeatureTests: DownloadFeatureTestCase {
                 tasks: [downloading],
                 allowsCellular: true,
                 speed: .fast,
+                networkKind: .wifi,
                 isDownloading: true
             ),
             queue: queue

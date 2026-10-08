@@ -4,7 +4,7 @@ import SwiftUI
 
 /// App 入口界面。
 ///
-/// 当前提供书架与搜索两个入口，搜索加书成功后即时同步书架状态。
+/// 当前提供书架、搜索与下载三个入口，搜索加书成功后即时同步书架状态。
 struct RootView: View {
     @State private var bookshelfStore = Store(initialState: BookshelfFeature.State()) {
         BookshelfFeature()
@@ -14,9 +14,13 @@ struct RootView: View {
         SearchFeature()
     }
 
+    @State private var downloadStore = Store(initialState: DownloadFeature.State()) {
+        DownloadFeature()
+    }
+
     var body: some View {
         TabView {
-            BookshelfView(store: bookshelfStore)
+            BookshelfView(store: bookshelfStore, downloadStore: downloadStore)
                 .tabItem {
                     Label("书架", systemImage: "books.vertical")
                 }
@@ -27,6 +31,14 @@ struct RootView: View {
             .tabItem {
                 Label("搜索", systemImage: "magnifyingglass")
             }
+
+            DownloadQueueView(store: downloadStore)
+                .tabItem {
+                    Label("下载", systemImage: "arrow.down.circle")
+                }
+        }
+        .task {
+            downloadStore.send(.task)
         }
     }
 }

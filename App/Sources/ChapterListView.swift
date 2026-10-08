@@ -11,6 +11,7 @@ import SwiftUI
 /// 数据来自本地目录快照（SwiftData），完全离线可用。
 struct ChapterListView: View {
     let store: StoreOf<ChapterListFeature>
+    let downloadStore: StoreOf<DownloadFeature>
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -28,18 +29,91 @@ struct ChapterListView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(viewStore.chapters) { chapter in
-                        NavigationLink {
-                            ReaderView(chapterPath: chapter.path)
-                        } label: {
-                            ChapterRow(chapter: chapter)
+                        HStack(spacing: 10) {
+                            Button {
+                                downloadStore.send(.enqueue([
+                                    request(
+                                        for: chapter,
+                                        bookPath: viewStore.bookPath,
+                                        bookTitle: viewStore.bookTitle
+                                    ),
+                                ]))
+                            } label: {
+                                Image(systemName: chapter.isDownloaded
+                                    ? "checkmark.circle.fill"
+                                    : "arrow.down.circle")
+                                    .font(.title3)
+                                    .foregroundStyle(chapter.isDownloaded ? .green : .blue)
+                                    .frame(width: 32, height: 44)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(chapter.isDownloaded)
+                            .accessibilityLabel(chapter.isDownloaded ? "已下载" : "下载本章")
+
+                            NavigationLink {
+                                ReaderView(chapterPath: chapter.path)
+                            } label: {
+                                ChapterRow(chapter: chapter)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if !chapter.isDownloaded {
+                                Button {
+                                    downloadStore.send(.enqueue([
+                                        request(
+                                            for: chapter,
+                                            bookPath: viewStore.bookPath,
+                                            bookTitle: viewStore.bookTitle
+                                        ),
+                                    ]))
+                                } label: {
+                                    Label("下载", systemImage: "arrow.down.circle")
+                                }
+                                .tint(.blue)
+                            }
                         }
                     }
                     .listStyle(.plain)
                 }
             }
             .navigationTitle(viewStore.bookTitle)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        downloadStore.send(.enqueue(
+                            viewStore.chapters.map {
+                                request(
+                                    for: $0,
+                                    bookPath: viewStore.bookPath,
+                                    bookTitle: viewStore.bookTitle
+                                )
+                            }
+                        ))
+                    } label: {
+                        Label("下载本书", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(
+                        viewStore.chapters.isEmpty
+                            || viewStore.chapters.allSatisfy(\.isDownloaded)
+                    )
+                }
+            }
             .onAppear { viewStore.send(.onAppear) }
         }
+    }
+
+    private func request(
+        for chapter: ChapterItem,
+        bookPath: String,
+        bookTitle: String
+    ) -> DownloadChapterRequest {
+        DownloadChapterRequest(
+            bookPath: bookPath,
+            bookTitle: bookTitle,
+            chapterPath: chapter.path,
+            chapterName: chapter.name,
+            chapterNumber: chapter.number
+        )
     }
 }
 
@@ -91,6 +165,11 @@ private struct ChapterRow: View {
         ChapterListFeature()
     }
     NavigationStack {
-        ChapterListView(store: store)
+        ChapterListView(
+            store: store,
+            downloadStore: Store(initialState: DownloadFeature.State()) {
+                DownloadFeature()
+            }
+        )
     }
 }
