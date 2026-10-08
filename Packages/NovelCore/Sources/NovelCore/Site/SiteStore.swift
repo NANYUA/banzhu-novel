@@ -487,7 +487,7 @@ extension SiteSettings {
         guard navigationOnly.count > clampedLimit else { return hosts }
 
         let removable = navigationOnly
-            .filter { $0.id != currentHostID && !$0.isStandby && $0.hostStatus != .unguarded }
+            .filter { $0.id != currentHostID && !$0.isStandby }
             .sorted { lhs, rhs in
                 evictionRank(lhs) < evictionRank(rhs)
             }
