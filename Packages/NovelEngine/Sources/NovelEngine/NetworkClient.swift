@@ -32,6 +32,24 @@ public enum NetworkError: LocalizedError {
             return true
         }
     }
+
+    /// 是否需要由上层弹出人机验证界面。
+    public var isGuardRequired: Bool {
+        if case .guarded = self {
+            return true
+        }
+        return false
+    }
+
+    /// 是否属于当前 host 不可用，可尝试切换到下一个 host。
+    public var isHostUnavailable: Bool {
+        switch self {
+        case .guarded, .decodeFailed:
+            return false
+        case .httpStatus, .badResponse, .transport:
+            return true
+        }
+    }
 }
 
 /// 网络客户端：GBK 编解码、移动 UA、Cookie 复用、GET/POST、重试退避、人机验证检测。
@@ -64,21 +82,9 @@ actor NetworkClient {
         try await requestWithGuard(url: url, body: bodyString)
     }
 
-    /// 带自动验证的请求：遇到验证页 → 自动处理一次 → 重试；仍失败才抛 .guarded。
+    /// 请求入口。遇盾时只上报，由上层统一决定是否进入全局验证流程。
     private func requestWithGuard(url: URL, body: String?) async throws -> String {
-        do {
-            return try await request(url: url, body: body)
-        } catch let e as NetworkError {
-            guard case .guarded = e else { throw e }
-            // 自动处理验证（离屏 WKWebView 执行挑战脚本写 Cookie）
-            let origin = (url.scheme.map { "\($0)://" } ?? "https://") + (url.host ?? "")
-            let passed = await GuardResolver.shared.autoPass(urlString: origin + "/")
-            if passed {
-                // 验证后重试一次
-                return try await request(url: url, body: body)
-            }
-            throw NetworkError.guarded
-        }
+        try await request(url: url, body: body)
     }
 
     private func request(url: URL, body: String?, retries: Int = 3) async throws -> String {

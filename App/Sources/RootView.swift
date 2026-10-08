@@ -18,6 +18,14 @@ struct RootView: View {
         DownloadFeature()
     }
 
+    @State private var siteStore = Store(initialState: SiteFeature.State()) {
+        SiteFeature()
+    }
+
+    @State private var guardStore = Store(initialState: GuardFeature.State()) {
+        GuardFeature()
+    }
+
     var body: some View {
         TabView {
             BookshelfView(store: bookshelfStore, downloadStore: downloadStore)
@@ -36,8 +44,18 @@ struct RootView: View {
                 .tabItem {
                     Label("下载", systemImage: "arrow.down.circle")
                 }
+
+            SiteSettingsView(store: siteStore)
+                .tabItem {
+                    Label("设置", systemImage: "gearshape")
+                }
+        }
+        .overlay {
+            GuardOverlayView(store: guardStore)
         }
         .task {
+            siteStore.send(.task)
+            guardStore.send(.task)
             downloadStore.send(.task)
         }
     }
