@@ -133,6 +133,7 @@ public actor NovelEngine {
         let startingHost = config.host
         var attempted = Set<String>()
         var lastError: Error = NetworkError.badResponse
+        var guardedHost: String?
 
         var candidates = [startingHost]
         if routing.autoSwitchHost {
@@ -143,8 +144,14 @@ public actor NovelEngine {
             let host = Self.normalizedHost(candidate)
             guard !host.isEmpty, attempted.insert(host).inserted else { continue }
             do {
-                return try await fetchFromHost(host, path: path, body: body)
+                return try await fetchFromHostWithoutGuard(host, path: path, body: body)
             } catch let error as NetworkError {
+                if error.isGuardRequired {
+                    if guardedHost == nil {
+                        guardedHost = host
+                    }
+                    continue
+                }
                 guard error.isHostUnavailable else {
                     config = SiteConfig(host: startingHost)
                     throw error
@@ -155,24 +162,55 @@ public actor NovelEngine {
 
         if routing.autoSwitchHost {
             for navURL in routing.navigationURLs {
-                let resolvedHosts = (try? await resolveCandidatesRaw(fromNav: navURL)) ?? []
-                for candidate in resolvedHosts {
-                    let host = Self.normalizedHost(candidate)
-                    guard !host.isEmpty, attempted.insert(host).inserted else { continue }
-                    do {
-                        return try await fetchFromHost(host, path: path, body: body)
-                    } catch let error as NetworkError {
-                        if error.isGuardRequired {
-                            config = SiteConfig(host: startingHost)
-                            throw error
+                do {
+                    let resolvedHosts = try await resolveCandidatesRaw(
+                        fromNav: navURL,
+                        allowGuard: false
+                    )
+                    for candidate in resolvedHosts {
+                        let host = Self.normalizedHost(candidate)
+                        guard !host.isEmpty, attempted.insert(host).inserted else { continue }
+                        do {
+                            return try await fetchFromHostWithoutGuard(host, path: path, body: body)
+                        } catch let error as NetworkError {
+                            if error.isGuardRequired {
+                                if guardedHost == nil {
+                                    guardedHost = host
+                                }
+                                continue
+                            }
+                            guard error.isHostUnavailable else {
+                                config = SiteConfig(host: startingHost)
+                                throw error
+                            }
+                            lastError = error
                         }
-                        guard error.isHostUnavailable else {
-                            config = SiteConfig(host: startingHost)
-                            throw error
+                    }
+                } catch let error as NetworkError {
+                    if error.isGuardRequired {
+                        if guardedHost == nil {
+                            guardedHost = URL(string: navURL).flatMap(\.host)
                         }
+                    } else if error.isHostUnavailable {
                         lastError = error
+                    } else {
+                        config = SiteConfig(host: startingHost)
+                        throw error
                     }
                 }
+            }
+        }
+
+        if let guardedHost {
+            do {
+                return try await fetchFromHostWithGuard(
+                    guardedHost,
+                    path: path,
+                    body: body
+                )
+            } catch {
+                config = SiteConfig(host: startingHost)
+                throw error
             }
         }
 
@@ -180,7 +218,23 @@ public actor NovelEngine {
         throw lastError
     }
 
-    private func fetchFromHost(_ host: String, path: String, body: String?) async throws -> String {
+    private func fetchFromHostWithoutGuard(
+        _ host: String,
+        path: String,
+        body: String?
+    ) async throws -> String {
+        config = SiteConfig(host: host)
+        guard let url = config.url(path) else { throw NetworkError.badResponse }
+        let html = try await perform(url: url, body: body)
+        routing.onHostChanged?(host)
+        return html
+    }
+
+    private func fetchFromHostWithGuard(
+        _ host: String,
+        path: String,
+        body: String?
+    ) async throws -> String {
         config = SiteConfig(host: host)
         guard let url = config.url(path) else { throw NetworkError.badResponse }
         let html = try await performWithGuard(url: url, body: body)
@@ -208,9 +262,17 @@ public actor NovelEngine {
         return try await net.get(url)
     }
 
-    private func resolveCandidatesRaw(fromNav navURL: String) async throws -> [String] {
+    private func resolveCandidatesRaw(
+        fromNav navURL: String,
+        allowGuard: Bool = true
+    ) async throws -> [String] {
         guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
-        let html = try await performWithGuard(url: url, body: nil)
+        let html: String
+        if allowGuard {
+            html = try await performWithGuard(url: url, body: nil)
+        } else {
+            html = try await perform(url: url, body: nil)
+        }
         let patterns = SiteConfig.mirrorPatterns
         var found: [String] = []
         var seen = Set<String>()

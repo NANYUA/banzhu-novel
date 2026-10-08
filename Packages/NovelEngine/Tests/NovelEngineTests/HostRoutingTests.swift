@@ -49,6 +49,37 @@ final class HostRoutingTests: XCTestCase {
         XCTAssertEqual(hosts, ["one.example"])
     }
 
+    func test当前host被盾时优先切换未验证host() async throws {
+        let gate = GuardGate()
+        let transport = FakeTransport { url in
+            if url.host == "one.example" {
+                throw NetworkError.guarded
+            }
+            if url.host == "two.example" {
+                return "two-ok"
+            }
+            throw NetworkError.badResponse
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: ["https://two.example"],
+                autoSwitchHost: true,
+                currentHost: "https://one.example",
+                guardPass: { _ in
+                    await gate.markPassed()
+                    return true
+                }
+            )
+        )
+
+        let html = try await engine.requestForTesting(path: "/chapter.html")
+
+        XCTAssertEqual(html, "two-ok")
+        let passCount = await gate.passCount()
+        XCTAssertEqual(passCount, 0)
+    }
+
     func test已保存host全失败后从导航网址解析新host() async throws {
         let transport = FakeTransport { url in
             switch url.host {
