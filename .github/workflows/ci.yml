@@ -8,6 +8,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_package:
+        description: Run unsigned package job
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   verify:
@@ -124,7 +131,7 @@ jobs:
   package-unsigned:
     name: 打包未签名 iOS App
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_package
     runs-on: macos-15
     timeout-minutes: 30
 
