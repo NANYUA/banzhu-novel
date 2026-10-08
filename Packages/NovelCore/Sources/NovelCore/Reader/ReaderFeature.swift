@@ -191,7 +191,7 @@ public struct ReaderFeature: Reducer {
                 let precacheCount = state.precacheCount
                 return .run { _ in
                     // 进度写入失败不应阻断阅读；书架排序与 LRU 会在下次成功时刷新。
-                    try? await progressStore.markRead(chapterPath, Date())
+                    try? await progressStore.markRead(chapterPath, 0, Date())
                     await cacheStore.cacheCurrentAndFollowing(chapterPath, text, precacheCount)
                 }
 
@@ -207,7 +207,11 @@ public struct ReaderFeature: Reducer {
                 }
                 state.pageTurnDirection = .forward
                 state.currentOffset = state.pages[pageIndex + 1].location
-                return .none
+                return saveProgress(
+                    chapterPath: state.chapterPath,
+                    offset: state.currentOffset,
+                    store: readingProgressStore
+                )
 
             case .prevPage:
                 let pageIndex = state.currentPageIndex
@@ -216,13 +220,21 @@ public struct ReaderFeature: Reducer {
                 }
                 state.pageTurnDirection = .backward
                 state.currentOffset = state.pages[pageIndex - 1].location
-                return .none
+                return saveProgress(
+                    chapterPath: state.chapterPath,
+                    offset: state.currentOffset,
+                    store: readingProgressStore
+                )
 
             case let .jumpToOffset(offset):
                 // clamp 到文本范围
                 let maxOffset = max(0, state.text.count)
                 state.currentOffset = min(max(0, offset), maxOffset)
-                return .none
+                return saveProgress(
+                    chapterPath: state.chapterPath,
+                    offset: state.currentOffset,
+                    store: readingProgressStore
+                )
 
             case let .configChanged(newConfig):
                 guard newConfig != state.config else { return .none }
@@ -273,5 +285,15 @@ public struct ReaderFeature: Reducer {
                 return .none
             }
         }
+    }
+}
+
+private func saveProgress(
+    chapterPath: String,
+    offset: Int,
+    store: ReadingProgressStore
+) -> Effect<ReaderFeature.Action> {
+    .run { _ in
+        try? await store.markRead(chapterPath, offset, Date())
     }
 }

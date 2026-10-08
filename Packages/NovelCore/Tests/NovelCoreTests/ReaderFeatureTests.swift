@@ -15,7 +15,7 @@ final class ReaderFeatureTests: XCTestCase {
     private func makeStore(
         text: String,
         loader: @escaping @Sendable (String) async throws -> String,
-        progress: @escaping @Sendable (String, Date) async throws -> Void = { _, _ in },
+        progress: @escaping @Sendable (String, Int, Date) async throws -> Void = { _, _, _ in },
         cache: @escaping @Sendable (String, String, Int) async -> Void = { _, _, _ in },
         settingsStore: ReadingSettingsStore? = nil
     ) -> TestStore<ReaderFeature.State, ReaderFeature.Action> {
@@ -259,8 +259,8 @@ final class ReaderFeatureTests: XCTestCase {
         let recorder = ReadRecorder()
         let store = makeStore(text: Self.sampleText) { _ in
             Self.sampleText
-        } progress: { path, date in
-            await recorder.record(path: path, date: date)
+        } progress: { path, offset, date in
+            await recorder.record(path: path, offset: offset, date: date)
         }
 
         await loadSample(into: store)
@@ -268,6 +268,7 @@ final class ReaderFeatureTests: XCTestCase {
 
         let records = await recorder.allRecords()
         XCTAssertEqual(records.map(\.path), ["/1/1.html"])
+        XCTAssertEqual(records.first?.offset, 0)
         XCTAssertNotNil(records.first?.date)
     }
 
@@ -400,13 +401,14 @@ final class ReaderFeatureTests: XCTestCase {
 private actor ReadRecorder {
     struct Reading: Sendable {
         let path: String
+        let offset: Int
         let date: Date
     }
 
     private var records: [Reading] = []
 
-    func record(path: String, date: Date) {
-        records.append(Reading(path: path, date: date))
+    func record(path: String, offset: Int, date: Date) {
+        records.append(Reading(path: path, offset: offset, date: date))
     }
 
     func allRecords() -> [Reading] {

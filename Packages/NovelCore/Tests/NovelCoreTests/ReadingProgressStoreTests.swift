@@ -34,11 +34,12 @@ final class ReadingProgressStoreTests: XCTestCase {
         try context.save()
 
         let readAt = Date(timeIntervalSince1970: 12345)
-        try markRead(chapterPath: chapter.path, date: readAt)
+        try markRead(chapterPath: chapter.path, offset: 42, date: readAt)
 
         let storedBook = try context.fetch(FetchDescriptor<BookRecord>()).first
         XCTAssertEqual(storedBook?.lastReadChapterPath, chapter.path)
         XCTAssertEqual(storedBook?.lastReadChapterName, "第七章")
+        XCTAssertEqual(storedBook?.lastReadOffset, 42)
         XCTAssertEqual(storedBook?.lastReadAt, readAt)
     }
 
@@ -47,7 +48,7 @@ final class ReadingProgressStoreTests: XCTestCase {
         context.insert(book)
         try context.save()
 
-        try markRead(chapterPath: "/read/missing/1.html", date: Date())
+        try markRead(chapterPath: "/read/missing/1.html", offset: 0, date: Date())
 
         let storedBook = try context.fetch(FetchDescriptor<BookRecord>()).first
         XCTAssertNil(storedBook?.lastReadAt)
@@ -64,12 +65,12 @@ final class ReadingProgressStoreTests: XCTestCase {
         context.insert(chapter)
         try context.save()
 
-        XCTAssertNoThrow(try markRead(chapterPath: chapter.path, date: Date()))
+        XCTAssertNoThrow(try markRead(chapterPath: chapter.path, offset: 0, date: Date()))
     }
 
     /// 以显式容器复刻 `ReadingProgressStoreLive` 的写入规则：
     /// 测试环境不碰真实沙盒，但仍验证同一套数据变更。
-    private func markRead(chapterPath: String, date: Date) throws {
+    private func markRead(chapterPath: String, offset: Int, date: Date) throws {
         let descriptor = FetchDescriptor<ChapterRecord>(
             predicate: #Predicate { $0.path == chapterPath }
         )
@@ -83,6 +84,7 @@ final class ReadingProgressStoreTests: XCTestCase {
 
         book.lastReadChapterPath = chapter.path
         book.lastReadChapterName = chapter.name
+        book.lastReadOffset = offset
         book.lastReadAt = date
         try context.save()
     }
