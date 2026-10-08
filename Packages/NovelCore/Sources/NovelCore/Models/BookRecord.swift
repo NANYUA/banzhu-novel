@@ -22,6 +22,10 @@ final class BookRecord {
     var intro: String
     var coverUrl: String
     var wordCount: String
+    var status: String = ""
+    var category: String = ""
+    var tags: String = ""
+    var lastUpdated: String = ""
 
     /// 所属分组（D13 决策：一级手动分组，每本书只能属于一个分组）
     /// `nil` 表示未分组。**「全部」是隐含的**（不按 groupId 过滤即为全部），不占记录。
@@ -61,7 +65,9 @@ final class BookRecord {
 
     init(
         bookPath: String, title: String, author: String = "", intro: String = "",
-        coverUrl: String = "", wordCount: String = "", addedAt: Date = Date()
+        coverUrl: String = "", wordCount: String = "", status: String = "",
+        category: String = "", tags: String = "", lastUpdated: String = "",
+        addedAt: Date = Date()
     ) {
         // ⚠️ 这里必须写 self.：本类是 SwiftData @Model，init 的形参与属性**同名**，
         // 去掉 self. 会退化成「形参赋给形参」，属性实际根本没被赋值。
@@ -73,6 +79,10 @@ final class BookRecord {
         self.intro = intro
         self.coverUrl = coverUrl
         self.wordCount = wordCount
+        self.status = status
+        self.category = category
+        self.tags = tags
+        self.lastUpdated = lastUpdated
         self.addedAt = addedAt
         // swiftformat:enable redundantSelf
     }

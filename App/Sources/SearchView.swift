@@ -8,13 +8,16 @@ import SwiftUI
 /// 本文件只负责展示与转发交互，搜索和落库逻辑都在 `SearchFeature` 内。
 struct SearchView: View {
     let store: StoreOf<SearchFeature>
+    let downloadStore: StoreOf<DownloadFeature>
     let onBookAdded: (ShelfRow) -> Void
 
     init(
         store: StoreOf<SearchFeature>,
+        downloadStore: StoreOf<DownloadFeature>,
         onBookAdded: @escaping (ShelfRow) -> Void = { _ in }
     ) {
         self.store = store
+        self.downloadStore = downloadStore
         self.onBookAdded = onBookAdded
     }
 
@@ -33,6 +36,12 @@ struct SearchView: View {
                     if let row {
                         onBookAdded(row)
                     }
+                }
+                .task(id: viewStore.notice) {
+                    guard viewStore.notice != nil else { return }
+                    try? await Task.sleep(for: .seconds(2.5))
+                    guard !Task.isCancelled else { return }
+                    viewStore.send(.noticeDismissed)
                 }
             }
         }
@@ -103,14 +112,33 @@ struct SearchView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(viewStore.results) { book in
-                SearchResultRow(
-                    book: book,
-                    isAdding: viewStore.addingPaths.contains(book.path)
-                ) {
-                    viewStore.send(.addRequested(book))
+            List {
+                ForEach(viewStore.results) { book in
+                    SearchResultRow(
+                        book: book,
+                        isAdding: viewStore.addingPaths.contains(book.path),
+                        isAdded: viewStore.addedPaths.contains(book.path),
+                        downloadStore: downloadStore
+                    ) {
+                        viewStore.send(.addRequested(book))
+                    }
+                    .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
                 }
-                .listRowInsets(.init(top: 8, leading: 16, bottom: 8, trailing: 16))
+
+                if viewStore.hasMore {
+                    HStack(spacing: 10) {
+                        if viewStore.isLoadingMore {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Button("加载更多") {
+                            viewStore.send(.loadMore)
+                        }
+                        .disabled(viewStore.isLoadingMore)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .listRowSeparator(.hidden)
+                }
             }
             .listStyle(.plain)
         }
@@ -148,55 +176,75 @@ struct SearchView: View {
 private struct SearchResultRow: View {
     let book: Book
     let isAdding: Bool
+    let isAdded: Bool
+    let downloadStore: StoreOf<DownloadFeature>
     let onAdd: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(.tertiarySystemBackground))
-                .frame(width: 48, height: 64)
-                .overlay {
-                    Image(systemName: "book.closed")
-                        .foregroundStyle(.quaternary)
-                }
+            NavigationLink {
+                BookDetailView(book: book, downloadStore: downloadStore)
+            } label: {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(.tertiarySystemBackground))
+                        .frame(width: 48, height: 64)
+                        .overlay {
+                            Image(systemName: "book.closed")
+                                .foregroundStyle(.quaternary)
+                        }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(book.title)
-                    .font(.body.bold())
-                    .lineLimit(1)
-
-                Text(book.author.isEmpty ? "未知作者" : book.author)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                HStack(spacing: 8) {
-                    if !book.wordCount.isEmpty {
-                        Text(book.wordCount)
-                    }
-                    if !book.lastChapter.isEmpty {
-                        Text(book.lastChapter)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(book.title)
+                            .font(.body.bold())
                             .lineLimit(1)
+
+                        Text(book.author.isEmpty ? "未知作者" : book.author)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        HStack(spacing: 8) {
+                            if !book.wordCount.isEmpty {
+                                Text(book.wordCount)
+                            }
+                            if !book.lastChapter.isEmpty {
+                                Text(book.lastChapter)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isAdded {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.green)
+                    .accessibilityLabel("已加入书架")
+            } else {
+                Button(action: onAdd) {
+                    if isAdding {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "plus.circle")
+                            .font(.title3)
                     }
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .buttonStyle(.borderless)
+                .disabled(isAdding)
+                .accessibilityLabel("加入书架：\(book.title)")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(action: onAdd) {
-                if isAdding {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: "plus.circle")
-                        .font(.title3)
-                }
-            }
-            .buttonStyle(.borderless)
-            .disabled(isAdding)
-            .accessibilityLabel("加入书架：\(book.title)")
         }
+        .padding(12)
+        .contentShape(Rectangle())
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -215,5 +263,10 @@ private struct SearchResultRow: View {
     ) {
         SearchFeature()
     }
-    SearchView(store: store)
+    SearchView(
+        store: store,
+        downloadStore: Store(initialState: DownloadFeature.State()) {
+            DownloadFeature()
+        }
+    )
 }

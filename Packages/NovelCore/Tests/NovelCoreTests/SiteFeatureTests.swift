@@ -142,4 +142,46 @@ final class SiteFeatureTests: XCTestCase {
 
         XCTAssertEqual(entry.source, .user)
     }
+
+    func test用户host与导航host重叠时合并来源() {
+        let value = "https://same.example"
+        let settings = SiteSettings(
+            hosts: [
+                SiteEntry(value: value, source: .user),
+                SiteEntry(value: value, source: .navigation),
+            ]
+        )
+
+        XCTAssertEqual(settings.hosts.count, 1)
+        XCTAssertEqual(settings.hosts[0].sources, [.user, .navigation])
+    }
+
+    func test导航host上限会淘汰低优先级条目() {
+        var unavailable = SiteEntry(value: "https://a.example", source: .navigation)
+        unavailable.hostStatus = .unavailable
+        var unknown = SiteEntry(value: "https://b.example", source: .navigation)
+        unknown.hostStatus = .unknown
+        let user = SiteEntry(value: "https://user.example", source: .user)
+
+        let settings = SiteSettings(
+            hosts: [user, unavailable, unknown],
+            navigationHostLimit: 1
+        )
+
+        XCTAssertTrue(settings.hosts.contains(where: { $0.id == user.id }))
+        XCTAssertTrue(settings.hosts.contains(where: { $0.id == unknown.id }))
+        XCTAssertFalse(settings.hosts.contains(where: { $0.id == unavailable.id }))
+    }
+
+    func test导航连续失败进入冷却再冻结() {
+        let nav = SiteEntry(value: "https://nav.example", source: .user)
+        var settings = SiteSettings(navigationURLs: [nav])
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        settings.recordNavigationFailure(id: nav.id, now: now)
+        XCTAssertEqual(settings.navigationURLs[0].navigationStatus, .cooling)
+
+        settings.recordNavigationFailure(id: nav.id, now: now)
+        XCTAssertEqual(settings.navigationURLs[0].navigationStatus, .frozen)
+    }
 }

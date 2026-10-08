@@ -33,6 +33,45 @@ struct SiteSettingsView: View {
                             Text("立即验证").tag(VerificationStartTier.first)
                         }
                         .pickerStyle(.segmented)
+
+                        Picker(
+                            "host 冷却",
+                            selection: Binding(
+                                get: { viewStore.settings.hostCooldownSeconds },
+                                set: { viewStore.send(.setHostCooldown($0)) }
+                            )
+                        ) {
+                            Text("关闭").tag(0)
+                            Text("1 分钟").tag(60)
+                            Text("5 分钟").tag(300)
+                            Text("10 分钟").tag(600)
+                            Text("30 分钟").tag(1800)
+                        }
+
+                        Picker(
+                            "导航 host 上限",
+                            selection: Binding(
+                                get: { viewStore.settings.navigationHostLimit },
+                                set: { viewStore.send(.setNavigationHostLimit($0)) }
+                            )
+                        ) {
+                            Text("3").tag(3)
+                            Text("6").tag(6)
+                            Text("9").tag(9)
+                            Text("12").tag(12)
+                        }
+
+                        Picker(
+                            "备用 host 缓存",
+                            selection: Binding(
+                                get: { viewStore.settings.standbyTTLSeconds },
+                                set: { viewStore.send(.setStandbyTTL($0)) }
+                            )
+                        ) {
+                            Text("5 分钟").tag(300)
+                            Text("15 分钟").tag(900)
+                            Text("30 分钟").tag(1800)
+                        }
                     } footer: {
                         Text("先换 host：优先尝试不需要验证的地址。立即验证：当前地址被盾时马上验证。")
                     }
@@ -71,6 +110,14 @@ struct SiteSettingsView: View {
                 .swipeActions {
                     Button("删除", role: .destructive) {
                         viewStore.send(.deleteNavigationURL(entry.id))
+                    }
+                }
+                .contextMenu {
+                    Button("重新拉取") {
+                        viewStore.send(.reloadNavigation(entry.id))
+                    }
+                    Button(entry.isDisabled ? "启用导航" : "关闭导航") {
+                        viewStore.send(.setNavigationDisabled(entry.id, !entry.isDisabled))
                     }
                 }
             }

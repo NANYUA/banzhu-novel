@@ -51,7 +51,13 @@ struct ChapterListView: View {
                             .accessibilityLabel(chapter.isDownloaded ? "已下载" : "下载本章")
 
                             NavigationLink {
-                                ReaderView(chapterPath: chapter.path)
+                                ReaderView(
+                                    chapterPath: chapter.path,
+                                    chapterName: chapter.name,
+                                    bookPath: viewStore.bookPath,
+                                    chapters: viewStore.chapters,
+                                    downloadStore: downloadStore
+                                )
                             } label: {
                                 ChapterRow(chapter: chapter)
                             }
@@ -77,6 +83,7 @@ struct ChapterListView: View {
                 }
             }
             .navigationTitle(viewStore.bookTitle)
+            .toolbar(.hidden, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

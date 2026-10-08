@@ -8,6 +8,66 @@ public enum VerificationStartTier: String, Codable, Equatable, Sendable {
     case second
 }
 
+public enum RouteHostStatus: String, Codable, Equatable, Sendable {
+    case unknown
+    case unguarded
+    case guarded
+    case unavailable
+}
+
+public enum RouteNavigationStatus: String, Codable, Equatable, Sendable {
+    case active
+    case cooling
+    case frozen
+    case disabled
+}
+
+public struct HostRouteState: Sendable, Equatable {
+    public init(
+        value: String,
+        status: RouteHostStatus,
+        coolingUntil: Date? = nil,
+        lastSucceededAt: Date? = nil,
+        isUser: Bool = false,
+        isStandby: Bool = false
+    ) {
+        self.value = value
+        self.status = status
+        self.coolingUntil = coolingUntil
+        self.lastSucceededAt = lastSucceededAt
+        self.isUser = isUser
+        self.isStandby = isStandby
+    }
+
+    public var value: String
+    public var status: RouteHostStatus
+    public var coolingUntil: Date?
+    public var lastSucceededAt: Date?
+    public var isUser: Bool
+    public var isStandby: Bool
+}
+
+public struct HostStateUpdate: Sendable, Equatable {
+    public init(
+        value: String,
+        status: RouteHostStatus,
+        coolingUntil: Date? = nil
+    ) {
+        self.value = value
+        self.status = status
+        self.coolingUntil = coolingUntil
+    }
+
+    public var value: String
+    public var status: RouteHostStatus
+    public var coolingUntil: Date?
+}
+
+public enum NavigationOutcome: Sendable, Equatable {
+    case success
+    case failure
+}
+
 /// 引擎的站点路由配置。
 ///
 /// `hosts` 与 `navigationURLs` 都只描述同一个站点的入口，不做多站适配。
@@ -17,8 +77,14 @@ public struct SiteRoutingConfiguration: Sendable {
     public var autoSwitchHost: Bool
     public var verificationStartTier: VerificationStartTier
     public var currentHost: String?
+    public var hostStates: [HostRouteState]
+    public var navigationStates: [String: RouteNavigationStatus]
+    public var hostCooldownSeconds: Int
+    public var standbyTTLSeconds: Int
     public var guardPass: (@Sendable (String) async -> Bool)?
     public var onHostChanged: (@Sendable (String) -> Void)?
+    public var onHostStateChanged: (@Sendable (HostStateUpdate) -> Void)?
+    public var onNavigationOutcome: (@Sendable (String, NavigationOutcome) -> Void)?
 
     public init(
         hosts: [String] = [],
@@ -26,16 +92,28 @@ public struct SiteRoutingConfiguration: Sendable {
         autoSwitchHost: Bool = true,
         verificationStartTier: VerificationStartTier = .second,
         currentHost: String? = nil,
+        hostStates: [HostRouteState] = [],
+        navigationStates: [String: RouteNavigationStatus] = [:],
+        hostCooldownSeconds: Int = 300,
+        standbyTTLSeconds: Int = 900,
         guardPass: (@Sendable (String) async -> Bool)? = nil,
-        onHostChanged: (@Sendable (String) -> Void)? = nil
+        onHostChanged: (@Sendable (String) -> Void)? = nil,
+        onHostStateChanged: (@Sendable (HostStateUpdate) -> Void)? = nil,
+        onNavigationOutcome: (@Sendable (String, NavigationOutcome) -> Void)? = nil
     ) {
         self.hosts = hosts
         self.navigationURLs = navigationURLs
         self.autoSwitchHost = autoSwitchHost
         self.verificationStartTier = verificationStartTier
         self.currentHost = currentHost
+        self.hostStates = hostStates
+        self.navigationStates = navigationStates
+        self.hostCooldownSeconds = hostCooldownSeconds
+        self.standbyTTLSeconds = standbyTTLSeconds
         self.guardPass = guardPass
         self.onHostChanged = onHostChanged
+        self.onHostStateChanged = onHostStateChanged
+        self.onNavigationOutcome = onNavigationOutcome
     }
 }
 
@@ -50,6 +128,9 @@ public actor NovelEngine {
     private var routing = SiteRoutingConfiguration()
     private var unguardedHosts = Set<String>()
     private var guardedHosts = Set<String>()
+    private var hostRouteStates: [String: HostRouteState] = [:]
+    private var navigationRouteStates: [String: RouteNavigationStatus] = [:]
+    private var cooldowns: [String: Date] = [:]
     private let net: any NetworkTransport
 
     public init() {
@@ -62,6 +143,27 @@ public actor NovelEngine {
 
     public func configureRouting(_ configuration: SiteRoutingConfiguration) {
         routing = configuration
+        hostRouteStates = Dictionary(
+            uniqueKeysWithValues: configuration.hostStates.map {
+                (Self.normalizedHost($0.value), $0)
+            }
+        )
+        navigationRouteStates = configuration.navigationStates
+        for (host, state) in hostRouteStates {
+            if let coolingUntil = state.coolingUntil, coolingUntil > Date() {
+                cooldowns[host] = coolingUntil
+            }
+            switch state.status {
+            case .unguarded:
+                unguardedHosts.insert(host)
+                guardedHosts.remove(host)
+            case .guarded:
+                guardedHosts.insert(host)
+                unguardedHosts.remove(host)
+            case .unknown, .unavailable:
+                break
+            }
+        }
         if let currentHost = configuration.currentHost,
            !Self.normalizedHost(currentHost).isEmpty {
             config = SiteConfig(host: Self.normalizedHost(currentHost))
@@ -146,15 +248,16 @@ public actor NovelEngine {
         let startingHost = Self.normalizedHost(config.host)
         var attempted = Set<String>()
         var lastError: Error = NetworkError.badResponse
-        var guardedHost: String?
+        var guardedQueue: [String] = []
         var enterGuardImmediately = false
         let candidates = routing.autoSwitchHost
             ? orderedCandidates(startingHost: startingHost)
             : [startingHost]
 
-        for candidate in candidates {
+        for candidate in candidates.prefix(6) {
             let host = Self.normalizedHost(candidate)
             guard !host.isEmpty, attempted.insert(host).inserted else { continue }
+            guard !isCooling(host) else { continue }
             do {
                 let html = try await fetchFromHostWithoutGuard(
                     host,
@@ -162,16 +265,12 @@ public actor NovelEngine {
                     body: body,
                     notifyHostChange: true
                 )
-                unguardedHosts.insert(host)
-                guardedHosts.remove(host)
+                markHost(host, status: .unguarded)
                 return html
             } catch let error as NetworkError {
                 if error.isGuardRequired {
-                    guardedHosts.insert(host)
-                    unguardedHosts.remove(host)
-                    if guardedHost == nil {
-                        guardedHost = host
-                    }
+                    markHost(host, status: .guarded)
+                    guardedQueue.append(host)
                     if routing.verificationStartTier == .first, host == startingHost {
                         enterGuardImmediately = true
                         break
@@ -182,20 +281,32 @@ public actor NovelEngine {
                     config = SiteConfig(host: startingHost)
                     throw error
                 }
+                markHost(host, status: .unavailable)
                 lastError = error
             }
         }
 
-        if routing.autoSwitchHost, !enterGuardImmediately {
-            for navURL in routing.navigationURLs {
+        if routing.autoSwitchHost,
+           !enterGuardImmediately,
+           shouldAutoFetchNavigation()
+        {
+            for navURL in routing.navigationURLs
+                where navigationRouteStates[navURL, default: .active] == .active
+            {
                 do {
                     let resolvedHosts = try await resolveCandidatesRaw(
                         fromNav: navURL,
                         allowGuard: false
                     )
-                    for candidate in resolvedHosts {
+                    routing.onNavigationOutcome?(navURL, .success)
+                    for candidate in resolvedHosts.prefix(6) {
                         let host = Self.normalizedHost(candidate)
-                        guard !host.isEmpty, attempted.insert(host).inserted else { continue }
+                        guard !host.isEmpty,
+                              !isCooling(host),
+                              attempted.insert(host).inserted
+                        else {
+                            continue
+                        }
                         do {
                             let html = try await fetchFromHostWithoutGuard(
                                 host,
@@ -203,34 +314,29 @@ public actor NovelEngine {
                                 body: body,
                                 notifyHostChange: true
                             )
-                            unguardedHosts.insert(host)
-                            guardedHosts.remove(host)
+                            markHost(host, status: .unguarded)
                             return html
                         } catch let error as NetworkError {
                             if error.isGuardRequired {
-                                guardedHosts.insert(host)
-                                unguardedHosts.remove(host)
-                                if guardedHost == nil {
-                                    guardedHost = host
-                                }
+                                markHost(host, status: .guarded)
+                                guardedQueue.append(host)
                                 continue
                             }
                             guard error.isHostUnavailable else {
                                 config = SiteConfig(host: startingHost)
                                 throw error
                             }
+                            markHost(host, status: .unavailable)
                             lastError = error
                         }
                     }
                 } catch let error as NetworkError {
+                    routing.onNavigationOutcome?(navURL, .failure)
                     if error.isGuardRequired {
                         if let navHost = URL(string: navURL).flatMap(\.host) {
                             let host = Self.normalizedHost(navHost)
-                            guardedHosts.insert(host)
-                            unguardedHosts.remove(host)
-                            if guardedHost == nil {
-                                guardedHost = host
-                            }
+                            markHost(host, status: .guarded)
+                            guardedQueue.append(host)
                         }
                     } else if error.isHostUnavailable {
                         lastError = error
@@ -242,17 +348,25 @@ public actor NovelEngine {
             }
         }
 
-        if let guardedHost {
+        for host in guardedQueue.prefix(2) {
             do {
-                return try await fetchFromHostWithGuard(
-                    guardedHost,
+                let html = try await fetchFromHostWithGuard(
+                    host,
                     path: path,
                     body: body,
                     notifyHostChange: true
                 )
+                markHost(host, status: .unguarded)
+                return html
             } catch {
-                config = SiteConfig(host: startingHost)
-                throw error
+                markHost(
+                    host,
+                    status: .guarded,
+                    coolingUntil: Date().addingTimeInterval(
+                        TimeInterval(max(routing.hostCooldownSeconds, 60))
+                    )
+                )
+                lastError = error
             }
         }
 
@@ -263,19 +377,91 @@ public actor NovelEngine {
     private func orderedCandidates(startingHost: String) -> [String] {
         let hosts = routing.hosts
             .map(Self.normalizedHost)
-            .filter { !$0.isEmpty }
-        let unguarded = hosts.filter { unguardedHosts.contains($0) }
+            .filter { !$0.isEmpty && !isCooling($0) }
+        let standby = standbyHost().map { [$0] } ?? []
+        let unguarded = hosts.filter {
+            unguardedHosts.contains($0) || hostRouteStates[$0]?.status == .unguarded
+        }
         let unknown = hosts.filter {
             !unguardedHosts.contains($0) && !guardedHosts.contains($0)
         }
-        let guarded = hosts.filter { guardedHosts.contains($0) }
+        let guarded = hosts.filter {
+            guardedHosts.contains($0) || hostRouteStates[$0]?.status == .guarded
+        }
 
-        var result = [startingHost]
-        var seen = Set([startingHost])
-        for host in unguarded + unknown + guarded where seen.insert(host).inserted {
+        var result: [String] = []
+        var seen = Set<String>()
+        if !isCooling(startingHost) {
+            result.append(startingHost)
+            seen.insert(startingHost)
+        }
+        for host in standby + unguarded + unknown + guarded where seen.insert(host).inserted {
             result.append(host)
         }
         return result
+    }
+
+    private func markHost(
+        _ host: String,
+        status: RouteHostStatus,
+        coolingUntil: Date? = nil
+    ) {
+        switch status {
+        case .unguarded:
+            unguardedHosts.insert(host)
+            guardedHosts.remove(host)
+            cooldowns[host] = nil
+        case .guarded:
+            guardedHosts.insert(host)
+            unguardedHosts.remove(host)
+        case .unknown, .unavailable:
+            break
+        }
+        if let coolingUntil {
+            cooldowns[host] = coolingUntil
+        }
+        routing.onHostStateChanged?(
+            HostStateUpdate(value: host, status: status, coolingUntil: coolingUntil)
+        )
+    }
+
+    private func isCooling(_ host: String) -> Bool {
+        if let coolingUntil = cooldowns[host], coolingUntil > Date() {
+            return true
+        }
+        if let coolingUntil = hostRouteStates[host]?.coolingUntil, coolingUntil > Date() {
+            return true
+        }
+        return false
+    }
+
+    private func standbyHost() -> String? {
+        if let host = hostRouteStates.values.first(where: { $0.isStandby })?.value {
+            let normalized = Self.normalizedHost(host)
+            if !isCooling(normalized) {
+                return normalized
+            }
+        }
+        return hostRouteStates.values
+            .filter { $0.status == .unguarded && !$0.isUser && !$0.isStandby }
+            .compactMap { state -> (String, Date)? in
+                let host = Self.normalizedHost(state.value)
+                guard !isCooling(host) else { return nil }
+                return (host, state.lastSucceededAt ?? .distantPast)
+            }
+            .max { $0.1 < $1.1 }?
+            .0
+    }
+
+    private func shouldAutoFetchNavigation() -> Bool {
+        let navigationHostCount = routing.hostStates
+            .filter { !$0.isUser && $0.status != .unavailable }
+            .count
+        let hasStandby = routing.hostStates.contains(where: { $0.isStandby })
+        let hasActiveNavigation = routing.navigationURLs.contains {
+            navigationRouteStates[$0, default: .active] == .active
+        }
+        return navigationHostCount <= 1 && !hasStandby && hasActiveNavigation
     }
 
     private func fetchFromHostWithoutGuard(

@@ -3,6 +3,11 @@ import CoreGraphics
 import Dependencies
 import Foundation
 
+public enum PageTurnDirection: String, Equatable, Sendable {
+    case forward
+    case backward
+}
+
 /// 阅读页 —— 读一章正文，支持翻页。
 ///
 /// ## 🔴 数据契约：state 存 characterOffset，不存页码
@@ -23,19 +28,23 @@ public struct ReaderFeature: Reducer {
     public struct State: Equatable {
         public init(
             chapterPath: String,
+            chapterName: String = "",
             text: String = "",
             config: PaginationConfiguration = PaginationConfiguration(
                 containerSize: CGSize(width: 320, height: 480)
             ),
             currentOffset: Int = 0,
+            pageTurnDirection: PageTurnDirection = .forward,
             isLoading: Bool = false,
             errorMessage: String? = nil,
             precacheCount: Int = ReaderFeature.defaultPrecacheCount
         ) {
             self.chapterPath = chapterPath
+            self.chapterName = chapterName
             self.text = text
             self.config = config
             self.currentOffset = currentOffset
+            self.pageTurnDirection = pageTurnDirection
             self.isLoading = isLoading
             self.errorMessage = errorMessage
             self.precacheCount = precacheCount
@@ -44,8 +53,23 @@ public struct ReaderFeature: Reducer {
         /// 当前章节路径（如 `/49/49034/123.html`）
         public var chapterPath: String
 
+        /// 当前章节名。第一页会作为纯文本标题参与统一分页。
+        public var chapterName: String
+
         /// 本章正文本体
         public var text: String
+
+        /// 渲染与分页使用的文本：章节名作为普通正文前缀。
+        public var displayText: String {
+            guard !chapterName.isEmpty else { return text }
+            let normalizedTitle = chapterName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedTitle.isEmpty else { return text }
+            let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalizedText.hasPrefix(normalizedTitle) {
+                return text
+            }
+            return normalizedTitle + "\n\n" + text
+        }
 
         /// 分页配置。改了会触发重新分页
         public var config: PaginationConfiguration
@@ -53,6 +77,9 @@ public struct ReaderFeature: Reducer {
         /// 🔴 阅读位置：字符偏移，**不是页码**。
         /// 改设置后靠它重新定位到同一处文字。
         public var currentOffset: Int
+
+        /// 最近一次翻页方向，用于让动画与手势方向一致。
+        public var pageTurnDirection: PageTurnDirection
 
         /// 首次加载中
         public var isLoading = false
@@ -85,6 +112,8 @@ public struct ReaderFeature: Reducer {
     public enum Action: Equatable {
         /// 加载一章
         case loadChapter(String)
+        /// 加载指定章节并带章名，用于章节内第一页标题。
+        case loadChapterWithName(String, String)
         /// 内容加载完成
         case contentLoaded(String)
         /// 加载失败
@@ -116,6 +145,25 @@ public struct ReaderFeature: Reducer {
             switch action {
             case let .loadChapter(path):
                 state.chapterPath = path
+                state.chapterName = ""
+                state.isLoading = true
+                state.errorMessage = nil
+                state.text = ""
+                state.pages = []
+                state.currentOffset = 0
+                let loader = readerLoader
+                return .run { send in
+                    do {
+                        let text = try await loader.load(path)
+                        await send(.contentLoaded(text))
+                    } catch {
+                        await send(.loadFailed(error.localizedDescription))
+                    }
+                }
+
+            case let .loadChapterWithName(path, name):
+                state.chapterPath = path
+                state.chapterName = name
                 state.isLoading = true
                 state.errorMessage = nil
                 state.text = ""
@@ -135,7 +183,7 @@ public struct ReaderFeature: Reducer {
                 state.text = text
                 state.isLoading = false
                 // 内容变化 → 重新分页
-                state.pages = paginationService.paginate(text, state.config)
+                state.pages = paginationService.paginate(state.displayText, state.config)
                 state.currentOffset = 0
                 let chapterPath = state.chapterPath
                 let progressStore = readingProgressStore
@@ -157,6 +205,7 @@ public struct ReaderFeature: Reducer {
                 guard pageIndex >= 0, pageIndex + 1 < state.pages.count else {
                     return .none // 已是最后一页
                 }
+                state.pageTurnDirection = .forward
                 state.currentOffset = state.pages[pageIndex + 1].location
                 return .none
 
@@ -165,6 +214,7 @@ public struct ReaderFeature: Reducer {
                 guard pageIndex > 0 else {
                     return .none // 已是第一页
                 }
+                state.pageTurnDirection = .backward
                 state.currentOffset = state.pages[pageIndex - 1].location
                 return .none
 
@@ -180,7 +230,7 @@ public struct ReaderFeature: Reducer {
                 state.config = newConfig
                 // 只有影响排版的设置才重新分页；背景色 / 翻页方式等直接生效。
                 if shouldRepaginate {
-                    state.pages = paginationService.paginate(state.text, newConfig)
+                    state.pages = paginationService.paginate(state.displayText, newConfig)
                     // 🔴 数据契约：改设置后用 offset 重新定位，不丢位置。
                 }
                 let settingsStore = readingSettingsStore
@@ -218,7 +268,7 @@ public struct ReaderFeature: Reducer {
                 state.config = merged
                 state.precacheCount = min(max(settings.precacheCount, 0), Self.maxPrecacheCount)
                 if shouldRepaginate {
-                    state.pages = paginationService.paginate(state.text, merged)
+                    state.pages = paginationService.paginate(state.displayText, merged)
                 }
                 return .none
             }

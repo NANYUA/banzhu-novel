@@ -22,6 +22,10 @@ public struct Book: Identifiable, Codable, Hashable {
     public var lastChapter: String = ""
     public var wordCount: String = ""          // 字数，如 "175万字"
     public var coverUrl: String = ""
+    public var status: String = ""             // 连载中 / 已完本
+    public var category: String = ""
+    public var tags: [String] = []
+    public var lastUpdated: String = ""
 
     // ⚠️ 以下三项是**阅读进度**，由 Core 层产生而非引擎产生。
     // 严格说应该拆成 `EngineBook` 与本地存储模型两部分，此处暂沿用旧结构，

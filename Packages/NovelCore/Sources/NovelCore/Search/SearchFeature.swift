@@ -23,6 +23,10 @@ public struct SearchFeature: Reducer {
             isLoading: Bool = false,
             errorMessage: String? = nil,
             addingPaths: Set<String> = [],
+            addedPaths: Set<String> = [],
+            page: Int = 1,
+            isLoadingMore: Bool = false,
+            hasMore: Bool = false,
             notice: String? = nil,
             lastAddedRow: ShelfRow? = nil
         ) {
@@ -32,6 +36,10 @@ public struct SearchFeature: Reducer {
             self.isLoading = isLoading
             self.errorMessage = errorMessage
             self.addingPaths = addingPaths
+            self.addedPaths = addedPaths
+            self.page = page
+            self.isLoadingMore = isLoadingMore
+            self.hasMore = hasMore
             self.notice = notice
             self.lastAddedRow = lastAddedRow
         }
@@ -54,6 +62,18 @@ public struct SearchFeature: Reducer {
         /// 正在加入书架的书路径集合。按书路径去重，重复点击不会并发发两次。
         public var addingPaths: Set<String> = []
 
+        /// 已加入书架的书路径；用于隐藏加入按钮并阻止重复加入。
+        public var addedPaths: Set<String> = []
+
+        /// 已加载到第几页。
+        public var page = 1
+
+        /// 正在加载下一页。
+        public var isLoadingMore = false
+
+        /// 是否还有下一页。页面返回满 30 本时继续允许加载。
+        public var hasMore = false
+
         /// 加入书架结果提示（成功/重复/失败），不阻断搜索列表。
         public var notice: String?
 
@@ -70,6 +90,12 @@ public struct SearchFeature: Reducer {
         case searchSucceeded([Book])
         /// 搜索失败。
         case searchFailed(String)
+        /// 加载下一页。
+        case loadMore
+        /// 下一页成功。
+        case moreSucceeded([Book], page: Int)
+        /// 下一页失败。
+        case moreFailed(String)
         /// 点击搜索结果里的「加入书架」。
         case addRequested(Book)
         /// 加入成功。
@@ -100,6 +126,8 @@ public struct SearchFeature: Reducer {
                 state.isLoading = true
                 state.errorMessage = nil
                 state.notice = nil
+                state.page = 1
+                state.hasMore = false
                 let service = searchService
                 return .run { send in
                     do {
@@ -113,6 +141,8 @@ public struct SearchFeature: Reducer {
             case let .searchSucceeded(books):
                 state.results = books
                 state.isLoading = false
+                state.page = 1
+                state.hasMore = books.count >= 30
                 return .none
 
             case let .searchFailed(message):
@@ -121,8 +151,41 @@ public struct SearchFeature: Reducer {
                 state.errorMessage = message
                 return .none
 
+            case .loadMore:
+                guard state.hasMore, !state.isLoading, !state.isLoadingMore else {
+                    return .none
+                }
+                let keyword = state.submittedKeyword
+                guard !keyword.isEmpty else { return .none }
+                state.isLoadingMore = true
+                state.notice = nil
+                let nextPage = state.page + 1
+                let service = searchService
+                return .run { send in
+                    do {
+                        let books = try await service.search(keyword, nextPage)
+                        await send(.moreSucceeded(books, page: nextPage))
+                    } catch {
+                        await send(.moreFailed(error.localizedDescription))
+                    }
+                }
+
+            case let .moreSucceeded(books, page):
+                let existing = Set(state.results.map(\.path))
+                state.results.append(contentsOf: books.filter { !existing.contains($0.path) })
+                state.page = page
+                state.isLoadingMore = false
+                state.hasMore = books.count >= 30
+                return .none
+
+            case let .moreFailed(message):
+                state.isLoadingMore = false
+                state.notice = message
+                return .none
+
             case let .addRequested(book):
                 guard !state.addingPaths.contains(book.path) else { return .none }
+                guard !state.addedPaths.contains(book.path) else { return .none }
                 state.addingPaths.insert(book.path)
                 state.notice = nil
                 let adder = shelfAdder
@@ -137,6 +200,7 @@ public struct SearchFeature: Reducer {
 
             case let .addSucceeded(row):
                 state.addingPaths.remove(row.bookPath)
+                state.addedPaths.insert(row.bookPath)
                 state.notice = "《\(row.title)》已加入书架。"
                 state.lastAddedRow = row
                 return .none

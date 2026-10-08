@@ -33,7 +33,7 @@ struct RootView: View {
                     Label("书架", systemImage: "books.vertical")
                 }
 
-            SearchView(store: searchStore) { row in
+            SearchView(store: searchStore, downloadStore: downloadStore) { row in
                 bookshelfStore.send(.addSucceeded(row))
             }
             .tabItem {

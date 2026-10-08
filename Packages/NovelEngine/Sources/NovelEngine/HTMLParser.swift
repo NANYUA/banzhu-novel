@@ -104,6 +104,46 @@ enum HTMLParser {
         if let w = firstGroup("字数[：:]\\s*([0-9.]+\\s*[万千]?字?)", in: html, opts: [.caseInsensitive]) {
             book.wordCount = normalizeWords(w)
         }
+        let coverPatterns = [
+            "<div[^>]*class=\"[^\"]*(?:cover|book-img|imgbox)[^\"]*\"[^>]*>.*?<img[^>]+src=\"([^\"]+)\"",
+            "<img[^>]+(?:id|class)=\"[^\"]*(?:cover|bookimg)[^\"]*\"[^>]+src=\"([^\"]+)\"",
+            "<meta[^>]+property=\"og:image\"[^>]+content=\"([^\"]+)\"",
+        ]
+        for pattern in coverPatterns {
+            if let cover = firstGroup(pattern, in: html) {
+                book.coverUrl = cover
+                break
+            }
+        }
+        if let status = firstGroup("(?:状态|连载状态)[：:]\\s*([^<\\s]+)", in: html) {
+            book.status = stripTags(status)
+        }
+        if let category = firstGroup("(?:分类|类别|所属分类)[：:]\\s*([^<\\s]+)", in: html) {
+            book.category = stripTags(category)
+        }
+        if let last = firstGroup("最新章节[：:]\\s*<a[^>]*>([^<]+)</a>", in: html)
+            ?? firstGroup("最新章节[：:]\\s*([^<\\n]+)", in: html) {
+            book.lastChapter = stripTags(last)
+        }
+        if let updated = firstGroup("(?:更新时间|最后更新)[：:]\\s*([^<\\n]+)", in: html) {
+            book.lastUpdated = stripTags(updated)
+        }
+        if let re = try? NSRegularExpression(
+            pattern: "class=\"[^\"]*tag[^\"]*\"[^>]*>([^<]+)<",
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) {
+            let ns = html as NSString
+            var tags: [String] = []
+            var seen = Set<String>()
+            for match in re.matches(in: html, options: [], range: NSRange(location: 0, length: ns.length)) {
+                guard match.numberOfRanges > 1 else { continue }
+                let tag = stripTags(ns.substring(with: match.range(at: 1)))
+                if !tag.isEmpty, seen.insert(tag).inserted {
+                    tags.append(tag)
+                }
+            }
+            book.tags = tags
+        }
         // 简介：先定位 "mod book-intro" 再取其中的 class="bd"（避开 bd column-2 的章节列表）
         if let range = html.range(of: "mod book-intro") {
             let tail = String(html[range.lowerBound...])

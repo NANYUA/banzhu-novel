@@ -20,13 +20,32 @@ import UIKit
 /// 替换 NovelCore 里的 Fake 占位 —— 这样真机上分页才是真实排版。
 struct ReaderView: View {
     let store: StoreOf<ReaderFeature>
+    let bookPath: String
+    let chapters: [ChapterItem]
+    let downloadStore: StoreOf<DownloadFeature>?
 
     @State private var isShowingSettings = false
+    @State private var isShowingDirectory = false
+    @State private var isShowingSearch = false
+    @State private var isChromeVisible = false
+    @Environment(\.dismiss) private var dismiss
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
-    init(chapterPath: String) {
+    init(
+        chapterPath: String,
+        chapterName: String = "",
+        bookPath: String = "",
+        chapters: [ChapterItem] = [],
+        downloadStore: StoreOf<DownloadFeature>? = nil
+    ) {
+        self.bookPath = bookPath
+        self.chapters = chapters
+        self.downloadStore = downloadStore
         store = Store(
-            initialState: ReaderFeature.State(chapterPath: chapterPath)
+            initialState: ReaderFeature.State(
+                chapterPath: chapterPath,
+                chapterName: chapterName
+            )
         ) {
             ReaderFeature()
         } withDependencies: {
@@ -40,6 +59,9 @@ struct ReaderView: View {
     /// 测试/嵌入用：直接接收外部 store（含 preview 等场景）。
     init(store: StoreOf<ReaderFeature>) {
         self.store = store
+        bookPath = ""
+        chapters = []
+        downloadStore = nil
     }
 
     var body: some View {
@@ -49,24 +71,28 @@ struct ReaderView: View {
                     backgroundColor(for: viewStore.config)
                         .ignoresSafeArea()
 
-                    readerContent(viewStore, availableWidth: geometry.size.width)
+                    readerContent(
+                        viewStore,
+                        availableWidth: geometry.size.width,
+                        availableHeight: geometry.size.height
+                    )
+
+                    if isChromeVisible {
+                        readerChrome(viewStore)
+                            .transition(.opacity)
+                    }
                 }
                 .task {
                     viewStore.send(.loadSavedSettings(geometry.size))
-                    viewStore.send(.loadChapter(viewStore.chapterPath))
+                    viewStore.send(
+                        .loadChapterWithName(viewStore.chapterPath, viewStore.chapterName)
+                    )
                 }
             }
             .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "textformat.size")
-                    }
-                    .accessibilityLabel("阅读设置")
-                }
-            }
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(.hidden, for: .tabBar)
             .sheet(isPresented: $isShowingSettings) {
                 ReaderSettingsView(
                     configuration: viewStore.config,
@@ -79,6 +105,20 @@ struct ReaderView: View {
                     }
                 )
             }
+            .sheet(isPresented: $isShowingDirectory) {
+                directorySheet(viewStore)
+            }
+            .sheet(isPresented: $isShowingSearch) {
+                ReaderSearchView(
+                    bookPath: bookPath,
+                    onSelect: { chapter in
+                        viewStore.send(
+                            .loadChapterWithName(chapter.chapterPath, chapter.chapterName)
+                        )
+                        isShowingSearch = false
+                    }
+                )
+            }
             .preferredColorScheme(viewStore.config.appearanceMode.preferredColorScheme)
         }
     }
@@ -88,7 +128,8 @@ struct ReaderView: View {
     @ViewBuilder
     private func readerContent(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        availableWidth: CGFloat
+        availableWidth: CGFloat,
+        availableHeight _: CGFloat
     ) -> some View {
         if viewStore.isLoading, viewStore.text.isEmpty {
             ProgressView("加载中…")
@@ -127,9 +168,15 @@ struct ReaderView: View {
                     viewStore.send(.jumpToOffset(offset))
                 }
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(configuration.pageTurnMode == .scroll)
             .id(pageIdentity(viewStore))
-            .transition(pageTransition(for: configuration.pageTurnAnimation))
+            .transition(
+                pageTransition(
+                    for: configuration.pageTurnAnimation,
+                    direction: viewStore.pageTurnDirection
+                )
+            )
         }
         .contentShape(Rectangle())
         .animation(
@@ -139,7 +186,16 @@ struct ReaderView: View {
             value: viewStore.currentPageIndex
         )
 
-        return readerGesture(page, viewStore: viewStore, availableWidth: availableWidth)
+        return readerGesture(
+            page,
+            viewStore: viewStore,
+            availableWidth: availableWidth,
+            onCenterTap: {
+                withAnimation(.spring(response: 0.3, dampingFraction: 1)) {
+                    isChromeVisible.toggle()
+                }
+            }
+        )
     }
 
     // MARK: - 手势
@@ -148,7 +204,8 @@ struct ReaderView: View {
     private func readerGesture(
         _ content: some View,
         viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        availableWidth: CGFloat
+        availableWidth: CGFloat,
+        onCenterTap: @escaping () -> Void
     ) -> some View {
         switch viewStore.config.pageTurnMode {
         case .slide:
@@ -165,13 +222,29 @@ struct ReaderView: View {
                         }
                     }
             )
+            .simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        if value.location.x >= availableWidth / 3,
+                           value.location.x <= availableWidth * 2 / 3
+                        {
+                            onCenterTap()
+                        }
+                    }
+            )
 
         case .tap:
             content.gesture(
                 SpatialTapGesture()
                     .onEnded { value in
                         if value.location.x < availableWidth / 2 {
-                            viewStore.send(.prevPage)
+                            if value.location.x > availableWidth / 3 {
+                                onCenterTap()
+                            } else {
+                                viewStore.send(.prevPage)
+                            }
+                        } else if value.location.x < availableWidth * 2 / 3 {
+                            onCenterTap()
                         } else {
                             viewStore.send(.nextPage)
                         }
@@ -179,8 +252,152 @@ struct ReaderView: View {
             )
 
         case .scroll:
-            content
+            content.simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        if value.location.x >= availableWidth / 3,
+                           value.location.x <= availableWidth * 2 / 3
+                        {
+                            onCenterTap()
+                        }
+                    }
+            )
         }
+    }
+
+    private func readerChrome(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) -> some View {
+        VStack {
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("返回", systemImage: "chevron.left")
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Text(viewStore.chapterName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button {
+                    isChromeVisible = false
+                } label: {
+                    Image(systemName: "eye.slash")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("隐藏控制栏")
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                chromeButton("目录", systemImage: "list.bullet") {
+                    isShowingDirectory = true
+                }
+                chromeButton("下载", systemImage: "arrow.down.circle") {
+                    downloadCurrentChapter(viewStore)
+                }
+                chromeButton("搜索", systemImage: "magnifyingglass") {
+                    isShowingSearch = true
+                }
+                chromeButton("设置", systemImage: "textformat.size") {
+                    isShowingSettings = true
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
+        }
+        .background(
+            LinearGradient(
+                colors: [.black.opacity(0.25), .clear, .black.opacity(0.25)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+        )
+    }
+
+    private func chromeButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 18, weight: .medium))
+                Text(title)
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+    }
+
+    private func directorySheet(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) -> some View {
+        NavigationStack {
+            List(chapters) { chapter in
+                Button {
+                    viewStore.send(.loadChapterWithName(chapter.path, chapter.name))
+                    isShowingDirectory = false
+                } label: {
+                    HStack {
+                        Text(chapter.name)
+                            .lineLimit(1)
+                        Spacer()
+                        if chapter.path == viewStore.chapterPath {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle("目录")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") {
+                        isShowingDirectory = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func downloadCurrentChapter(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) {
+        guard let downloadStore,
+              let chapter = chapters.first(where: { $0.path == viewStore.chapterPath })
+        else {
+            return
+        }
+        downloadStore.send(.enqueue([
+            DownloadChapterRequest(
+                bookPath: bookPath,
+                bookTitle: "",
+                chapterPath: chapter.path,
+                chapterName: chapter.name,
+                chapterNumber: chapter.number
+            ),
+        ]))
+        isChromeVisible = false
     }
 
     // MARK: - 外观
@@ -198,20 +415,29 @@ struct ReaderView: View {
         return "page-\(viewStore.currentPageIndex)"
     }
 
-    private func pageTransition(for animation: PageTurnAnimation) -> AnyTransition {
+    private func pageTransition(
+        for animation: PageTurnAnimation,
+        direction: PageTurnDirection
+    ) -> AnyTransition {
         switch animation {
         case .none:
             .identity
         case .cover:
-            .asymmetric(
-                insertion: .move(edge: .trailing),
-                removal: .move(edge: .leading)
-            )
+            direction == .forward
+                ? .asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading))
+                : .asymmetric(insertion: .move(edge: .leading), removal: .move(edge: .trailing))
         case .curl:
-            .asymmetric(
-                insertion: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity),
-                removal: .scale(scale: 0.94, anchor: .leading).combined(with: .opacity)
-            )
+            if direction == .forward {
+                .asymmetric(
+                    insertion: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity),
+                    removal: .scale(scale: 0.94, anchor: .leading).combined(with: .opacity)
+                )
+            } else {
+                .asymmetric(
+                    insertion: .scale(scale: 0.94, anchor: .leading).combined(with: .opacity),
+                    removal: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity)
+                )
+            }
         }
     }
 
@@ -234,7 +460,7 @@ struct ReaderView: View {
     ) -> String {
         let pages = viewStore.pages
         let offset = viewStore.currentOffset
-        let text = viewStore.text
+        let text = viewStore.displayText
 
         guard !pages.isEmpty, !text.isEmpty else { return text }
         guard let page = pages.first(where: { offset >= $0.location && offset < $0.location + $0.length }) else {
@@ -267,6 +493,7 @@ private struct PageTextView: UIViewRepresentable {
         textView.isSelectable = false
         textView.showsVerticalScrollIndicator = false
         textView.alwaysBounceVertical = true
+        textView.textContainer.lineFragmentPadding = 0
         textView.delegate = context.coordinator
         return textView
     }
@@ -282,6 +509,7 @@ private struct PageTextView: UIViewRepresentable {
         context.coordinator.appliedConfiguration = configuration
 
         uiView.isScrollEnabled = configuration.pageTurnMode == .scroll
+        uiView.textContainer.lineFragmentPadding = 0
         uiView.textContainerInset = UIEdgeInsets(
             top: configuration.inset.top,
             left: configuration.inset.leading,

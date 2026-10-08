@@ -76,9 +76,16 @@ final class HTMLParserTests: XCTestCase {
     /// 照 <h1> + 作者： + 字数： + class="bd" 的结构构造
     private let bookInfoHTML = """
     <div class="mod book-intro">
+      <div class="cover"><img src="https://example.com/book.jpg"></div>
       <h1>楚香君游戏</h1>
       <p>作者：测试作者甲</p>
       <p>字数：125万字</p>
+      <p>状态：连载中</p>
+      <p>分类：玄幻</p>
+      <a class="tag">热血</a>
+      <a class="tag">冒险</a>
+      <p>最新章节：<a href="/49/49034/9.html">第9章 新的开始</a></p>
+      <p>更新时间：2026-10-09</p>
       <div class="bd">这是一本测试用的简介，用于验证解析逻辑。</div>
       <div class="bd column-2">
         <ul><li><a href="/49/49034/1.html">第1章</a></li></ul>
@@ -99,6 +106,16 @@ final class HTMLParserTests: XCTestCase {
         let book = HTMLParser.parseBookInfo(bookInfoHTML, path: "/49/49034/")
         XCTAssertTrue(book.intro.contains("测试用的简介"), "简介取错块：\(book.intro)")
         XCTAssertFalse(book.intro.contains("第1章"), "简介混入了章节列表")
+    }
+
+    func testParseBookInfo_详情字段完整解析() {
+        let book = HTMLParser.parseBookInfo(bookInfoHTML, path: "/49/49034/")
+        XCTAssertEqual(book.coverUrl, "https://example.com/book.jpg")
+        XCTAssertEqual(book.status, "连载中")
+        XCTAssertEqual(book.category, "玄幻")
+        XCTAssertEqual(book.tags, ["热血", "冒险"])
+        XCTAssertEqual(book.lastChapter, "第9章 新的开始")
+        XCTAssertEqual(book.lastUpdated, "2026-10-09")
     }
 
     func testParseBookInfo_空输入不崩溃() {

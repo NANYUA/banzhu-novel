@@ -88,6 +88,7 @@ final class ReaderFeatureTests: XCTestCase {
 
         await store.send(.prevPage) {
             $0.currentOffset = 0
+            $0.pageTurnDirection = .backward
         }
         await store.finish()
     }
@@ -225,6 +226,32 @@ final class ReaderFeatureTests: XCTestCase {
         await store.finish()
         XCTAssertTrue(store.state.pages.isEmpty)
         XCTAssertEqual(store.state.currentOffset, 0)
+    }
+
+    func test章节名参与第一页分页() async {
+        let displayText = "第一章 开始\n\n" + Self.sampleText
+        let expectedPages = Paginator(measurer: FakeMeasuring(widthBudget: 10)).paginate(
+            text: displayText,
+            configuration: ReaderFeature.State(chapterPath: "/1/1.html").config
+        )
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await store.send(.loadChapterWithName("/1/1.html", "第一章 开始")) {
+            $0.chapterPath = "/1/1.html"
+            $0.chapterName = "第一章 开始"
+            $0.isLoading = true
+            $0.text = ""
+            $0.pages = []
+            $0.currentOffset = 0
+        }
+        await store.receive(.contentLoaded(Self.sampleText)) {
+            $0.text = Self.sampleText
+            $0.isLoading = false
+            $0.pages = expectedPages
+            $0.currentOffset = 0
+        }
+        await store.finish()
+        XCTAssertTrue(store.state.displayText.hasPrefix("第一章 开始\n\n"))
+        XCTAssertFalse(store.state.pages.isEmpty)
     }
 
     /// 内容加载成功后必须写入阅读进度，供书架排序与 LRU 淘汰使用。

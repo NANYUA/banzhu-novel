@@ -85,7 +85,11 @@ enum ShelfAdderLive {
             author: book.author,
             intro: book.intro,
             coverUrl: book.coverUrl,
-            wordCount: book.wordCount
+            wordCount: book.wordCount,
+            status: book.status,
+            category: book.category,
+            tags: book.tags.joined(separator: ","),
+            lastUpdated: book.lastUpdated
         )
         // 目录快照：需求要求离线也能显示「最新章节」与「未读章数」
         record.latestChapterName = chapters.last?.name

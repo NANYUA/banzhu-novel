@@ -249,14 +249,6 @@ private extension BookshelfView {
                 .disabled(viewStore.selectedBookPaths.isEmpty)
                 .accessibilityLabel("批量操作")
             }
-        } else {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    viewStore.send(.editModeChanged(true))
-                } label: {
-                    Label("选择", systemImage: "checkmark.circle")
-                }
-            }
         }
     }
 }
@@ -298,15 +290,9 @@ private extension BookshelfView {
             .buttonStyle(.plain)
         } else {
             NavigationLink {
-                ChapterListView(
-                    store: Store(
-                        initialState: ChapterListFeature.State(
-                            bookPath: row.bookPath,
-                            bookTitle: row.title
-                        )
-                    ) {
-                        ChapterListFeature()
-                    },
+                BookDetailView(
+                    bookPath: row.bookPath,
+                    title: row.title,
                     downloadStore: downloadStore
                 )
             } label: {
@@ -404,8 +390,9 @@ private struct BookRow: View {
                     .background(.red, in: Circle())
             }
         }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle()) // 整行可点
+        .padding(12)
+        .contentShape(Rectangle()) // 整张卡片可点
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var placeholder: some View {

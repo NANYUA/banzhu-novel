@@ -93,6 +93,93 @@ final class HostRoutingTests: XCTestCase {
         XCTAssertEqual(recorded, ["https://two.example"])
     }
 
+    func test冷却中的host不会请求() async throws {
+        let transport = FakeTransport { url in
+            if url.host == "standby.example" {
+                return "standby-ok"
+            }
+            throw NetworkError.badResponse
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: ["https://start.example", "https://standby.example"],
+                autoSwitchHost: true,
+                verificationStartTier: .second,
+                currentHost: "https://start.example",
+                hostStates: [
+                    HostRouteState(
+                        value: "https://start.example",
+                        status: .guarded,
+                        coolingUntil: Date().addingTimeInterval(600)
+                    ),
+                    HostRouteState(
+                        value: "https://standby.example",
+                        status: .unguarded,
+                        isStandby: true
+                    ),
+                ]
+            )
+        )
+
+        let html = try await engine.requestForTesting(path: "/chapter.html")
+
+        XCTAssertEqual(html, "standby-ok")
+        let hosts = await transport.requestedHosts()
+        XCTAssertEqual(hosts, ["standby.example"])
+    }
+
+    func test禁用导航时不会解析导航页() async {
+        let transport = FakeTransport { _ in
+            throw NetworkError.httpStatus(503)
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: [],
+                navigationURLs: ["https://nav.example.com"],
+                autoSwitchHost: true,
+                currentHost: "https://start.example",
+                navigationStates: ["https://nav.example.com": .disabled]
+            )
+        )
+
+        _ = try? await engine.requestForTesting(path: "/chapter.html")
+
+        let hosts = await transport.requestedHosts()
+        XCTAssertEqual(hosts, ["start.example"])
+    }
+
+    func test备用host优先于其它未知host() async throws {
+        let transport = FakeTransport { url in
+            if url.host == "standby.example" {
+                return "standby-ok"
+            }
+            throw NetworkError.httpStatus(503)
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: ["https://unknown.example", "https://standby.example"],
+                autoSwitchHost: true,
+                currentHost: "https://start.example",
+                hostStates: [
+                    HostRouteState(
+                        value: "https://standby.example",
+                        status: .unguarded,
+                        isStandby: true
+                    ),
+                ]
+            )
+        )
+
+        let html = try await engine.requestForTesting(path: "/chapter.html")
+
+        XCTAssertEqual(html, "standby-ok")
+        let hosts = await transport.requestedHosts()
+        XCTAssertEqual(hosts, ["start.example", "standby.example"])
+    }
+
     func test第一梯队触发模式在当前host被盾时立即验证() async throws {
         let gate = GuardGate()
         let transport = FakeTransport { url in
@@ -194,6 +281,35 @@ final class HostRoutingTests: XCTestCase {
         XCTAssertEqual(html, "after-guard")
         let passCount = await gate.passCount()
         XCTAssertEqual(passCount, 1)
+    }
+
+    func test切换host后目录仍保存相对路径() async throws {
+        let toc = """
+        <div><a href="/49/49034/1.html">第1章</a></div>
+        """
+        let transport = FakeTransport { _ in toc }
+        let engine = NovelEngine(network: transport)
+
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: ["https://two.example"],
+                autoSwitchHost: false,
+                currentHost: "https://one.example"
+            )
+        )
+        let first = try await engine.chapters(bookPath: "/49/49034/")
+
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: ["https://one.example"],
+                autoSwitchHost: false,
+                currentHost: "https://two.example"
+            )
+        )
+        let second = try await engine.chapters(bookPath: "/49/49034/")
+
+        XCTAssertEqual(first.first?.path, "/49/49034/1.html")
+        XCTAssertEqual(first.first?.path, second.first?.path)
     }
 }
 
