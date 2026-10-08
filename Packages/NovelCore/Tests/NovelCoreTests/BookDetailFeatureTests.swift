@@ -51,7 +51,11 @@ final class BookDetailFeatureTests: XCTestCase {
     }
 
     func test加载失败时保留回退值并显示错误() async {
-        struct Failed: Error {}
+        struct Failed: LocalizedError {
+            var errorDescription: String? {
+                "加载失败"
+            }
+        }
         let fallback = BookDetail(book: Book(path: "/1/", title: "搜索结果"))
         let store = TestStore(initialState: BookDetailFeature.State(fallback: fallback)) {
             BookDetailFeature()
@@ -62,9 +66,9 @@ final class BookDetailFeatureTests: XCTestCase {
         await store.send(.onAppear) {
             $0.isLoading = true
         }
-        await store.receive(.loadFailed("Failed()")) {
+        await store.receive(.loadFailed("加载失败")) {
             $0.isLoading = false
-            $0.errorMessage = "Failed()"
+            $0.errorMessage = "加载失败"
         }
         XCTAssertEqual(store.state.detail, fallback)
         await store.finish()
