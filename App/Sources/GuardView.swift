@@ -18,7 +18,6 @@ struct GuardOverlayView: View {
                 ZStack {
                     if viewStore.phase == .autoPassing {
                         autoPassing(viewStore)
-                            .frame(maxHeight: .infinity, alignment: .bottom)
                     } else {
                         manualVerification(
                             request: request,
@@ -57,11 +56,18 @@ struct GuardOverlayView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(.white.opacity(0.18), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+        .padding(.horizontal, 14)
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        .padding(.bottom, 14)
     }
 
     private func manualVerification(
@@ -104,7 +110,7 @@ struct GuardOverlayView: View {
             }
             .padding(16)
         }
-        .background(Color(.systemBackground))
+        .background(.regularMaterial)
         .task(id: request.id) {
             manualController.onComplete = {
                 viewStore.send(.manualCompleted)

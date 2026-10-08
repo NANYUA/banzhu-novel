@@ -23,18 +23,18 @@ struct SiteSettingsView: View {
                             )
                         )
                         Picker(
-                            "验证触发时机",
+                            "何时验证",
                             selection: Binding(
                                 get: { viewStore.settings.verificationStartTier },
                                 set: { viewStore.send(.setVerificationStartTier($0)) }
                             )
                         ) {
-                            Text("第一梯队").tag(VerificationStartTier.first)
-                            Text("第二梯队").tag(VerificationStartTier.second)
+                            Text("先换 host").tag(VerificationStartTier.second)
+                            Text("立即验证").tag(VerificationStartTier.first)
                         }
                         .pickerStyle(.segmented)
                     } footer: {
-                        Text("第一梯队：当前 host 被盾就验证。第二梯队：先尝试无需验证的 host，再验证。")
+                        Text("先换 host：优先尝试不需要验证的地址。立即验证：当前地址被盾时马上验证。")
                     }
 
                     navigationSection(viewStore)
