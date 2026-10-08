@@ -6,11 +6,12 @@ import XCTest
 /// 阅读自动缓存与本地优先读取测试。
 @MainActor
 final class ChapterCacheStoreTests: XCTestCase {
-    private var container: ModelContainer!
-    private var context: ModelContext!
+    private var container: ModelContainer?
+    private var context: ModelContext?
 
     override func setUpWithError() throws {
-        container = try NovelStore.makeContainer(inMemory: true)
+        let container = try NovelStore.makeContainer(inMemory: true)
+        self.container = container
         context = ModelContext(container)
     }
 
@@ -20,6 +21,7 @@ final class ChapterCacheStoreTests: XCTestCase {
     }
 
     func test自动缓存当前与后续三章_跳过已下载和已有缓存() async throws {
+        let context = try XCTUnwrap(context)
         let bookPath = "/cache/reader/"
         let chapter1 = makeChapter(bookPath: bookPath, number: 1, source: .notDownloaded)
         let chapter2 = makeChapter(
@@ -72,6 +74,7 @@ final class ChapterCacheStoreTests: XCTestCase {
     }
 
     func test预缓存数量为零时只缓存当前章() async throws {
+        let context = try XCTUnwrap(context)
         let chapter = makeChapter(
             bookPath: "/cache/reader/zero/",
             number: 1,
@@ -103,6 +106,7 @@ final class ChapterCacheStoreTests: XCTestCase {
     }
 
     func test阅读优先读取本地缓存正文() throws {
+        let context = try XCTUnwrap(context)
         let chapter = makeChapter(
             bookPath: "/cache/reader/local/",
             number: 1,
@@ -124,6 +128,7 @@ final class ChapterCacheStoreTests: XCTestCase {
     }
 
     func test没有本地正文时不返回缓存结果() throws {
+        let context = try XCTUnwrap(context)
         let chapter = makeChapter(
             bookPath: "/cache/reader/network/",
             number: 1,
