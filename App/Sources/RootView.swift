@@ -51,8 +51,10 @@ struct RootView: View {
                 }
         }
         .overlay {
-            GuardOverlayView(store: guardStore)
-                .allowsHitTesting(guardStore.state.isPresented)
+            WithViewStore(guardStore, observe: \.isPresented) { viewStore in
+                GuardOverlayView(store: guardStore)
+                    .allowsHitTesting(viewStore.state)
+            }
         }
         .task {
             siteStore.send(.task)
