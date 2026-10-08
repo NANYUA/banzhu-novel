@@ -340,11 +340,13 @@ final class ReaderFeatureTests: XCTestCase {
     /// 修改阅读配置后必须持久化（含预缓存章数）。
     func test修改配置自动保存() async {
         let recorder = SettingsRecorder()
-        let store = makeStore(text: Self.sampleText) { _ in
-            Self.sampleText
-        } settingsStore: ReadingSettingsStore(
-            load: { nil },
-            save: { settings in recorder.record(settings) }
+        let store = makeStore(
+            text: Self.sampleText,
+            loader: { _ in Self.sampleText },
+            settingsStore: ReadingSettingsStore(
+                load: { nil },
+                save: { settings in recorder.record(settings) }
+            )
         )
 
         await loadSample(into: store)
