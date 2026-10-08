@@ -11,6 +11,7 @@ struct GuardOverlayView: View {
     let store: StoreOf<GuardFeature>
 
     @StateObject private var manualController = ManualGuardWebController()
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -59,7 +60,12 @@ struct GuardOverlayView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .background(
+            reduceTransparency
+                ? AnyShapeStyle(Color(.systemBackground))
+                : AnyShapeStyle(.ultraThinMaterial),
+            in: RoundedRectangle(cornerRadius: 18)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(.white.opacity(0.18), lineWidth: 0.5)

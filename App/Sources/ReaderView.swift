@@ -30,6 +30,7 @@ struct ReaderView: View {
     @State private var isChromeVisible = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
     init(
@@ -376,8 +377,12 @@ private extension ReaderView {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(
+            reduceTransparency
+                ? AnyShapeStyle(Color(.systemBackground))
+                : AnyShapeStyle(.regularMaterial),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
         .padding(.horizontal, 14)
         .padding(.bottom, 12)
     }
