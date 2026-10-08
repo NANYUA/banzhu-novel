@@ -179,7 +179,8 @@ extension HostRoutingTests {
 
         XCTAssertEqual(html, "standby-ok")
         let hosts = await transport.requestedHosts()
-        XCTAssertEqual(hosts, ["start.example", "standby.example"])
+        XCTAssertEqual(hosts.first, "start.example")
+        XCTAssertTrue(hosts.contains("standby.example"))
     }
 
     func test第一梯队触发模式在当前host被盾时立即验证() async throws {

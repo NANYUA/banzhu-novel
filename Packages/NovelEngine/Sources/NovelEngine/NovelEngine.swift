@@ -271,13 +271,14 @@ public actor NovelEngine {
                     if routing.verificationStartTier == .first, host == startingHost {
                         enterGuardImmediately = true
                     }
+                } else {
+                    guard error.isHostUnavailable else {
+                        config = SiteConfig(host: startingHost)
+                        throw error
+                    }
+                    markHost(host, status: .unavailable)
+                    lastError = error
                 }
-                guard error.isHostUnavailable else {
-                    config = SiteConfig(host: startingHost)
-                    throw error
-                }
-                markHost(host, status: .unavailable)
-                lastError = error
             }
         }
 
