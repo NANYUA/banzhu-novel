@@ -422,9 +422,7 @@ private func updateNetworkNotice(state: inout DownloadFeature.State) {
     case .unknown:
         break
     default:
-        if state.notice == "网络不可用，联网后会自动继续。"
-            || state.notice == "当前为蜂窝网络，已等待 WiFi。"
-        {
+        if state.notice == "网络不可用，联网后会自动继续。" || state.notice == "当前为蜂窝网络，已等待 WiFi。" {
             state.notice = nil
         }
     }
