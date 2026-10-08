@@ -27,60 +27,307 @@ struct BookshelfView: View {
     let store: StoreOf<BookshelfFeature>
     let downloadStore: StoreOf<DownloadFeature>
 
+    @State private var isShowingNewGroupAlert = false
+    @State private var newGroupName = ""
+    @State private var renamingGroup: ShelfGroupSnapshot?
+    @State private var renameGroupName = ""
+    @State private var isConfirmingDelete = false
+
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             NavigationStack {
-                ZStack {
-                    if viewStore.isLoading, viewStore.rows.isEmpty {
-                        // 首次加载中，还没数据也不确定是否失败
-                        ProgressView("加载中…")
+                VStack(spacing: 0) {
+                    groupBar(viewStore)
+
+                    ZStack {
+                        if viewStore.isLoading, viewStore.rows.isEmpty {
+                            // 首次加载中，还没数据也不确定是否失败
+                            ProgressView("加载中…")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if let message = viewStore.errorMessage, viewStore.rows.isEmpty {
+                            // 加载失败 + 无数据 → 显示错误 + 重试
+                            VStack(spacing: 16) {
+                                Text("加载失败")
+                                    .font(.title3.bold())
+                                Text(message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button("重试") {
+                                    viewStore.send(.onAppear)
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if let message = viewStore.errorMessage, viewStore.rows.isEmpty {
-                        // 加载失败 + 无数据 → 显示错误 + 重试
-                        VStack(spacing: 16) {
-                            Text("加载失败")
-                                .font(.title3.bold())
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Button("重试") {
-                                viewStore.send(.onAppear)
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        // 有数据（或加载失败但有旧数据）—— 正常列表
-                        List(viewStore.rows) { row in
-                            // 点书 → 目录页（章节列表）
-                            NavigationLink {
-                                ChapterListView(
-                                    store: Store(
-                                        initialState: ChapterListFeature.State(
-                                            bookPath: row.bookPath,
-                                            bookTitle: row.title
-                                        )
-                                    ) {
-                                        ChapterListFeature()
-                                    },
-                                    downloadStore: downloadStore
-                                )
-                            } label: {
-                                BookRow(row: row)
-                            }
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        }
-                        .listStyle(.plain)
-                        .refreshable {
-                            await viewStore.send(.onAppear).finish()
+                        } else {
+                            shelfList(viewStore)
                         }
                     }
                 }
                 .navigationTitle("书架")
                 .onAppear { viewStore.send(.onAppear) }
+                .toolbar {
+                    toolbarContent(viewStore)
+                }
+                .alert("新建分组", isPresented: $isShowingNewGroupAlert) {
+                    TextField("分组名", text: $newGroupName)
+                    Button("创建") {
+                        viewStore.send(.createGroup(newGroupName))
+                        newGroupName = ""
+                    }
+                    Button("取消", role: .cancel) {
+                        newGroupName = ""
+                    }
+                }
+                .alert(
+                    "重命名分组",
+                    isPresented: Binding(
+                        get: { renamingGroup != nil },
+                        set: {
+                            if !$0 {
+                                renamingGroup = nil
+                            }
+                        }
+                    )
+                ) {
+                    TextField("分组名", text: $renameGroupName)
+                    Button("保存") {
+                        if let group = renamingGroup {
+                            viewStore.send(.renameGroup(group.id, renameGroupName))
+                        }
+                        renamingGroup = nil
+                        renameGroupName = ""
+                    }
+                    Button("取消", role: .cancel) {
+                        renamingGroup = nil
+                        renameGroupName = ""
+                    }
+                }
+                .confirmationDialog(
+                    "删除选中的 \(viewStore.selectedBookPaths.count) 本书？",
+                    isPresented: $isConfirmingDelete,
+                    titleVisibility: .visible
+                ) {
+                    Button("删除", role: .destructive) {
+                        for path in viewStore.selectedBookPaths {
+                            downloadStore.send(.cancelBook(path))
+                        }
+                        viewStore.send(.deleteSelectedBooks)
+                    }
+                    Button("取消", role: .cancel) {}
+                }
+                .onChange(of: viewStore.pendingDownloadRequests) { _, requests in
+                    guard !requests.isEmpty else { return }
+                    downloadStore.send(.enqueue(requests))
+                    viewStore.send(.batchDownloadConsumed)
+                }
             }
         }
+    }
+}
+
+// MARK: - 分组栏
+
+private extension BookshelfView {
+    func groupBar(
+        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some View {
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    GroupChip(
+                        title: "全部",
+                        isSelected: viewStore.selectedGroupID == nil
+                    ) {
+                        viewStore.send(.groupSelected(nil))
+                    }
+
+                    ForEach(viewStore.groups) { group in
+                        GroupChip(
+                            title: group.name,
+                            isSelected: viewStore.selectedGroupID == group.id
+                        ) {
+                            viewStore.send(.groupSelected(group.id))
+                        }
+                        .contextMenu {
+                            Button("重命名") {
+                                renamingGroup = group
+                                renameGroupName = group.name
+                            }
+                            Button("删除", role: .destructive) {
+                                viewStore.send(.deleteGroup(group.id))
+                            }
+                        }
+                    }
+
+                    Button {
+                        isShowingNewGroupAlert = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.tint)
+                    }
+                    .accessibilityLabel("新建分组")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+
+            if let notice = viewStore.groupNotice {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                    Text(notice)
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        viewStore.send(.groupNoticeDismissed)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("关闭提示")
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    @ToolbarContentBuilder
+    func toolbarContent(
+        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some ToolbarContent {
+        if viewStore.isEditing {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("完成") {
+                    viewStore.send(.editModeChanged(false))
+                }
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        viewStore.send(.downloadSelectedBooks)
+                    } label: {
+                        Label("整本下载", systemImage: "arrow.down.circle")
+                    }
+
+                    Menu("移入分组") {
+                        Button("未分组") {
+                            viewStore.send(.assignSelectedBooks(nil))
+                        }
+                        ForEach(viewStore.groups) { group in
+                            Button(group.name) {
+                                viewStore.send(.assignSelectedBooks(group.id))
+                            }
+                        }
+                    }
+
+                    Button(role: .destructive) {
+                        isConfirmingDelete = true
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .disabled(viewStore.selectedBookPaths.isEmpty)
+                .accessibilityLabel("批量操作")
+            }
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    viewStore.send(.editModeChanged(true))
+                } label: {
+                    Label("选择", systemImage: "checkmark.circle")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 列表
+
+private extension BookshelfView {
+    func shelfList(
+        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some View {
+        List(viewStore.visibleRows) { row in
+            rowContent(row, viewStore: viewStore)
+                .listRowSeparator(.hidden)
+                .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+        }
+        .listStyle(.plain)
+        .refreshable {
+            await viewStore.send(.onAppear).finish()
+        }
+    }
+
+    @ViewBuilder
+    private func rowContent(
+        _ row: ShelfRow,
+        viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some View {
+        if viewStore.isEditing {
+            let isSelected = viewStore.selectedBookPaths.contains(row.bookPath)
+            Button {
+                viewStore.send(.selectionToggled(row.bookPath))
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    BookRow(row: row)
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink {
+                ChapterListView(
+                    store: Store(
+                        initialState: ChapterListFeature.State(
+                            bookPath: row.bookPath,
+                            bookTitle: row.title
+                        )
+                    ) {
+                        ChapterListFeature()
+                    },
+                    downloadStore: downloadStore
+                )
+            } label: {
+                BookRow(row: row)
+            }
+            .onLongPressGesture {
+                viewStore.send(.editModeChanged(true))
+            }
+        }
+    }
+}
+
+// MARK: - 分组胶囊
+
+private struct GroupChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule().fill(
+                        isSelected ? Color.accentColor : Color(.tertiarySystemFill)
+                    )
+                )
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
     }
 }
 

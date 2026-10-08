@@ -2,11 +2,11 @@
 
 ## Status
 
-业务开发阶段。骨架完成；书架、目录、阅读、搜索、下载队列链路已落地，
-章节级 LRU 缓存淘汰规则与执行器已实现。
+业务开发阶段。书架、目录、阅读、搜索、下载队列、书架分组、批量操作、
+阅读设置持久化均已落地；章节级 LRU 缓存淘汰规则与执行器已实现。
 
-缓存闭环尚未全部接通：阅读成功后写入 `lastReadAt` 已接入；
-阅读时自动缓存后续章节、缓存后触发淘汰仍未接入。
+缓存闭环已接通：阅读成功后写入 `lastReadAt`；阅读时自动缓存后续章节，
+缓存后触发 LRU 淘汰。
 
 ## 技术栈
 
@@ -78,7 +78,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       ├── Sources/NovelCore/
 │       │   ├── Models/          # BookRecord / ChapterRecord / BookGroup / DownloadTask
 │       │   ├── Storage/         # NovelStore (SwiftData)
-│       │   ├── Shelf/           # BookshelfFeature / ShelfRow / ShelfLoader / ShelfAdder
+│       │   ├── Shelf/           # BookshelfFeature / ShelfRow / ShelfLoader / ShelfAdder / ShelfGroupStore / ShelfBatchDownloader
 │       │   └── Search/          # SearchFeature
 │       └── Tests/
 ├── scripts/

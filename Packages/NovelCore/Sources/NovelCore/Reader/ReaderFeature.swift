@@ -99,12 +99,17 @@ public struct ReaderFeature: Reducer {
         case configChanged(PaginationConfiguration)
         /// 自动预缓存后续章节数变化
         case precacheCountChanged(Int)
+        /// 从持久化恢复阅读设置
+        case loadSavedSettings(CGSize)
+        /// 持久化设置读取完成（带页面容器尺寸，恢复时合并出完整配置）
+        case settingsLoaded(ReadingSettings, CGSize)
     }
 
     @Dependency(\.readerLoader) var readerLoader
     @Dependency(\.paginationService) var paginationService
     @Dependency(\.readingProgressStore) var readingProgressStore
     @Dependency(\.chapterCacheStore) var chapterCacheStore
+    @Dependency(\.readingSettingsStore) var readingSettingsStore
 
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -178,12 +183,43 @@ public struct ReaderFeature: Reducer {
                     state.pages = paginationService.paginate(state.text, newConfig)
                     // 🔴 数据契约：改设置后用 offset 重新定位，不丢位置。
                 }
-                return .none
+                let settingsStore = readingSettingsStore
+                let settings = ReadingSettings(
+                    configuration: state.config,
+                    precacheCount: state.precacheCount
+                )
+                return .run { _ in
+                    settingsStore.save(settings)
+                }
 
             case let .precacheCountChanged(count):
                 let clamped = min(max(0, count), Self.maxPrecacheCount)
                 guard clamped != state.precacheCount else { return .none }
                 state.precacheCount = clamped
+                let settingsStore = readingSettingsStore
+                let settings = ReadingSettings(
+                    configuration: state.config,
+                    precacheCount: state.precacheCount
+                )
+                return .run { _ in
+                    settingsStore.save(settings)
+                }
+
+            case let .loadSavedSettings(size):
+                let settingsStore = readingSettingsStore
+                return .run { send in
+                    guard let settings = settingsStore.load() else { return }
+                    await send(.settingsLoaded(settings, size))
+                }
+
+            case let .settingsLoaded(settings, size):
+                let merged = settings.mergedConfiguration(containerSize: size)
+                let shouldRepaginate = merged.affectsPagination(comparedTo: state.config)
+                state.config = merged
+                state.precacheCount = min(max(settings.precacheCount, 0), Self.maxPrecacheCount)
+                if shouldRepaginate {
+                    state.pages = paginationService.paginate(state.text, merged)
+                }
                 return .none
             }
         }

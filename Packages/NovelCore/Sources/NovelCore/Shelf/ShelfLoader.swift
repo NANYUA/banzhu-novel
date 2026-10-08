@@ -59,6 +59,7 @@ enum ShelfLoaderLive {
                 title: book.title,
                 author: book.author,
                 coverUrl: book.coverUrl,
+                groupId: book.groupId,
                 lastReadChapterName: book.lastReadChapterName,
                 latestChapterName: book.latestChapterName,
                 unreadCount: unreadCount(of: book, in: context),

@@ -32,7 +32,7 @@ public struct ReadingColor: Hashable, Sendable {
 }
 
 /// 阅读背景色预置项。
-public enum ReadingBackgroundStyle: String, CaseIterable, Hashable, Sendable {
+public enum ReadingBackgroundStyle: String, CaseIterable, Hashable, Sendable, Codable {
     case white
     case sepia
     case eyeCare
@@ -41,7 +41,7 @@ public enum ReadingBackgroundStyle: String, CaseIterable, Hashable, Sendable {
 }
 
 /// 文字颜色策略。
-public enum ReadingTextColorMode: String, CaseIterable, Hashable, Sendable {
+public enum ReadingTextColorMode: String, CaseIterable, Hashable, Sendable, Codable {
     /// 根据背景亮度自动选择黑或白
     case automatic
 
@@ -50,14 +50,14 @@ public enum ReadingTextColorMode: String, CaseIterable, Hashable, Sendable {
 }
 
 /// 夜间模式 / 外观模式。
-public enum ReadingAppearanceMode: String, CaseIterable, Hashable, Sendable {
+public enum ReadingAppearanceMode: String, CaseIterable, Hashable, Sendable, Codable {
     case system
     case light
     case dark
 }
 
 /// 翻页方式。
-public enum PageTurnMode: String, CaseIterable, Hashable, Sendable {
+public enum PageTurnMode: String, CaseIterable, Hashable, Sendable, Codable {
     /// 左右滑动翻页
     case slide
 
@@ -69,7 +69,7 @@ public enum PageTurnMode: String, CaseIterable, Hashable, Sendable {
 }
 
 /// 翻页动画。
-public enum PageTurnAnimation: String, CaseIterable, Hashable, Sendable {
+public enum PageTurnAnimation: String, CaseIterable, Hashable, Sendable, Codable {
     case none
     case cover
     case curl

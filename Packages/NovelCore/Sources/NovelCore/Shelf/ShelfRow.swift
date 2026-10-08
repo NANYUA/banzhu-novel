@@ -21,6 +21,7 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
         title: String,
         author: String,
         coverUrl: String,
+        groupId: UUID? = nil,
         lastReadChapterName: String? = nil,
         latestChapterName: String? = nil,
         unreadCount: Int = 0,
@@ -30,6 +31,7 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
         self.title = title
         self.author = author
         self.coverUrl = coverUrl
+        self.groupId = groupId
         self.lastReadChapterName = lastReadChapterName
         self.latestChapterName = latestChapterName
         self.unreadCount = unreadCount
@@ -37,7 +39,7 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
     }
 
     /// 复用 `bookPath` 作唯一标识。
-    /// 全局唯一（换域名时也不变），见 `BookRecord` 注释。
+    /// 单站点前提下它全局唯一（换镜像域名时也不变），见 `BookRecord` 注释。
     public var id: String {
         bookPath
     }
@@ -46,6 +48,9 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
     public let title: String
     public let author: String
     public let coverUrl: String
+
+    /// 所属分组；`nil` 表示未分组（「全部」是隐含视图，不占记录）。
+    public var groupId: UUID?
 
     /// 「上次读到：第 N 章 章名」。离线也要能显示，故取的是持久化副本。
     public let lastReadChapterName: String?

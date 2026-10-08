@@ -16,7 +16,8 @@ final class ReaderFeatureTests: XCTestCase {
         text: String,
         loader: @escaping @Sendable (String) async throws -> String,
         progress: @escaping @Sendable (String, Date) async throws -> Void = { _, _ in },
-        cache: @escaping @Sendable (String, String, Int) async -> Void = { _, _, _ in }
+        cache: @escaping @Sendable (String, String, Int) async -> Void = { _, _, _ in },
+        settingsStore: ReadingSettingsStore? = nil
     ) -> TestStore<ReaderFeature.State, ReaderFeature.Action> {
         TestStore(initialState: ReaderFeature.State(chapterPath: "/1/1.html")) {
             ReaderFeature()
@@ -27,6 +28,9 @@ final class ReaderFeatureTests: XCTestCase {
             $0.paginationService.paginate = { text, config in
                 Paginator(measurer: FakeMeasuring(widthBudget: 10))
                     .paginate(text: text, configuration: config)
+            }
+            if let settingsStore {
+                $0.readingSettingsStore = settingsStore
             }
         }
     }
@@ -279,6 +283,78 @@ final class ReaderFeatureTests: XCTestCase {
         let records = await recorder.allRecords()
         XCTAssertEqual(records.first?.count, 20)
     }
+
+    /// 打开阅读页时读取持久化设置：配置与预缓存章数一起恢复。
+    func test读取保存设置恢复() async {
+        let saved = ReadingSettings(
+            fontSize: 20,
+            lineSpacing: 8,
+            pageTurnMode: .tap,
+            precacheCount: 5
+        )
+        let store = makeStore(text: Self.sampleText) { _ in
+            Self.sampleText
+        } settingsStore: ReadingSettingsStore(
+            load: { saved },
+            save: { _ in }
+        )
+
+        await loadSample(into: store)
+        await store.send(.loadSavedSettings(CGSize(width: 400, height: 600)))
+        await store.receive(.settingsLoaded(saved, CGSize(width: 400, height: 600))) {
+            $0.config.containerSize = CGSize(width: 400, height: 600)
+            $0.config.fontSize = 20
+            $0.config.lineSpacing = 8
+            $0.config.pageTurnMode = .tap
+            $0.precacheCount = 5
+        }
+        await store.finish()
+        XCTAssertEqual(store.state.config.fontSize, 20)
+        XCTAssertEqual(store.state.config.pageTurnMode, .tap)
+        XCTAssertEqual(store.state.precacheCount, 5)
+    }
+
+    /// 没有持久化设置时保持默认配置，不产生恢复动作。
+    func test无保存设置保持默认() async {
+        let store = makeStore(text: "") { _ in "" } settingsStore: ReadingSettingsStore(
+            load: { nil },
+            save: { _ in }
+        )
+
+        await store.send(.loadSavedSettings(CGSize(width: 400, height: 600)))
+        await store.finish()
+        XCTAssertEqual(store.state.config.containerSize, CGSize(width: 320, height: 480))
+        XCTAssertEqual(store.state.precacheCount, ReaderFeature.defaultPrecacheCount)
+    }
+
+    /// 修改阅读配置后必须持久化（含预缓存章数）。
+    func test修改配置自动保存() async {
+        let recorder = SettingsRecorder()
+        let store = makeStore(text: Self.sampleText) { _ in
+            Self.sampleText
+        } settingsStore: ReadingSettingsStore(
+            load: { nil },
+            save: { settings in recorder.record(settings) }
+        )
+
+        await loadSample(into: store)
+        var next = store.state.config
+        next.fontSize = 22
+        next.backgroundStyle = .black
+        await store.send(.configChanged(next)) {
+            $0.config.fontSize = 22
+            $0.config.backgroundStyle = .black
+        }
+        await store.send(.precacheCountChanged(7)) {
+            $0.precacheCount = 7
+        }
+        await store.finish()
+
+        let saved = recorder.latest()
+        XCTAssertEqual(saved?.fontSize, 22)
+        XCTAssertEqual(saved?.backgroundStyle, .black)
+        XCTAssertEqual(saved?.precacheCount, 7)
+    }
 }
 
 /// 记录阅读进度调用，供 reducer 测试断言。
@@ -315,5 +391,23 @@ private actor CacheRecorder {
 
     func allRecords() -> [Request] {
         records
+    }
+}
+
+/// 记录阅读设置保存调用，供 reducer 测试断言。
+private final class SettingsRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latestSaved: ReadingSettings?
+
+    func record(_ settings: ReadingSettings) {
+        lock.lock()
+        defer { lock.unlock() }
+        latestSaved = settings
+    }
+
+    func latest() -> ReadingSettings? {
+        lock.lock()
+        defer { lock.unlock() }
+        latestSaved
     }
 }
