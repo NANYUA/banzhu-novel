@@ -58,31 +58,31 @@ extension DependencyValues {
                     )
                 }
             },
-            mutate: { ids, _ in ids.map(Self.placeholderSnapshot(id:)) },
-            complete: { id, _ in Self.placeholderSnapshot(id: id, state: .done) },
+            mutate: { ids, _ in ids.map(makePlaceholderSnapshot(id:)) },
+            complete: { id, _ in makePlaceholderSnapshot(id: id, state: .done) },
             remove: { _ in }
         )
-
-        private static func placeholderSnapshot(
-            id: String,
-            state: DownloadState = .queued
-        ) -> DownloadTaskSnapshot {
-            DownloadTaskSnapshot(
-                id: id,
-                bookPath: "",
-                bookTitle: "",
-                chapterPath: "",
-                chapterName: "",
-                chapterNumber: 0,
-                state: state,
-                attempts: 0,
-                lastError: nil,
-                blockedByGuard: false,
-                createdAt: Date(),
-                finishedAt: nil
-            )
-        }
     }
+}
+
+private func makePlaceholderSnapshot(
+    id: String,
+    state: DownloadState = .queued
+) -> DownloadTaskSnapshot {
+    DownloadTaskSnapshot(
+        id: id,
+        bookPath: "",
+        bookTitle: "",
+        chapterPath: "",
+        chapterName: "",
+        chapterNumber: 0,
+        state: state,
+        attempts: 0,
+        lastError: nil,
+        blockedByGuard: false,
+        createdAt: Date(),
+        finishedAt: nil
+    )
 }
 
 enum DownloadQueueStoreError: LocalizedError {
