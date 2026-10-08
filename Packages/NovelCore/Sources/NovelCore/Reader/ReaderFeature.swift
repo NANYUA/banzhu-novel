@@ -71,6 +71,16 @@ public struct ReaderFeature: Reducer {
             return normalizedTitle + "\n\n" + text
         }
 
+        /// 标题前缀长度；持久化 characterOffset 时需要扣除。
+        public var titlePrefixLength: Int {
+            max(0, displayText.count - text.count)
+        }
+
+        /// 对外持久化的字符偏移，始终相对原始正文。
+        public var progressOffset: Int {
+            max(0, currentOffset - titlePrefixLength)
+        }
+
         /// 分页配置。改了会触发重新分页
         public var config: PaginationConfiguration
 
@@ -209,7 +219,7 @@ public struct ReaderFeature: Reducer {
                 state.currentOffset = state.pages[pageIndex + 1].location
                 return saveProgress(
                     chapterPath: state.chapterPath,
-                    offset: state.currentOffset,
+                    offset: state.progressOffset,
                     store: readingProgressStore
                 )
 
@@ -222,17 +232,17 @@ public struct ReaderFeature: Reducer {
                 state.currentOffset = state.pages[pageIndex - 1].location
                 return saveProgress(
                     chapterPath: state.chapterPath,
-                    offset: state.currentOffset,
+                    offset: state.progressOffset,
                     store: readingProgressStore
                 )
 
             case let .jumpToOffset(offset):
                 // clamp 到文本范围
-                let maxOffset = max(0, state.text.count)
+                let maxOffset = max(0, state.displayText.count)
                 state.currentOffset = min(max(0, offset), maxOffset)
                 return saveProgress(
                     chapterPath: state.chapterPath,
-                    offset: state.currentOffset,
+                    offset: state.progressOffset,
                     store: readingProgressStore
                 )
 
