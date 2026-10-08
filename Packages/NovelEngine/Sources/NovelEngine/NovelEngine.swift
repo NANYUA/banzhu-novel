@@ -584,6 +584,10 @@ public actor NovelEngine {
     }
 
     private func shouldAutoFetchNavigation() -> Bool {
+        let hasCoolingHost = routing.hostStates.contains {
+            isCooling(Self.normalizedHost($0.value))
+        }
+        guard !hasCoolingHost else { return false }
         let navigationHostCount = routing.hostStates
             .filter {
                 !$0.isUser

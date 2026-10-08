@@ -184,4 +184,24 @@ final class SiteFeatureTests: XCTestCase {
         settings.recordNavigationFailure(id: nav.id, now: now)
         XCTAssertEqual(settings.navigationURLs[0].navigationStatus, .frozen)
     }
+
+    func test删除重叠host的用户来源后降级为导航host() async {
+        let entry = SiteEntry(
+            value: "https://same.example",
+            sources: [.user, .navigation]
+        )
+        let store = TestStore(
+            initialState: SiteFeature.State(
+                settings: SiteSettings(hosts: [entry])
+            )
+        ) {
+            SiteFeature()
+        }
+
+        await store.send(.deleteHost(entry.id)) {
+            $0.settings.hosts[0].sources = [.navigation]
+        }
+        await store.finish()
+        XCTAssertEqual(store.state.settings.hosts[0].sources, [.navigation])
+    }
 }
