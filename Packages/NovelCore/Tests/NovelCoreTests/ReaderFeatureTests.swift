@@ -283,7 +283,11 @@ final class ReaderFeatureTests: XCTestCase {
         let records = await recorder.allRecords()
         XCTAssertEqual(records.first?.count, 20)
     }
+}
 
+// MARK: - 阅读设置持久化
+
+@MainActor extension ReaderFeatureTests {
     /// 打开阅读页时读取持久化设置：配置与预缓存章数一起恢复。
     func test读取保存设置恢复() async {
         let saved = ReadingSettings(

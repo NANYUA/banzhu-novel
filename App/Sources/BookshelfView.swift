@@ -132,67 +132,80 @@ private extension BookshelfView {
         _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
     ) -> some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    GroupChip(
-                        title: "全部",
-                        isSelected: viewStore.selectedGroupID == nil
-                    ) {
-                        viewStore.send(.groupSelected(nil))
-                    }
-
-                    ForEach(viewStore.groups) { group in
-                        GroupChip(
-                            title: group.name,
-                            isSelected: viewStore.selectedGroupID == group.id
-                        ) {
-                            viewStore.send(.groupSelected(group.id))
-                        }
-                        .contextMenu {
-                            Button("重命名") {
-                                renamingGroup = group
-                                renameGroupName = group.name
-                            }
-                            Button("删除", role: .destructive) {
-                                viewStore.send(.deleteGroup(group.id))
-                            }
-                        }
-                    }
-
-                    Button {
-                        isShowingNewGroupAlert = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.tint)
-                    }
-                    .accessibilityLabel("新建分组")
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-            }
+            groupChips(viewStore)
 
             if let notice = viewStore.groupNotice {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundStyle(.orange)
-                    Text(notice)
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button {
-                        viewStore.send(.groupNoticeDismissed)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("关闭提示")
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                groupNotice(notice, viewStore: viewStore)
             }
         }
         .background(Color(.systemGroupedBackground))
+    }
+
+    private func groupChips(
+        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                GroupChip(
+                    title: "全部",
+                    isSelected: viewStore.selectedGroupID == nil
+                ) {
+                    viewStore.send(.groupSelected(nil))
+                }
+
+                ForEach(viewStore.groups) { group in
+                    GroupChip(
+                        title: group.name,
+                        isSelected: viewStore.selectedGroupID == group.id
+                    ) {
+                        viewStore.send(.groupSelected(group.id))
+                    }
+                    .contextMenu {
+                        Button("重命名") {
+                            renamingGroup = group
+                            renameGroupName = group.name
+                        }
+                        Button("删除", role: .destructive) {
+                            viewStore.send(.deleteGroup(group.id))
+                        }
+                    }
+                }
+
+                Button {
+                    isShowingNewGroupAlert = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.tint)
+                }
+                .accessibilityLabel("新建分组")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func groupNotice(
+        _ notice: String,
+        viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.orange)
+            Text(notice)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                viewStore.send(.groupNoticeDismissed)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭提示")
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 
     @ToolbarContentBuilder

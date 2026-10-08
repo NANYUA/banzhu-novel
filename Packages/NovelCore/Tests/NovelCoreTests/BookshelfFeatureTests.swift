@@ -222,7 +222,11 @@ final class BookshelfFeatureTests: XCTestCase {
         XCTAssertEqual(store.state.visibleRows.map(\.bookPath), ["/1/"])
         await store.finish()
     }
+}
 
+// MARK: - 批量操作
+
+@MainActor extension BookshelfFeatureTests {
     func test批量归类更新选中书的groupId() async {
         let groupID = UUID()
         let rowA = Self.makeRow(bookPath: "/1/", title: "书一")
@@ -327,7 +331,9 @@ final class BookshelfFeatureTests: XCTestCase {
         await store.send(.onAppear)
         await store.finish()
     }
+}
 
+@MainActor extension BookshelfFeatureTests {
     // MARK: - 加入书架
 
     private static func makeBook(path: String, title: String) -> Book {

@@ -212,10 +212,10 @@ public struct BookshelfFeature: Reducer {
 
             case let .booksGroupAssigned(groupID):
                 let selected = state.selectedBookPaths
-                for index in state.rows.indices
-                    where selected.contains(state.rows[index].bookPath)
-                {
-                    state.rows[index].groupId = groupID
+                for index in state.rows.indices {
+                    if selected.contains(state.rows[index].bookPath) {
+                        state.rows[index].groupId = groupID
+                    }
                 }
                 return .none
 
