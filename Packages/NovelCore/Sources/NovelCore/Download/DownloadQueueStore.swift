@@ -58,7 +58,7 @@ extension DependencyValues {
                     )
                 }
             },
-            mutate: { ids, _ in ids.map(makePlaceholderSnapshot(id:)) },
+            mutate: { ids, _ in ids.map { makePlaceholderSnapshot(id: $0) } },
             complete: { id, _ in makePlaceholderSnapshot(id: id, state: .done) },
             remove: { _ in }
         )
