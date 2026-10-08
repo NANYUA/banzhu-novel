@@ -25,7 +25,7 @@ extension DependencyValues {
             if let localText = try? await ReaderLoaderLive.load(chapterPath: chapterPath) {
                 return localText
             }
-            try await NovelEngine.shared.content(chapterPath: chapterPath)
+            return try await NovelEngine.shared.content(chapterPath: chapterPath)
         }
 
         /// 测试默认值：返回空串，避免忘记注入桩的测试意外联网。
