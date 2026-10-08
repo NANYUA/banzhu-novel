@@ -96,9 +96,27 @@ jobs:
 
       # ── 关卡 4：单元测试 ───────────────────────────────────────
       - name: 单元测试（XCTest）
+        id: test
         run: |
-          swift test --package-path Packages/NovelCore
-          swift test --package-path Packages/NovelEngine
+          set -o pipefail
+          swift test --package-path Packages/NovelCore 2>&1 | tee test-core.log
+          swift test --package-path Packages/NovelEngine 2>&1 | tee test-engine.log
+
+      - name: 输出测试错误
+        if: always() && steps.test.outcome == 'failure'
+        run: |
+          for log in test-core.log test-engine.log; do
+            if [ ! -f "$log" ]; then
+              continue
+            fi
+            matches=$(grep -E "error:|fatal error:|Test Case .* failed|XCTAssert|failed -|XCTFailureError" "$log" || true)
+            if [ -z "$matches" ]; then
+              matches=$(tail -n 40 "$log")
+            fi
+            while IFS= read -r line; do
+              echo "::error title=XCTest::$line"
+            done <<< "$matches"
+          done
 
       - name: 结果
         run: echo "✅ 全部关卡通过"
