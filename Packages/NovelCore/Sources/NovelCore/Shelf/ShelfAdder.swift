@@ -126,41 +126,25 @@ enum ShelfAdderLive {
         do {
             let detail = try await NovelEngine.shared.bookInfo(path: fallback.path)
             var merged = fallback
-            if !detail.title.isEmpty {
-                merged.title = detail.title
-            }
-            if !detail.author.isEmpty {
-                merged.author = detail.author
-            }
-            if !detail.intro.isEmpty {
-                merged.intro = detail.intro
-            }
-            if !detail.coverUrl.isEmpty {
-                merged.coverUrl = detail.coverUrl
-            }
-            if !detail.wordCount.isEmpty {
-                merged.wordCount = detail.wordCount
-            }
-            if !detail.status.isEmpty {
-                merged.status = detail.status
-            }
-            if !detail.category.isEmpty {
-                merged.category = detail.category
-            }
-            if !detail.tags.isEmpty {
-                merged.tags = detail.tags
-            }
-            if !detail.lastChapter.isEmpty {
-                merged.lastChapter = detail.lastChapter
-            }
-            if !detail.lastUpdated.isEmpty {
-                merged.lastUpdated = detail.lastUpdated
-            }
+            merged.title = prefer(detail.title, merged.title)
+            merged.author = prefer(detail.author, merged.author)
+            merged.intro = prefer(detail.intro, merged.intro)
+            merged.coverUrl = prefer(detail.coverUrl, merged.coverUrl)
+            merged.wordCount = prefer(detail.wordCount, merged.wordCount)
+            merged.status = prefer(detail.status, merged.status)
+            merged.category = prefer(detail.category, merged.category)
+            merged.tags = detail.tags.isEmpty ? merged.tags : detail.tags
+            merged.lastChapter = prefer(detail.lastChapter, merged.lastChapter)
+            merged.lastUpdated = prefer(detail.lastUpdated, merged.lastUpdated)
             return merged
         } catch let error as NetworkError where error.isGuardRequired {
             throw error
         } catch {
             return fallback
         }
+    }
+
+    private static func prefer(_ newValue: String, _ oldValue: String) -> String {
+        newValue.isEmpty ? oldValue : newValue
     }
 }
