@@ -69,6 +69,9 @@ Five gates on every push:
 4. Xcode build (unsigned)
 5. XCTest
 
+`package-unsigned` does not run on push. It is manual-only:
+run the `CI` workflow with `workflow_dispatch` and set `run_package=true`.
+
 ## License
 
 MIT
