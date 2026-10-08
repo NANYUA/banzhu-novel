@@ -315,9 +315,10 @@ public actor NovelEngine {
                     )
                     navigationRouteStates[navURL] = .active
                     routing.onNavigationOutcome?(navURL, .success)
-                    let hosts = resolvedHosts
+                    let hosts = Array(resolvedHosts
                         .map(Self.normalizedHost)
                         .filter { !$0.isEmpty && !isCooling($0) }
+                        .prefix(6))
                     let probeResults = await probeBatch(hosts, path: path, body: body)
                     for (host, result) in probeResults {
                         switch result {
@@ -498,7 +499,9 @@ public actor NovelEngine {
     private func standbyHost() -> String? {
         if let host = hostRouteStates.values.first(where: { $0.isStandby })?.value {
             let normalized = Self.normalizedHost(host)
-            if !isCooling(normalized) {
+            if !isCooling(normalized),
+               !isStandbyExpired(hostRouteStates[normalized])
+            {
                 return normalized
             }
         }
@@ -511,6 +514,14 @@ public actor NovelEngine {
             }
             .max { $0.1 < $1.1 }?
             .0
+    }
+
+    private func isStandbyExpired(_ state: HostRouteState?) -> Bool {
+        guard let state, let lastSucceededAt = state.lastSucceededAt else {
+            return false
+        }
+        let ttl = TimeInterval(max(routing.standbyTTLSeconds, 0))
+        return Date().timeIntervalSince(lastSucceededAt) > ttl
     }
 
     private func shouldAutoFetchNavigation() -> Bool {

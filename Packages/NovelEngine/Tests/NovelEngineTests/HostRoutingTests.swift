@@ -152,6 +152,30 @@ extension HostRoutingTests {
         XCTAssertEqual(hosts, ["start.example"])
     }
 
+    func test导航自动host超过一个时不拉取导航() async {
+        let transport = FakeTransport { _ in
+            throw NetworkError.httpStatus(503)
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: ["https://one.example", "https://two.example"],
+                navigationURLs: ["https://nav.example.com"],
+                autoSwitchHost: true,
+                currentHost: "https://start.example",
+                hostStates: [
+                    HostRouteState(value: "https://one.example", status: .unavailable),
+                    HostRouteState(value: "https://two.example", status: .unavailable),
+                ]
+            )
+        )
+
+        _ = try? await engine.requestForTesting(path: "/chapter.html")
+
+        let hosts = await transport.requestedHosts()
+        XCTAssertFalse(hosts.contains("nav.example.com"))
+    }
+
     func test备用host优先于其它未知host() async throws {
         let transport = FakeTransport { url in
             if url.host == "standby.example" {
