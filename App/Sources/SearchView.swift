@@ -8,6 +8,15 @@ import SwiftUI
 /// 本文件只负责展示与转发交互，搜索和落库逻辑都在 `SearchFeature` 内。
 struct SearchView: View {
     let store: StoreOf<SearchFeature>
+    let onBookAdded: (ShelfRow) -> Void
+
+    init(
+        store: StoreOf<SearchFeature>,
+        onBookAdded: @escaping (ShelfRow) -> Void = { _ in }
+    ) {
+        self.store = store
+        self.onBookAdded = onBookAdded
+    }
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -19,6 +28,11 @@ struct SearchView: View {
                 .navigationTitle("搜索")
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     noticeBanner(viewStore)
+                }
+                .onChange(of: viewStore.lastAddedRow) { _, row in
+                    if let row {
+                        onBookAdded(row)
+                    }
                 }
             }
         }

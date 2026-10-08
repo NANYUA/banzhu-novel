@@ -91,6 +91,7 @@ final class SearchFeatureTests: XCTestCase {
         await store.receive(.addSucceeded(Self.row)) {
             $0.addingPaths = []
             $0.notice = "《示例书》已加入书架。"
+            $0.lastAddedRow = Self.row
         }
         await store.finish()
     }

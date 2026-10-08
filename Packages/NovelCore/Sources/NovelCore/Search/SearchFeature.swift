@@ -23,7 +23,8 @@ public struct SearchFeature: Reducer {
             isLoading: Bool = false,
             errorMessage: String? = nil,
             addingPaths: Set<String> = [],
-            notice: String? = nil
+            notice: String? = nil,
+            lastAddedRow: ShelfRow? = nil
         ) {
             self.keyword = keyword
             self.submittedKeyword = submittedKeyword
@@ -32,6 +33,7 @@ public struct SearchFeature: Reducer {
             self.errorMessage = errorMessage
             self.addingPaths = addingPaths
             self.notice = notice
+            self.lastAddedRow = lastAddedRow
         }
 
         /// 用户当前输入的关键词。提交前不会触发网络请求。
@@ -54,6 +56,9 @@ public struct SearchFeature: Reducer {
 
         /// 加入书架结果提示（成功/重复/失败），不阻断搜索列表。
         public var notice: String?
+
+        /// 最近一次成功加入书架的行，供根视图即时同步书架列表。
+        public var lastAddedRow: ShelfRow?
     }
 
     public enum Action: Equatable {
@@ -133,6 +138,7 @@ public struct SearchFeature: Reducer {
             case let .addSucceeded(row):
                 state.addingPaths.remove(row.bookPath)
                 state.notice = "《\(row.title)》已加入书架。"
+                state.lastAddedRow = row
                 return .none
 
             case let .addFailed(bookPath, message):
