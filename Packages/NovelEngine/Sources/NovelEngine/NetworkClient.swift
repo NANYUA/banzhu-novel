@@ -140,3 +140,10 @@ actor NetworkClient {
         throw lastError
     }
 }
+
+protocol NetworkTransport: Sendable {
+    func get(_ url: URL) async throws -> String
+    func post(_ url: URL, bodyString: String) async throws -> String
+}
+
+extension NetworkClient: NetworkTransport {}

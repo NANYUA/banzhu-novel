@@ -37,9 +37,15 @@ public actor NovelEngine {
 
     private var config = SiteConfig.default
     private var routing = SiteRoutingConfiguration()
-    private let net = NetworkClient.shared
+    private let net: any NetworkTransport
 
-    public init() {}
+    public init() {
+        net = NetworkClient.shared
+    }
+
+    init(network: any NetworkTransport) {
+        net = network
+    }
 
     public func configureRouting(_ configuration: SiteRoutingConfiguration) {
         routing = configuration
@@ -115,6 +121,10 @@ public actor NovelEngine {
         let html = try await fetch(path: chapterPath, body: nil)
         let text = ContentDecoder.decode(html: html)
         return text.isEmpty ? "（本章内容为空，可能需要重新过验证或稍后重试）" : text
+    }
+
+    func requestForTesting(path: String, body: String? = nil) async throws -> String {
+        try await fetch(path: path, body: body)
     }
 
     // MARK: - 路由
