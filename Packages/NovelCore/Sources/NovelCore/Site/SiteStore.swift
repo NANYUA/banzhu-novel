@@ -287,10 +287,13 @@ public struct SiteSettings: Codable, Equatable, Sendable {
         if !hosts.contains(where: { $0.id == currentHostID }) {
             currentHostID = hosts.first?.id
         }
-        if let currentHostID,
-           !hosts.contains(where: { $0.id == currentHostID && $0.coolingUntil == nil })
-        {
-            self.currentHostID = hosts.first { !$0.isCooling() }?.id ?? currentHostID
+        if let currentHostID {
+            let currentHostIsUsable = hosts.contains {
+                $0.id == currentHostID && $0.coolingUntil == nil
+            }
+            if !currentHostIsUsable {
+                self.currentHostID = hosts.first { !$0.isCooling() }?.id ?? currentHostID
+            }
         }
     }
 

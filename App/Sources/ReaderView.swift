@@ -209,115 +209,108 @@ struct ReaderView: View {
     ) -> some View {
         switch viewStore.config.pageTurnMode {
         case .slide:
-            content.gesture(
-                DragGesture(minimumDistance: 30)
-                    .onEnded { value in
-                        let horizontal = value.translation.width
-                        let vertical = value.translation.height
-                        guard abs(horizontal) > abs(vertical) else { return }
-                        if horizontal < -30 {
-                            viewStore.send(.nextPage)
-                        } else if horizontal > 30 {
-                            viewStore.send(.prevPage)
-                        }
-                    }
-            )
-            .simultaneousGesture(
-                SpatialTapGesture()
-                    .onEnded { value in
-                        if value.location.x >= availableWidth / 3,
-                           value.location.x <= availableWidth * 2 / 3
-                        {
-                            onCenterTap()
-                        }
-                    }
+            slideGesture(
+                content,
+                viewStore: viewStore,
+                availableWidth: availableWidth,
+                onCenterTap: onCenterTap
             )
 
         case .tap:
-            content.gesture(
-                SpatialTapGesture()
-                    .onEnded { value in
-                        if value.location.x < availableWidth / 2 {
-                            if value.location.x > availableWidth / 3 {
-                                onCenterTap()
-                            } else {
-                                viewStore.send(.prevPage)
-                            }
-                        } else if value.location.x < availableWidth * 2 / 3 {
-                            onCenterTap()
-                        } else {
-                            viewStore.send(.nextPage)
-                        }
-                    }
+            tapGesture(
+                content,
+                viewStore: viewStore,
+                availableWidth: availableWidth,
+                onCenterTap: onCenterTap
             )
 
         case .scroll:
-            content.simultaneousGesture(
-                SpatialTapGesture()
-                    .onEnded { value in
-                        if value.location.x >= availableWidth / 3,
-                           value.location.x <= availableWidth * 2 / 3
-                        {
-                            onCenterTap()
-                        }
-                    }
+            scrollGesture(
+                content,
+                availableWidth: availableWidth,
+                onCenterTap: onCenterTap
             )
         }
+    }
+
+    private func slideGesture(
+        _ content: some View,
+        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
+        availableWidth: CGFloat,
+        onCenterTap: @escaping () -> Void
+    ) -> some View {
+        content.gesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let horizontal = value.translation.width
+                    let vertical = value.translation.height
+                    guard abs(horizontal) > abs(vertical) else { return }
+                    if horizontal < -30 {
+                        viewStore.send(.nextPage)
+                    } else if horizontal > 30 {
+                        viewStore.send(.prevPage)
+                    }
+                }
+        )
+        .simultaneousGesture(
+            SpatialTapGesture()
+                .onEnded { value in
+                    if isCenterTap(value.location.x, width: availableWidth) {
+                        onCenterTap()
+                    }
+                }
+        )
+    }
+
+    private func tapGesture(
+        _ content: some View,
+        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
+        availableWidth: CGFloat,
+        onCenterTap: @escaping () -> Void
+    ) -> some View {
+        content.gesture(
+            SpatialTapGesture()
+                .onEnded { value in
+                    let x = value.location.x
+                    if isCenterTap(x, width: availableWidth) {
+                        onCenterTap()
+                    } else if x < availableWidth / 2 {
+                        viewStore.send(.prevPage)
+                    } else {
+                        viewStore.send(.nextPage)
+                    }
+                }
+        )
+    }
+
+    private func scrollGesture(
+        _ content: some View,
+        availableWidth: CGFloat,
+        onCenterTap: @escaping () -> Void
+    ) -> some View {
+        content.simultaneousGesture(
+            SpatialTapGesture()
+                .onEnded { value in
+                    if isCenterTap(value.location.x, width: availableWidth) {
+                        onCenterTap()
+                    }
+                }
+        )
+    }
+
+    private func isCenterTap(_ x: CGFloat, width: CGFloat) -> Bool {
+        x >= width / 3 && x <= width * 2 / 3
     }
 
     private func readerChrome(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> some View {
         VStack {
-            HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Label("返回", systemImage: "chevron.left")
-                }
-                .buttonStyle(.bordered)
-
-                Spacer()
-
-                Text(viewStore.chapterName)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Button {
-                    isChromeVisible = false
-                } label: {
-                    Image(systemName: "eye.slash")
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("隐藏控制栏")
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
+            readerTopBar(viewStore)
 
             Spacer()
 
-            HStack(spacing: 0) {
-                chromeButton("目录", systemImage: "list.bullet") {
-                    isShowingDirectory = true
-                }
-                chromeButton("下载", systemImage: "arrow.down.circle") {
-                    downloadCurrentChapter(viewStore)
-                }
-                chromeButton("搜索", systemImage: "magnifyingglass") {
-                    isShowingSearch = true
-                }
-                chromeButton("设置", systemImage: "textformat.size") {
-                    isShowingSettings = true
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 14)
-            .padding(.bottom, 12)
+            readerBottomBar(viewStore)
         }
         .background(
             LinearGradient(
@@ -328,6 +321,62 @@ struct ReaderView: View {
             .ignoresSafeArea()
             .allowsHitTesting(false)
         )
+    }
+
+    private func readerTopBar(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) -> some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Label("返回", systemImage: "chevron.left")
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+
+            Text(viewStore.chapterName)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+
+            Spacer()
+
+            Button {
+                isChromeVisible = false
+            } label: {
+                Image(systemName: "eye.slash")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("隐藏控制栏")
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+    }
+
+    private func readerBottomBar(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) -> some View {
+        HStack(spacing: 0) {
+            chromeButton("目录", systemImage: "list.bullet") {
+                isShowingDirectory = true
+            }
+            chromeButton("下载", systemImage: "arrow.down.circle") {
+                downloadCurrentChapter(viewStore)
+            }
+            chromeButton("搜索", systemImage: "magnifyingglass") {
+                isShowingSearch = true
+            }
+            chromeButton("设置", systemImage: "textformat.size") {
+                isShowingSettings = true
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 12)
     }
 
     private func chromeButton(
@@ -423,9 +472,17 @@ struct ReaderView: View {
         case .none:
             .identity
         case .cover:
-            direction == .forward
-                ? .asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading))
-                : .asymmetric(insertion: .move(edge: .leading), removal: .move(edge: .trailing))
+            if direction == .forward {
+                .asymmetric(
+                    insertion: .move(edge: .trailing),
+                    removal: .move(edge: .leading)
+                )
+            } else {
+                .asymmetric(
+                    insertion: .move(edge: .leading),
+                    removal: .move(edge: .trailing)
+                )
+            }
         case .curl:
             if direction == .forward {
                 .asymmetric(
@@ -471,145 +528,5 @@ struct ReaderView: View {
         let end = min(page.location + page.length, chars.count)
         guard start < end else { return "" }
         return String(chars[start ..< end])
-    }
-}
-
-/// 单页 / 整章 `UITextView` 包装（UIKit 承载，SwiftUI 里用 `UIViewRepresentable`）。
-///
-/// 分页模式下只渲染当前页并关闭滚动；滚动模式下渲染整章并监听滚动位置。
-private struct PageTextView: UIViewRepresentable {
-    let text: String
-    let offset: Int
-    let configuration: PaginationConfiguration
-    let onOffsetChange: (Int) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
-        textView.isEditable = false
-        textView.isSelectable = false
-        textView.showsVerticalScrollIndicator = false
-        textView.alwaysBounceVertical = true
-        textView.textContainer.lineFragmentPadding = 0
-        textView.delegate = context.coordinator
-        return textView
-    }
-
-    func updateUIView(_ uiView: UITextView, context: Context) {
-        context.coordinator.parent = self
-
-        let contentChanged = context.coordinator.appliedText != text
-            || context.coordinator.appliedConfiguration != configuration
-        guard contentChanged else { return }
-
-        context.coordinator.appliedText = text
-        context.coordinator.appliedConfiguration = configuration
-
-        uiView.isScrollEnabled = configuration.pageTurnMode == .scroll
-        uiView.textContainer.lineFragmentPadding = 0
-        uiView.textContainerInset = UIEdgeInsets(
-            top: configuration.inset.top,
-            left: configuration.inset.leading,
-            bottom: configuration.inset.bottom,
-            right: configuration.inset.trailing
-        )
-        uiView.backgroundColor = configuration.backgroundStyle.uiColor(
-            custom: configuration.customBackgroundColor
-        )
-        uiView.attributedText = makeAttributedString()
-
-        if configuration.pageTurnMode == .scroll {
-            context.coordinator.scrollToOffset(offset, in: uiView)
-        }
-    }
-
-    private func makeAttributedString() -> NSAttributedString {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = configuration.lineSpacing
-        paragraphStyle.paragraphSpacing = configuration.paragraphSpacing
-        paragraphStyle.firstLineHeadIndent = configuration.firstLineHeadIndent
-
-        let backgroundColor = configuration.backgroundStyle.uiColor(
-            custom: configuration.customBackgroundColor
-        )
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: ReadingFontFactory.makeFont(configuration: configuration),
-            .paragraphStyle: paragraphStyle,
-            .kern: configuration.characterSpacing,
-            .foregroundColor: configuration.textColorMode.uiColor(
-                on: backgroundColor,
-                custom: configuration.customTextColor
-            ),
-        ]
-        return NSAttributedString(string: text, attributes: attributes)
-    }
-
-    final class Coordinator: NSObject, UITextViewDelegate {
-        var parent: PageTextView
-        var appliedText: String?
-        var appliedConfiguration: PaginationConfiguration?
-
-        init(parent: PageTextView) {
-            self.parent = parent
-        }
-
-        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-            guard !decelerate else { return }
-            reportOffset(scrollView)
-        }
-
-        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-            reportOffset(scrollView)
-        }
-
-        func scrollToOffset(_ offset: Int, in textView: UITextView) {
-            let location = utf16Offset(for: offset, in: textView.text)
-            textView.scrollRangeToVisible(NSRange(location: location, length: 0))
-        }
-
-        private func reportOffset(_ scrollView: UIScrollView) {
-            guard parent.configuration.pageTurnMode == .scroll,
-                  let textView = scrollView as? UITextView
-            else {
-                return
-            }
-
-            let visibleTop = CGPoint(
-                x: textView.textContainerInset.left + textView.textContainer.lineFragmentPadding,
-                y: scrollView.contentOffset.y + textView.textContainerInset.top
-            )
-            let utf16Offset = textView.layoutManager.characterIndex(
-                for: visibleTop,
-                in: textView.textContainer,
-                fractionOfDistanceBetweenInsertionPoints: nil
-            )
-            parent.onOffsetChange(characterOffset(fromUTF16: utf16Offset, in: textView.text))
-        }
-
-        private func characterOffset(fromUTF16 offset: Int, in text: String) -> Int {
-            guard let utf16Index = text.utf16.index(
-                text.utf16.startIndex,
-                offsetBy: offset,
-                limitedBy: text.utf16.endIndex
-            ),
-                let index = String.Index(utf16Index, within: text)
-            else {
-                return 0
-            }
-            return text.distance(from: text.startIndex, to: index)
-        }
-
-        private func utf16Offset(for characterOffset: Int, in text: String) -> Int {
-            let clamped = min(max(characterOffset, 0), text.count)
-            guard let index = text.index(text.startIndex, offsetBy: clamped, limitedBy: text.endIndex),
-                  let utf16Index = index.samePosition(in: text.utf16)
-            else {
-                return text.utf16.count
-            }
-            return text.utf16.distance(from: text.utf16.startIndex, to: utf16Index)
-        }
     }
 }

@@ -82,66 +82,93 @@ struct SearchView: View {
         _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
     ) -> some View {
         if viewStore.isLoading, viewStore.results.isEmpty {
-            ProgressView("搜索中…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            loadingView
         } else if let message = viewStore.errorMessage {
-            VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                Text("搜索失败")
-                    .font(.title3.bold())
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Button("重试") {
-                    viewStore.send(.search)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            errorView(message, viewStore: viewStore)
         } else if viewStore.results.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                Text(viewStore.submittedKeyword.isEmpty ? "尚未搜索" : "没有找到相关书籍")
-                    .font(.title3.bold())
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            emptyView(title: viewStore.submittedKeyword.isEmpty ? "尚未搜索" : "没有找到相关书籍")
         } else {
-            List {
-                ForEach(viewStore.results) { book in
-                    SearchResultRow(
-                        book: book,
-                        isAdding: viewStore.addingPaths.contains(book.path),
-                        isAdded: viewStore.addedPaths.contains(book.path),
-                        downloadStore: downloadStore
-                    ) {
-                        viewStore.send(.addRequested(book))
-                    }
-                    .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
-                }
-
-                if viewStore.hasMore {
-                    HStack(spacing: 10) {
-                        if viewStore.isLoadingMore {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Button("加载更多") {
-                            viewStore.send(.loadMore)
-                        }
-                        .disabled(viewStore.isLoadingMore)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .listRowSeparator(.hidden)
-                }
-            }
-            .listStyle(.plain)
+            resultsView(viewStore)
         }
+    }
+
+    private var loadingView: some View {
+        ProgressView("搜索中…")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func errorView(
+        _ message: String,
+        viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
+    ) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("搜索失败")
+                .font(.title3.bold())
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("重试") {
+                viewStore.send(.search)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func emptyView(title: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.title3.bold())
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func resultsView(
+        _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
+    ) -> some View {
+        List {
+            ForEach(viewStore.results) { book in
+                SearchResultRow(
+                    book: book,
+                    isAdding: viewStore.addingPaths.contains(book.path),
+                    isAdded: viewStore.addedPaths.contains(book.path),
+                    downloadStore: downloadStore
+                ) {
+                    viewStore.send(.addRequested(book))
+                }
+                .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+            }
+
+            if viewStore.hasMore {
+                loadMoreRow(viewStore)
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+    }
+
+    private func loadMoreRow(
+        _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
+    ) -> some View {
+        HStack(spacing: 10) {
+            if viewStore.isLoadingMore {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Button("加载更多") {
+                viewStore.send(.loadMore)
+            }
+            .disabled(viewStore.isLoadingMore)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
