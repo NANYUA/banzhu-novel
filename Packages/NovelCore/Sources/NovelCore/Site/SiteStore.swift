@@ -501,6 +501,9 @@ extension SiteSettings {
     }
 
     private static func evictionRank(_ entry: SiteEntry) -> (Int, Date, Date) {
+        if entry.isCooling() {
+            return (-1, entry.lastSucceededAt ?? .distantPast, entry.lastProbedAt ?? .distantPast)
+        }
         let statusRank = switch entry.hostStatus {
         case .unavailable: 0
         case .guarded: 1

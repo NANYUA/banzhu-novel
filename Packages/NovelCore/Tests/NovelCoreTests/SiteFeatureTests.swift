@@ -173,6 +173,21 @@ final class SiteFeatureTests: XCTestCase {
         XCTAssertFalse(settings.hosts.contains(where: { $0.id == unavailable.id }))
     }
 
+    func test导航host上限优先淘汰冷却条目() {
+        var cooling = SiteEntry(value: "https://cooling.example", source: .navigation)
+        cooling.coolingUntil = Date().addingTimeInterval(600)
+        var unknown = SiteEntry(value: "https://keep.example", source: .navigation)
+        unknown.hostStatus = .unknown
+
+        let settings = SiteSettings(
+            hosts: [cooling, unknown],
+            navigationHostLimit: 1
+        )
+
+        XCTAssertFalse(settings.hosts.contains(where: { $0.id == cooling.id }))
+        XCTAssertTrue(settings.hosts.contains(where: { $0.id == unknown.id }))
+    }
+
     func test导航连续失败进入冷却再冻结() {
         let nav = SiteEntry(value: "https://nav.example", source: .user)
         var settings = SiteSettings(navigationURLs: [nav])
