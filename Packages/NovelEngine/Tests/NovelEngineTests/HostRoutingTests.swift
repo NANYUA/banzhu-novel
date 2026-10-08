@@ -235,6 +235,34 @@ extension HostRoutingTests {
         XCTAssertTrue(hosts.contains("standby.example"))
     }
 
+    func test探测批次最多三个并发() async throws {
+        let probe = ConcurrencyProbe()
+        let transport = FakeTransport { url in
+            if url.host == "start.example" {
+                throw NetworkError.httpStatus(503)
+            }
+            await probe.enter()
+            try? await Task.sleep(for: .milliseconds(80))
+            await probe.leave()
+            return "ok-\(url.host ?? "")"
+        }
+        let engine = NovelEngine(network: transport)
+        let hosts = (1 ... 6).map { "https://host\($0).example" }
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: hosts,
+                autoSwitchHost: true,
+                currentHost: "https://start.example"
+            )
+        )
+
+        _ = try await engine.requestForTesting(path: "/chapter.html")
+
+        let maximum = await probe.maximum()
+        XCTAssertLessThanOrEqual(maximum, 3)
+        XCTAssertGreaterThanOrEqual(maximum, 2)
+    }
+
     func test第一梯队触发模式在当前host被盾时立即验证() async throws {
         let gate = GuardGate()
         let transport = FakeTransport { url in
@@ -406,6 +434,24 @@ private actor GuardGate {
 
     func passCount() -> Int {
         count
+    }
+}
+
+private actor ConcurrencyProbe {
+    private var active = 0
+    private var maximumActive = 0
+
+    func enter() {
+        active += 1
+        maximumActive = max(maximumActive, active)
+    }
+
+    func leave() {
+        active = max(0, active - 1)
+    }
+
+    func maximum() -> Int {
+        maximumActive
     }
 }
 
