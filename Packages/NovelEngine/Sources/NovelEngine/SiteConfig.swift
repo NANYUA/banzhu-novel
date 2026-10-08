@@ -32,9 +32,8 @@ public struct SiteConfig: Codable, Equatable {
             return env
         }
         #endif
-        return "Mozilla/5.0 (Linux; U; Android 8.1.0; zh-CN; MI 8 Lite Build/OPM1.171019.019) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/78.0.3904.108 " +
-            "Mobile Safari/537.36"
+        return "Mozilla/5.0 (Linux; Android 13; Pixel 7) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36"
     }
 
     /// 把路径拼成完整 URL。已是完整 URL 的直接返回。

@@ -134,6 +134,7 @@ public actor NovelEngine {
         var attempted = Set<String>()
         var lastError: Error = NetworkError.badResponse
         var guardedHost: String?
+        var guardedHostIsSaved = true
 
         var candidates = [startingHost]
         if routing.autoSwitchHost {
@@ -144,11 +145,17 @@ public actor NovelEngine {
             let host = Self.normalizedHost(candidate)
             guard !host.isEmpty, attempted.insert(host).inserted else { continue }
             do {
-                return try await fetchFromHostWithoutGuard(host, path: path, body: body)
+                return try await fetchFromHostWithoutGuard(
+                    host,
+                    path: path,
+                    body: body,
+                    notifyHostChange: true
+                )
             } catch let error as NetworkError {
                 if error.isGuardRequired {
                     if guardedHost == nil {
                         guardedHost = host
+                        guardedHostIsSaved = true
                     }
                     continue
                 }
@@ -171,11 +178,17 @@ public actor NovelEngine {
                         let host = Self.normalizedHost(candidate)
                         guard !host.isEmpty, attempted.insert(host).inserted else { continue }
                         do {
-                            return try await fetchFromHostWithoutGuard(host, path: path, body: body)
+                            return try await fetchFromHostWithoutGuard(
+                                host,
+                                path: path,
+                                body: body,
+                                notifyHostChange: false
+                            )
                         } catch let error as NetworkError {
                             if error.isGuardRequired {
                                 if guardedHost == nil {
                                     guardedHost = host
+                                    guardedHostIsSaved = false
                                 }
                                 continue
                             }
@@ -190,6 +203,7 @@ public actor NovelEngine {
                     if error.isGuardRequired {
                         if guardedHost == nil {
                             guardedHost = URL(string: navURL).flatMap(\.host)
+                            guardedHostIsSaved = false
                         }
                     } else if error.isHostUnavailable {
                         lastError = error
@@ -206,7 +220,8 @@ public actor NovelEngine {
                 return try await fetchFromHostWithGuard(
                     guardedHost,
                     path: path,
-                    body: body
+                    body: body,
+                    notifyHostChange: guardedHostIsSaved
                 )
             } catch {
                 config = SiteConfig(host: startingHost)
@@ -221,24 +236,30 @@ public actor NovelEngine {
     private func fetchFromHostWithoutGuard(
         _ host: String,
         path: String,
-        body: String?
+        body: String?,
+        notifyHostChange: Bool
     ) async throws -> String {
         config = SiteConfig(host: host)
         guard let url = config.url(path) else { throw NetworkError.badResponse }
         let html = try await perform(url: url, body: body)
-        routing.onHostChanged?(host)
+        if notifyHostChange {
+            routing.onHostChanged?(host)
+        }
         return html
     }
 
     private func fetchFromHostWithGuard(
         _ host: String,
         path: String,
-        body: String?
+        body: String?,
+        notifyHostChange: Bool
     ) async throws -> String {
         config = SiteConfig(host: host)
         guard let url = config.url(path) else { throw NetworkError.badResponse }
         let html = try await performWithGuard(url: url, body: body)
-        routing.onHostChanged?(host)
+        if notifyHostChange {
+            routing.onHostChanged?(host)
+        }
         return html
     }
 

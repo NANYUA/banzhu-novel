@@ -74,34 +74,50 @@ final class GuardResolver: NSObject {
             || html.contains("向右滑动") || html.contains("slide.js")
     }
 
-    /// 模拟人手拖动滑块：从左到底分多步派发 mousedown→mousemove…→mouseup，
-    /// 让盾脚本 slide.js 收集到 move_arr 轨迹并计算 guardret cookie 后自动 reload。
+    /// 模拟人手拖动滑块：19 步 smoothstep 轨迹 + 随机间隔，
+    /// 让盾脚本 slide.js 收集到接近真人的 move_arr 后自动 reload。
     private static let autoSlideJS = """
     (function(){
       try{
+        if(!document.cookie.match(/guard=/)){ return 'no-guard'; }
         var btn=document.getElementById('btn');
         var slider=document.getElementById('slider');
         if(!btn||!slider){ return 'no-slider'; }
-        var max=slider.offsetWidth-btn.offsetWidth;
-        var startX=100, y=30;
-        function fire(type,x){
-          var e=new MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window});
-          (type==='mousedown'?btn:document).dispatchEvent(e);
+        var br=btn.getBoundingClientRect();
+        var sx=Math.round(br.x+br.width/2);
+        var sy=Math.round(br.y+br.height/2);
+        var max=slider.clientWidth-btn.offsetWidth;
+        var total=max+5;
+        function wait(ms){
+          var start=performance.now();
+          while(performance.now()-start<ms){}
         }
-        fire('mousedown',startX);
-        var steps=18, i=0;
-        var timer=setInterval(function(){
-          i++;
-          var x=startX+Math.round(max*i/steps);
-          if(i>=steps){ x=startX+max; }
-          fire('mousemove',x);
-          if(i>=steps){
-            clearInterval(timer);
-            fire('mouseup',startX+max);
-          }
-        },30);
+        btn.dispatchEvent(new MouseEvent('mousedown',{
+          clientX:sx,clientY:sy,bubbles:true,cancelable:true
+        }));
+        wait(50);
+        var previous=sx;
+        var steps=19;
+        for(var i=1;i<=steps;i++){
+          var progress=i/steps;
+          var smooth=progress*progress*(3-2*progress);
+          var x=Math.round(sx+total*smooth+(Math.random()*4-2));
+          if(i<steps&&x>sx+max-3){ x=sx+max-3; }
+          if(x<=previous){ x=previous+1; }
+          var y=Math.round(Math.random()*5-2.5);
+          document.documentElement.dispatchEvent(new MouseEvent('mousemove',{
+            clientX:x,clientY:sy+y,bubbles:true,cancelable:true
+          }));
+          previous=x;
+          wait(13+Math.round(Math.random()*6));
+        }
+        document.documentElement.dispatchEvent(new MouseEvent('mouseup',{
+          clientX:sx+max+3,clientY:sy+1,bubbles:true,cancelable:true
+        }));
         return 'drag-started';
-      }catch(err){ return 'err:'+err; }
+      }catch(err){
+        return 'err:'+err;
+      }
     })();
     """
 

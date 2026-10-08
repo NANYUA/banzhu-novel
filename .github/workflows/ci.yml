@@ -138,7 +138,7 @@ jobs:
       - name: 生成 Xcode 工程
         run: xcodegen generate
 
-      - name: 归档 Release App（不签名）
+      - name: 构建 Release App（不签名）
         run: |
           set -o pipefail
           xcodebuild \
@@ -146,13 +146,13 @@ jobs:
             -scheme BanzhuNovel \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/BanzhuNovel.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/BanzhuNovelDerivedData" \
             -skipMacroValidation \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            archive 2>&1 | tee package-build.log
+            build 2>&1 | tee package-build.log
 
       - name: 输出打包错误
         if: failure()
@@ -163,11 +163,11 @@ jobs:
             done
           fi
 
-      - name: 制作 IPA / App / Archive
+      - name: 制作 IPA / App
         run: |
           set -euo pipefail
-          ARCHIVE="$RUNNER_TEMP/BanzhuNovel.xcarchive"
-          APP_PATH="$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)"
+          APP_PATH="$(find "$RUNNER_TEMP/BanzhuNovelDerivedData/Build/Products/Release-iphoneos" \
+            -maxdepth 1 -name '*.app' -print -quit)"
           test -n "$APP_PATH"
           APP_NAME="$(basename "$APP_PATH" .app)"
 
@@ -182,9 +182,6 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent \
             "$APP_PATH" \
             "artifacts/${APP_NAME}-unsigned.app.zip"
-          ditto -c -k --sequesterRsrc --keepParent \
-            "$ARCHIVE" \
-            "artifacts/${APP_NAME}-unsigned.xcarchive.zip"
           shasum -a 256 artifacts/* > artifacts/SHA256SUMS.txt
           ls -lh artifacts
 

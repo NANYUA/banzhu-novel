@@ -3,6 +3,7 @@ import XCTest
 
 final class HostRoutingTests: XCTestCase {
     func testHost失效时按已保存列表切换() async throws {
+        let changes = HostChangeRecorder()
         let transport = FakeTransport { url in
             if url.host == "one.example" {
                 throw NetworkError.transport(URLError(.cannotConnectToHost))
@@ -14,7 +15,10 @@ final class HostRoutingTests: XCTestCase {
             SiteRoutingConfiguration(
                 hosts: ["https://two.example"],
                 autoSwitchHost: true,
-                currentHost: "https://one.example"
+                currentHost: "https://one.example",
+                onHostChanged: { host in
+                    changes.record(host)
+                }
             )
         )
 
@@ -23,6 +27,8 @@ final class HostRoutingTests: XCTestCase {
         XCTAssertEqual(html, "ok")
         let hosts = await transport.requestedHosts()
         XCTAssertEqual(hosts, ["one.example", "two.example"])
+        let recorded = changes.values()
+        XCTAssertEqual(recorded, ["https://two.example"])
     }
 
     func test关闭自动换host时只尝试当前host() async throws {
@@ -51,6 +57,7 @@ final class HostRoutingTests: XCTestCase {
 
     func test当前host被盾时优先切换未验证host() async throws {
         let gate = GuardGate()
+        let changes = HostChangeRecorder()
         let transport = FakeTransport { url in
             if url.host == "one.example" {
                 throw NetworkError.guarded
@@ -69,6 +76,9 @@ final class HostRoutingTests: XCTestCase {
                 guardPass: { _ in
                     await gate.markPassed()
                     return true
+                },
+                onHostChanged: { host in
+                    changes.record(host)
                 }
             )
         )
@@ -78,9 +88,12 @@ final class HostRoutingTests: XCTestCase {
         XCTAssertEqual(html, "two-ok")
         let passCount = await gate.passCount()
         XCTAssertEqual(passCount, 0)
+        let recorded = changes.values()
+        XCTAssertEqual(recorded, ["https://two.example"])
     }
 
     func test已保存host全失败后从导航网址解析新host() async throws {
+        let changes = HostChangeRecorder()
         let transport = FakeTransport { url in
             switch url.host {
             case "one.example", "two.example":
@@ -99,7 +112,10 @@ final class HostRoutingTests: XCTestCase {
                 hosts: ["https://two.example"],
                 navigationURLs: ["https://nav.example.com"],
                 autoSwitchHost: true,
-                currentHost: "https://one.example"
+                currentHost: "https://one.example",
+                onHostChanged: { host in
+                    changes.record(host)
+                }
             )
         )
 
@@ -108,6 +124,8 @@ final class HostRoutingTests: XCTestCase {
         XCTAssertEqual(html, "mirror-ok")
         let hosts = await transport.requestedHosts()
         XCTAssertEqual(hosts, ["one.example", "two.example", "nav.example.com", "mirror001.com"])
+        let recorded = changes.values()
+        XCTAssertTrue(recorded.isEmpty)
     }
 
     func test遇盾通过后重放原请求() async throws {
@@ -178,5 +196,22 @@ private actor GuardGate {
 
     func passCount() -> Int {
         count
+    }
+}
+
+private final class HostChangeRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hosts: [String] = []
+
+    func record(_ host: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        hosts.append(host)
+    }
+
+    func values() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        hosts
     }
 }
