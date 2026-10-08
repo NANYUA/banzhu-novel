@@ -251,6 +251,6 @@ private final class HostChangeRecorder: @unchecked Sendable {
     func values() -> [String] {
         lock.lock()
         defer { lock.unlock() }
-        hosts
+        return hosts
     }
 }
