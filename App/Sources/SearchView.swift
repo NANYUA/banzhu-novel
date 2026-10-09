@@ -34,9 +34,9 @@ struct SearchView: View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             NavigationStack {
                 content(viewStore)
-                    // U0-3：整页底色统一成设置页那种 `systemGroupedBackground`（浅色 #F2F2F7）。
-                    // 结果列表、加载 / 空 / 错误态都透出这一层，页面里不再有任何一块白底。
-                    .background(Color(.systemGroupedBackground))
+                    // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`），
+                    // 两者形成一级层次。搜索结果卡的白色由 `SearchResultRow` 自己画。
+                    .background(AppTheme.Surface.page)
                     .navigationTitle("搜索")
                     // §1 一致性：与同项目的 `ReaderSearchView` 统一到系统 `.searchable`
                     // 范式，自绘搜索栏（TextField + 搜索按钮）已删除。
@@ -171,8 +171,10 @@ struct SearchView: View {
                         trailing: DesignTokens.Spacing.md
                     )
                 )
-                // 行背景清掉：plain List 的行 / 滚动背景默认是 `systemBackground`
-                // （浅色纯白），会把页面灰盖住，卡片之间的 6pt 间隙尤其明显。
+                .listRowSeparator(.hidden)
+                // 行背景清掉：卡面颜色由 `SearchResultRow` 自己画（`AppTheme.Surface.card`），
+                // 这里再铺一层 List 默认的 `systemBackground`（浅色纯白）会把卡片之间的
+                // 间隙也涂白，卡片就与页面分不出层次了。
                 .listRowBackground(Color.clear)
             }
 
@@ -183,7 +185,7 @@ struct SearchView: View {
             }
         }
         .listStyle(.plain)
-        // 让 List 自己的滚动背景透出页面色（U0-3 的那层白就是它）。
+        // 让 List 自己的滚动背景透出页面分组灰。
         .scrollContentBackground(.hidden)
     }
 
@@ -252,7 +254,7 @@ private struct SearchResultRow: View {
             Button(action: onOpen) {
                 HStack(spacing: 12) {
                     RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                        .fill(Color(.tertiarySystemBackground))
+                        .fill(AppTheme.Surface.inset)
                         .frame(width: 48, height: 64)
                         .overlay {
                             Image(systemName: "book.closed")
@@ -288,13 +290,18 @@ private struct SearchResultRow: View {
             // 强调层贴「打开详情」那块区域的轮廓；行尾「加入书架」是独立控件，不跟着变暗。
             .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
 
+            // 两个独立触控目标之间的发丝分隔线（系统 `Divider()`，不自算 1px）：
+            // 左边整块进详情、右边「加入书架」，这条线让「一块卡里有两个可点区域」一眼可读。
+            Divider()
+
             shelfAction
         }
         .padding(12)
         .contentShape(Rectangle())
-        // U0-3：与页面同色（用户要求统一成设置页的 `systemGroupedBackground`）。
+        // U1-1：卡面 = 白（`AppTheme.Surface.card`），压在页面的分组灰底上形成一级层次；
+        // 圆角统一 `DesignTokens.Radius.sm` = 12。
         .background(
-            Color(.systemGroupedBackground),
+            AppTheme.Surface.card,
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
         )
     }

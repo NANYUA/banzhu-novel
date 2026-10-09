@@ -6,14 +6,13 @@ import SwiftUI
 /// 自定义卡片用 `.buttonStyle(.plain)` 时没有任何按下反馈，用户点下去要等跳转才知道点到了。
 /// Apple HIG 要求**按下瞬间**就给反馈，而不是等抬手；而且这条反馈必须**可感知**——
 /// 弱到看不见的反馈等于没有反馈。本样式原来只做 `scaleEffect(0.98)` + `opacity(0.88)`，
-/// 在浅灰列表的白卡上几乎看不出来（卡片改成与页面同色后，`opacity` 更是只会冲淡文字，
-/// 读起来像禁用态，不像按下）。
+/// 在白卡上几乎看不出来（只改卡片透明度，浅色下只会冲淡文字，读起来像禁用态，不像按下）。
 ///
-/// ## 设计取值
+/// ## 设计取值（U1-1：页面底 = 分组灰、卡面 = 白）
 /// - 按下：轻微缩小 + 叠一层**可见**的强调层（`Color.primary.opacity(0.12)`）；抬手复原。
-/// - 强调层用 `Color.primary` 而不是硬编码灰：浅色模式下它是黑（压暗卡片），
-///   深色模式下它是白（提亮卡片），两种外观下都有可感知的对比。
-/// - 强度 0.12 ≈ 系统 `systemFill` 量级：浅色下卡片 `#F2F2F7` → `#D5D5D9`，
+/// - 强调层用 `Color.primary` 而不是硬编码灰：浅色模式下它是黑（压暗白卡），
+///   深色模式下它是白（提亮深色卡），两种外观下都有可感知的对比。
+/// - 强度 0.12 ≈ 系统 `systemFill` 量级：浅色下白卡 `#FFFFFF` → `#E0E0E0`，
 ///   一眼能看出「按下了」，又不至于像禁用态。
 /// - `shape` 只用来把强调层贴齐元素自身轮廓，否则按下瞬间会在圆角 / 胶囊外露出方角。
 /// - 用**临界阻尼弹簧**（`dampingFraction: 1`，无回弹）而非固定时长缓动：
@@ -28,7 +27,8 @@ struct PressableCardButtonStyle: ButtonStyle {
     var pressedScale: CGFloat = 0.98
 
     /// 按下强调层贴合的轮廓。
-    /// 默认矩形（永远落在元素自己的边界内）；圆角卡片传 `AnyShape(RoundedRectangle(cornerRadius: 8))`，
+    /// 默认矩形（永远落在元素自己的边界内）；圆角卡片传
+    /// `AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))`（卡片圆角 12），
     /// 胶囊传 `AnyShape(Capsule())`。
     var shape = AnyShape(Rectangle())
 

@@ -24,4 +24,29 @@ import SwiftUI
 enum AppTheme {
     /// 品牌强调色：暖珊瑚红 `#D1451F`（= RGB 209 / 69 / 31）。
     static let accent = Color(red: 209.0 / 255.0, green: 69.0 / 255.0, blue: 31.0 / 255.0)
+
+    /// 卡片化视觉语言（U1-1）：**浅色底 + 卡面 + 细微分隔线**。
+    ///
+    /// ## 为什么放在这里
+    /// `DesignTokens.swift` 只管尺度、不放颜色（那是它自己的约定）。颜色统一由 `AppTheme` 定义，
+    /// 避免出现第二个颜色真相源。
+    ///
+    /// ## 为什么全用语义系统色
+    /// skill §6 / §17「忽略深色模式」：语义色会随明暗外观自动适配。
+    /// - `page` 浅色下是系统分组灰（≈ `#F2F2F7`），深色下自动转黑；
+    /// - `card` 浅色下是白，压在页面灰底上形成**一级层次**（卡片与页面同色是 U0-3 的旧取舍，
+    ///   U1-1 明确要求卡片化，所以卡面重新与页面分开）；
+    /// - `separator` 是系统分隔线色，本身就是 1px 发丝级，符合「细微分隔线」。
+    ///
+    /// → 因此**不要**在这里写 `Color(white:)` / 十六进制值。
+    enum Surface {
+        /// 页面底色。
+        static let page = Color(.systemGroupedBackground)
+        /// 卡面（列表行卡片、搜索结果卡、章节行卡）。
+        static let card = Color(.secondarySystemGroupedBackground)
+        /// 卡面上的次级区块（卡片内再嵌一层）。
+        static let inset = Color(.tertiarySystemGroupedBackground)
+        /// 细微分隔线。
+        static let separator = Color(.separator)
+    }
 }

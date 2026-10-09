@@ -73,9 +73,10 @@ struct BookshelfView: View {
                         }
                     }
                 }
-                // U0-3：整页底色统一成设置页那种 `systemGroupedBackground`（浅色 #F2F2F7）。
-                // 分组栏、列表、加载 / 空 / 错误态都透出这一层，页面里不再有任何一块白底。
-                .background(Color(.systemGroupedBackground))
+                // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`），
+                // 两者形成一级层次。分组栏、加载 / 空 / 错误态透出页面色；
+                // 白底只留给列表里的行卡片本身。
+                .background(AppTheme.Surface.page)
                 .navigationTitle("书架")
                 .onAppear { viewStore.send(.onAppear) }
                 .navigationDestination(isPresented: $isShowingDetail) {
@@ -165,8 +166,12 @@ private extension BookshelfView {
             if let notice = viewStore.groupNotice {
                 groupNotice(notice, viewStore: viewStore)
             }
+
+            // 分组栏与列表之间的一条发丝分隔线（系统 `Divider()`，不自算 1px）。
+            // 滚动列表时它固定不动，把「筛选」和「内容」两个区块分开。
+            Divider()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(AppTheme.Surface.page)
     }
 
     private func groupChips(
@@ -311,12 +316,13 @@ private extension BookshelfView {
                         trailing: DesignTokens.Spacing.md
                     )
                 )
-                // 行背景也清掉：plain List 的行 / 滚动背景默认是 `systemBackground`
-                // （浅色纯白），会把页面灰盖住，卡片之间的 6pt 间隙尤其明显。
+                // 行背景清掉：卡面颜色由 `BookRow` 自己画（`AppTheme.Surface.card`），
+                // 这里再铺一层 List 默认的 `systemBackground`（浅色纯白）会把行卡片之间
+                // 的间隙也涂白，卡片就与页面分不出层次了。
                 .listRowBackground(Color.clear)
         }
         .listStyle(.plain)
-        // 让 List 自己的滚动背景透出页面色（U0-3 的那层白就是它）。
+        // 让 List 自己的滚动背景透出页面分组灰。
         .scrollContentBackground(.hidden)
         .refreshable {
             await viewStore.send(.onAppear).finish()
@@ -388,9 +394,11 @@ private struct GroupChip: View {
                 .padding(.vertical, DesignTokens.Spacing.xs)
                 // §9 触控目标：胶囊本身做到 44pt —— 强调层贴的就是它，所以不会出现「按下变胖」。
                 .frame(minHeight: 44)
+                // 未选中 = 白卡面 + 主色文字（U1-1 的「卡面 = 白」同样适用于分组栏里的贴片）；
+                // 选中 = 品牌强调色填充。
                 .background(
                     Capsule().fill(
-                        isSelected ? AppTheme.accent : Color(.tertiarySystemFill)
+                        isSelected ? AppTheme.accent : AppTheme.Surface.card
                     )
                 )
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
@@ -423,7 +431,7 @@ private struct BookRow: View {
                 }
             }
             .frame(width: 60, height: 80)
-            .background(Color(.tertiarySystemBackground))
+            .background(AppTheme.Surface.inset)
             .cornerRadius(DesignTokens.Radius.sm)
 
             // 文字区
@@ -462,16 +470,17 @@ private struct BookRow: View {
         }
         .padding(12)
         .contentShape(Rectangle()) // 整张卡片可点
-        // U0-3：与页面同色（用户要求统一成设置页的 `systemGroupedBackground`）。
+        // U1-1：卡面 = 白（`AppTheme.Surface.card`），压在页面的分组灰底上形成一级层次；
+        // 圆角统一 `DesignTokens.Radius.sm` = 12。
         .background(
-            Color(.systemGroupedBackground),
+            AppTheme.Surface.card,
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
         )
     }
 
     private var placeholder: some View {
         Rectangle()
-            .fill(Color(.tertiarySystemBackground))
+            .fill(AppTheme.Surface.inset)
             .overlay {
                 Image(systemName: "book")
                     .font(.title3)
