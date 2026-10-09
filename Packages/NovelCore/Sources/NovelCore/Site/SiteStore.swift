@@ -80,15 +80,15 @@ public struct SiteSettings: Codable, Equatable, Sendable {
         }
     }
 
-    public mutating func upsertHost(_ rawValue: String, isFromNavigation: Bool) {
-        let key = SiteSettings.canonicalHostKey(rawValue)
+    public mutating func upsertHost(_ entry: SiteEntry) {
+        let key = SiteSettings.canonicalHostKey(entry.value)
         guard !key.isEmpty else { return }
         if let index = hosts.firstIndex(where: { $0.normalizedKey == key }) {
-            if isFromNavigation {
+            if entry.isFromNavigation {
                 hosts[index].isFromNavigation = true
             }
         } else {
-            hosts.append(SiteEntry(value: rawValue, isFromNavigation: isFromNavigation))
+            hosts.append(entry)
         }
         normalize()
     }

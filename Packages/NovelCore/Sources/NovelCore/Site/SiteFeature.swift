@@ -99,7 +99,7 @@ public struct SiteFeature: Reducer {
             case let .navigationSucceeded(entries):
                 state.isFetchingNavigation = false
                 for entry in entries {
-                    state.settings.upsertHost(entry.value, isFromNavigation: true)
+                    state.settings.upsertHost(entry)
                 }
                 state.discoveredHosts = entries
                 state.isHostListExpanded = true
@@ -120,7 +120,7 @@ public struct SiteFeature: Reducer {
                     state.notice = "host 不能为空。"
                     return .none
                 }
-                state.settings.upsertHost(trimmed, isFromNavigation: false)
+                state.settings.upsertHost(SiteEntry(value: trimmed, isFromNavigation: false))
                 return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
 
             case let .deleteHost(id):
