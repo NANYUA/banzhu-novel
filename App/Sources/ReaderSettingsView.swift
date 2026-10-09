@@ -146,9 +146,18 @@ struct ReaderSettingsView: View {
             }
 
             HStack {
-                Text("页边距")
-                Slider(value: pageInsetBinding, in: 8 ... 48, step: 4)
+                Text("上下边距")
+                Slider(value: verticalInsetBinding, in: 0 ... 48, step: 4)
                 Text("\(Int(configuration.inset.top))")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 32, alignment: .trailing)
+            }
+
+            HStack {
+                Text("左右边距")
+                Slider(value: horizontalInsetBinding, in: 8 ... 48, step: 4)
+                Text("\(Int(configuration.inset.leading))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 32, alignment: .trailing)
@@ -280,17 +289,29 @@ private extension ReaderSettingsView {
         )
     }
 
-    var pageInsetBinding: Binding<CGFloat> {
+    /// 上下边距（U1-8）：与左右分开可调 —— 原先一个「页边距」滑杆同时改四边。
+    ///
+    /// 下限给到 0：上下不需要 HIG 那套水平页边距的下限，且正文上下还各有安全区兜底。
+    var verticalInsetBinding: Binding<CGFloat> {
         Binding(
             get: { configuration.inset.top },
             set: { newValue in
                 var next = configuration
-                next.inset = PageInset(
-                    top: newValue,
-                    leading: newValue,
-                    bottom: newValue,
-                    trailing: newValue
-                )
+                next.inset.top = newValue
+                next.inset.bottom = newValue
+                onChange(next)
+            }
+        )
+    }
+
+    /// 左右边距（U1-8）。下限仍守 8pt；默认 24pt 由 `PageInset` 的默认值给。
+    var horizontalInsetBinding: Binding<CGFloat> {
+        Binding(
+            get: { configuration.inset.leading },
+            set: { newValue in
+                var next = configuration
+                next.inset.leading = newValue
+                next.inset.trailing = newValue
                 onChange(next)
             }
         )

@@ -89,9 +89,12 @@ public struct PageInset: Equatable, Sendable, Codable {
     public var bottom: CGFloat
     public var trailing: CGFloat
 
-    /// 默认四边 16pt：项目默认页边距（对齐设置面板滑杆 8…48 与 HIG 标准内容页边距 ≥16pt），
-    /// 避免「从未动过阅读设置」时正文顶满屏幕（B0-4）。
-    public init(top: CGFloat = 16, leading: CGFloat = 16, bottom: CGFloat = 16, trailing: CGFloat = 16) {
+    /// 默认：左右 **24pt**、上下 **8pt**（U1-8，owner 指定）。
+    ///
+    /// - 左右 24 比 HIG 的 16pt 底线更宽松：中文正文一行排得下的字数更舒服，也避开屏幕圆角。
+    /// - 上下收到 8：原先四边都是 16（B0-4 落的），上下显得太宽 —— 正文上下还各有安全区兜底，
+    ///   不必再叠一层同样厚度的留白。
+    public init(top: CGFloat = 8, leading: CGFloat = 24, bottom: CGFloat = 8, trailing: CGFloat = 24) {
         self.top = top
         self.leading = leading
         self.bottom = bottom

@@ -151,4 +151,26 @@ final class PaginatorTests: XCTestCase {
         XCTAssertEqual(pages[0].location, 0)
         XCTAssertEqual(pages[0].length, 1)
     }
+
+    // MARK: - 默认页边距（U1-8）
+
+    /// ⑯ 默认页边距：左右 24、上下 8。
+    ///
+    /// 这个默认值此前**没有任何测试锁着**（B0-4 把它从 0 改成 16 时也没锁），
+    /// 改歪了没人会发现。这里补一个锚点。
+    func test默认页边距左右二十四上下八() {
+        let inset = PageInset()
+        XCTAssertEqual(inset.leading, 24)
+        XCTAssertEqual(inset.trailing, 24)
+        XCTAssertEqual(inset.top, 8)
+        XCTAssertEqual(inset.bottom, 8)
+    }
+
+    /// ⑰ 分页配置与落盘设置必须**同源**取默认值：
+    /// 两处都写 `PageInset()`，只要有人把其中一处改成字面量就会漂移，
+    /// 表现为「从没动过设置，但读过一次设置后页边距变了」。
+    func test分页配置与阅读设置的默认页边距同源() {
+        XCTAssertEqual(config().inset, PageInset())
+        XCTAssertEqual(ReadingSettings().inset, PageInset())
+    }
 }
