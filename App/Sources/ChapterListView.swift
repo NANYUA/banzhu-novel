@@ -80,10 +80,15 @@ struct ChapterListView: View {
                                 .tint(Color.accentColor)
                             }
                         }
+                        .listRowBackground(Color.clear)
                     }
                     .listStyle(.plain)
+                    // 让 List 滚动背景透出页面色（plain List 默认是 `systemBackground` 纯白）。
+                    .scrollContentBackground(.hidden)
                 }
             }
+            // U0-5：与书架 / 搜索页统一，整页底色走 `systemGroupedBackground`（浅色 #F2F2F7）。
+            .background(Color(.systemGroupedBackground))
             .navigationTitle(viewStore.bookTitle)
             .toolbar(.hidden, for: .tabBar)
             .toolbar {
