@@ -133,4 +133,103 @@ final class HostRoutingTests: XCTestCase {
         let passCount = await gate.passCount()
         XCTAssertEqual(passCount, 1)
     }
+
+    // MARK: - B0-6 Step 3：导航页是 JS 加载器壳时用渲染结果兜底
+
+    /// 只返回 `<script src>` 的加载器壳：纯 GET 0 命中，但渲染后就该拿到候选。
+    private static let shellHTML = "<html><body><script src=\"loader.js\"></script></body></html>"
+
+    func test纯GET零命中时用渲染结果再匹配出候选() async throws {
+        let transport = FakeTransport { _ in Self.shellHTML }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                host: "https://nav.example.com",
+                renderNavigation: { _ in
+                    """
+                    <map><area href="https://mirror001.com" alt="A">
+                    <area href="https://mirror002.com" alt="B"></map>
+                    """
+                }
+            )
+        )
+
+        let hosts = try await engine.resolveCandidates(fromNav: "https://nav.example.com")
+
+        XCTAssertEqual(hosts, ["https://mirror001.com", "https://mirror002.com"])
+    }
+
+    func test纯GET已命中时不再调用渲染器() async throws {
+        let transport = FakeTransport { _ in "<a href=\"https://mirror001.com\">A</a>" }
+        let engine = NovelEngine(network: transport)
+        // 渲染器若被调用，结果里会多出 mirror009 —— 用它反证「已命中就不渲染」。
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                host: "https://nav.example.com",
+                renderNavigation: { _ in "<a href=\"https://mirror009.com\">B</a>" }
+            )
+        )
+
+        let hosts = try await engine.resolveCandidates(fromNav: "https://nav.example.com")
+
+        XCTAssertEqual(hosts, ["https://mirror001.com"])
+    }
+
+    func test无渲染器时零命中行为与改动前一致() async throws {
+        let transport = FakeTransport { _ in Self.shellHTML }
+        let engine = NovelEngine(network: transport)
+
+        do {
+            _ = try await engine.resolveCandidates(fromNav: "https://nav.example.com")
+            XCTFail("0 命中应抛错")
+        } catch let error as NetworkError {
+            guard case let .noCandidates(bytes) = error else {
+                return XCTFail("应为 NetworkError.noCandidates，实际 \(error)")
+            }
+            XCTAssertEqual(bytes, Self.shellHTML.utf8.count)
+        }
+    }
+
+    func test渲染器拿不到页面时仍抛noCandidates() async throws {
+        let transport = FakeTransport { _ in Self.shellHTML }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                host: "https://nav.example.com",
+                renderNavigation: { _ in nil }
+            )
+        )
+
+        do {
+            _ = try await engine.resolveCandidates(fromNav: "https://nav.example.com")
+            XCTFail("渲染拿不到页面时应抛错")
+        } catch let error as NetworkError {
+            guard case let .noCandidates(bytes) = error else {
+                return XCTFail("应为 NetworkError.noCandidates，实际 \(error)")
+            }
+            XCTAssertEqual(bytes, Self.shellHTML.utf8.count)
+        }
+    }
+
+    func test渲染结果仍无候选时报渲染后的字节数() async throws {
+        let transport = FakeTransport { _ in Self.shellHTML }
+        let engine = NovelEngine(network: transport)
+        let renderedHTML = "<html><body><p>渲染完也没有地址</p></body></html>"
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                host: "https://nav.example.com",
+                renderNavigation: { _ in renderedHTML }
+            )
+        )
+
+        do {
+            _ = try await engine.resolveCandidates(fromNav: "https://nav.example.com")
+            XCTFail("渲染后仍无候选应抛错")
+        } catch let error as NetworkError {
+            guard case let .noCandidates(bytes) = error else {
+                return XCTFail("应为 NetworkError.noCandidates，实际 \(error)")
+            }
+            XCTAssertEqual(bytes, renderedHTML.utf8.count)
+        }
+    }
 }

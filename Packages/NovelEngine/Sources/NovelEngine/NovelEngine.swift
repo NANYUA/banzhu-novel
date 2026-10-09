@@ -8,9 +8,19 @@ public struct SiteRoutingConfiguration: Sendable {
     public var host: String
     public var guardPass: GuardPass?
 
-    public init(host: String, guardPass: GuardPass? = nil) {
+    /// 导航页渲染回调（可选）：导航页只是个 JS 加载器壳时，由上层用浏览器引擎
+    /// 把脚本跑一遍，再把完成后的 DOM 交回来；拿不到返回 nil。
+    /// 引擎只吃闭包、不 import 任何 UI 框架，所以由上层注入。
+    public var renderNavigation: (@Sendable (URL) async -> String?)?
+
+    public init(
+        host: String,
+        guardPass: GuardPass? = nil,
+        renderNavigation: (@Sendable (URL) async -> String?)? = nil
+    ) {
         self.host = Self.normalizedHost(host)
         self.guardPass = guardPass
+        self.renderNavigation = renderNavigation
     }
 
     public static func normalizedHost(_ raw: String) -> String {
@@ -63,44 +73,60 @@ public actor NovelEngine {
 
     // MARK: - 导航解析（只能由按钮触发）
 
-    /// 从导航页抓取所有候选域名。只做一次请求，不缓存、不自动探索。
+    /// 从导航页抓取所有候选域名。先做一次纯 GET；若 0 命中且上层注入了
+    /// `renderNavigation`，再把页面渲染一遍（执行 JS）后匹配第二次。
+    /// 不缓存、不自动探索。
     public func resolveCandidates(fromNav navURL: String) async throws -> [String] {
         let normalizedNav = SiteRoutingConfiguration.normalizedHost(navURL)
         guard let url = URL(string: normalizedNav) else { throw NetworkError.badResponse }
         let html = try await performWithGuard(url: url, body: nil)
-        let patterns = SiteConfig.mirrorPatterns
+        let matched = Self.candidateHosts(in: html)
+        if !matched.isEmpty { return matched }
+
+        // 纯 GET 0 命中：页面可能只是个 JS 加载器壳（地址清单要执行脚本后才进 DOM）。
+        // 只有上层注入了渲染器才多走这一步；没注入时行为与改动前完全一致。
+        if let renderNavigation = routing.renderNavigation,
+           let rendered = await renderNavigation(url),
+           !rendered.isEmpty {
+            let renderedMatched = Self.candidateHosts(in: rendered)
+            if !renderedMatched.isEmpty { return renderedMatched }
+            throw Self.noCandidatesError(bytes: rendered.utf8.count)
+        }
+        throw Self.noCandidatesError(bytes: html.utf8.count)
+    }
+
+    /// 按镜像匹配规则从页面里抽出候选 host（规范化 + 去重）。
+    private static func candidateHosts(in html: String) -> [String] {
         var found: [String] = []
         var seen = Set<String>()
         let ns = html as NSString
-        for pattern in patterns {
+        let fullRange = NSRange(location: 0, length: ns.length)
+        for pattern in SiteConfig.mirrorPatterns {
             guard let regex = try? NSRegularExpression(
                 pattern: pattern,
                 options: [.caseInsensitive]
             ) else {
                 continue
             }
-            for match in regex.matches(
-                in: html,
-                options: [],
-                range: NSRange(location: 0, length: ns.length)
-            ) {
+            for match in regex.matches(in: html, options: [], range: fullRange) {
                 let host = SiteRoutingConfiguration.normalizedHost(ns.substring(with: match.range))
                 if !host.isEmpty, seen.insert(host).inserted {
                     found.append(host)
                 }
             }
         }
-        if found.isEmpty {
-            // 与「响应异常」区分开：这里是页面拿到了、但没匹配到地址。
-            // 记一条诊断（页面字节数 + 正则条数），便于区分「壳页 / 正则不匹配」两类原因。
-            EngineLog.log(
-                .warning,
-                "nav",
-                "0 候选：页面 \(html.utf8.count) 字节，patterns \(patterns.count) 条"
-            )
-            throw NetworkError.noCandidates(html.utf8.count)
-        }
         return found
+    }
+
+    /// 0 命中的统一出口：与「响应异常」区分开（页面拿到了，但没匹配到地址）。
+    /// 记一条诊断（页面字节数 + 正则条数），便于区分「壳页 / 正则不匹配」两类原因。
+    private static func noCandidatesError(bytes: Int) -> NetworkError {
+        EngineLog.log(
+            .warning,
+            "nav",
+            "0 候选：页面 \(bytes) 字节，patterns \(SiteConfig.mirrorPatterns.count) 条"
+        )
+        return NetworkError.noCandidates(bytes)
     }
 
     // MARK: - 搜索

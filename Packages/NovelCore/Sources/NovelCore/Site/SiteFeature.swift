@@ -175,6 +175,11 @@ extension DependencyValues {
                     host: settings.currentHostValue ?? "",
                     guardPass: { url in
                         await GuardCoordinator.shared.requestPass(siteURL: url)
+                    },
+                    // B0-6 Step 3：导航页是 JS 两跳时，纯 GET 只能拿到壳，
+                    // 交由离屏渲染器执行脚本后再匹配（失败会安静返回 nil）。
+                    renderNavigation: { url in
+                        await NavigationRenderer.render(url)
                     }
                 )
             )
