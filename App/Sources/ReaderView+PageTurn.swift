@@ -47,7 +47,11 @@ extension ReaderView {
         }
     }
 
-    /// 翻页动画：§8 用可中断的临界阻尼弹簧；Reduce Motion 退化为短淡入淡出（§13）。
+    /// 翻页动画：**普通缓动，不用弹簧**（U1-9，owner 要求删掉翻页的弹簧效果）。
+    ///
+    /// 原先这里是 `.spring(response:dampingFraction: 1)`（临界阻尼，其实没有回弹），
+    /// 现在统一换成缓动曲线，让「翻页」这条链路上不再出现任何弹簧。
+    /// Reduce Motion 仍退化为更短的淡入淡出（§13）。
     func pageAnimation(for animation: PageTurnAnimation) -> Animation? {
         if reduceMotion {
             return .easeInOut(duration: 0.2)
@@ -56,9 +60,9 @@ extension ReaderView {
         case .none:
             return nil
         case .cover:
-            return .spring(response: 0.3, dampingFraction: 1)
+            return .easeOut(duration: 0.24)
         case .curl:
-            return .spring(response: 0.35, dampingFraction: 1)
+            return .easeInOut(duration: 0.28)
         }
     }
 }

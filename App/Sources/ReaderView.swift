@@ -291,7 +291,7 @@ private extension ReaderView {
                         if abs(projected) > availableWidth / 2, viewStore.pages.indices.contains(target) {
                             viewStore.send(projected < 0 ? .nextPage : .prevPage)
                         }
-                        withAnimation(slideSettleAnimation(velocity: value.velocity.width, offset: slideOffset)) {
+                        withAnimation(slideSettleAnimation()) {
                             slideOffset = 0
                         }
                     }
@@ -306,10 +306,17 @@ private extension ReaderView {
             )
     }
 
-    /// 弹簧吸附（等价 response 0.36 / ζ=1）：手势带动量时降到 ζ≈0.8，并把释放速度按剩余位移归一化交接给弹簧。
-    private func slideSettleAnimation(velocity: CGFloat, offset: CGFloat) -> Animation {
-        let relative = offset == 0 ? 0 : min(max(velocity / -offset, -8), 8)
-        return .interpolatingSpring(stiffness: 300, damping: abs(relative) > 0.5 ? 28 : 35, initialVelocity: Double(relative))
+    /// 吸附回位动画：**普通缓动，不用弹簧**（U1-9，owner 要求删掉翻页的弹簧效果）。
+    ///
+    /// 原先这里是 `.interpolatingSpring(stiffness: 300, damping: 28…35, initialVelocity:)`
+    /// —— 阻尼比 ζ≈0.8，会过冲回弹。现在换成一条「起始快、末端缓停」的 timing curve：
+    /// 观感仍是「一滑就到位」，但不再有过冲。
+    ///
+    /// 注意：跟手（1:1 位移 + 边界橡皮筋）与抬手后的**动量判向**都保留，
+    /// 被去掉的只是回位动画的弹簧曲线本身。副作用是失去了释放速度的交接
+    /// （普通缓动没有初速度概念），换来的就是「不弹」。
+    private func slideSettleAnimation() -> Animation {
+        .timingCurve(0.22, 1, 0.36, 1, duration: 0.22)
     }
 
     private func tapGesture(
