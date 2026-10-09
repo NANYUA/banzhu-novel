@@ -222,10 +222,7 @@ private extension ReaderView {
         .animation(
             configuration.pageTurnMode == .scroll
                 ? nil
-                : (reduceMotion
-                    // §13：Reduce Motion 退化为短淡入淡出（transition 已是 .opacity），而不是瞬切。
-                    ? .easeInOut(duration: 0.2)
-                    : pageAnimation(for: configuration.pageTurnAnimation)),
+                : pageAnimation(for: configuration.pageTurnAnimation),
             value: viewStore.currentPageIndex
         )
 
@@ -567,6 +564,8 @@ private extension ReaderView {
     }
 
     private func pageAnimation(for animation: PageTurnAnimation) -> Animation? {
+        // §13：Reduce Motion 退化为短淡入淡出（transition 已是 .opacity），而不是瞬切。
+        if reduceMotion { return .easeInOut(duration: 0.2) }
         switch animation {
         case .none:
             nil
