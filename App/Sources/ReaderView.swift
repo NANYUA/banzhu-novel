@@ -227,9 +227,7 @@ private extension ReaderView {
             viewStore: viewStore,
             availableWidth: availableWidth,
             onCenterTap: {
-                withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
-                    isChromeVisible.toggle()
-                }
+                setChromeVisible(!isChromeVisible)
             }
         )
     }
@@ -394,7 +392,7 @@ private extension ReaderView {
             Spacer()
 
             Button {
-                isChromeVisible = false
+                setChromeVisible(false)
             } label: {
                 Image(systemName: "eye.slash")
             }
@@ -511,7 +509,23 @@ private extension ReaderView {
                 chapterNumber: chapter.number
             ),
         ]))
-        isChromeVisible = false
+        setChromeVisible(false)
+    }
+
+    // MARK: - 控制栏显隐
+
+    /// 控制栏显隐的**唯一**写入口（U1-2）。
+    ///
+    /// 上栏（`readerTopBar`）与下栏（`readerBottomBar`）都包在 `readerChrome` 里，
+    /// 由 body 里同一个 `if isChromeVisible` 与同一个 `.transition(.opacity)` 控制：
+    /// 两者在物理上无法分别隐藏，所以显隐的**时机与动画也必须只有一处决定**。
+    /// 中央点击 / 顶栏 `eye.slash` / 下载后自动隐藏全部走这里，杜绝再次分叉
+    /// （此前 `eye.slash` 与下载后是裸赋值，会瞬切而不与中央点击同步过渡）。
+    private func setChromeVisible(_ visible: Bool) {
+        guard isChromeVisible != visible else { return }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
+            isChromeVisible = visible
+        }
     }
 
     // MARK: - 外观
