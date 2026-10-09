@@ -77,20 +77,24 @@ struct ReaderView: View {
                     backgroundColor(for: viewStore.config)
                         .ignoresSafeArea()
 
-                    readerContent(
-                        viewStore,
-                        availableWidth: contentSize.width,
-                        availableHeight: contentSize.height
-                    )
+                    // 正文与上下栏共用同一个「安全区可用盒」：两栏不再按全屏坐标钉边，
+                    // 避免顶栏压灵动岛、底栏压 Home Indicator（B0-4）。
+                    ZStack {
+                        readerContent(
+                            viewStore,
+                            availableWidth: contentSize.width,
+                            availableHeight: contentSize.height
+                        )
+
+                        if isChromeVisible {
+                            readerChrome(viewStore)
+                                .transition(.opacity)
+                        }
+                    }
                     .padding(.leading, geometry.safeAreaInsets.leading)
                     .padding(.trailing, geometry.safeAreaInsets.trailing)
                     .padding(.top, geometry.safeAreaInsets.top)
                     .padding(.bottom, geometry.safeAreaInsets.bottom)
-
-                    if isChromeVisible {
-                        readerChrome(viewStore)
-                            .transition(.opacity)
-                    }
                 }
                 .task {
                     viewStore.send(.loadSavedSettings(contentSize))
