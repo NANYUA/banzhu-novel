@@ -70,7 +70,7 @@ final class HostRoutingTests: XCTestCase {
             }
         }
         let hosts = await transport.requestedHosts()
-        XCTAssertEqual(hosts, ["one.example", "one.example"])
+        XCTAssertEqual(hosts, ["one.example"])
     }
 
     func test导航解析返回去重后的host列表() async throws {
