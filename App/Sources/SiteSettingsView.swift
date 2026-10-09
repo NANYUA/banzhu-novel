@@ -25,6 +25,8 @@ struct SiteSettingsView: View {
                 }
                 .navigationTitle("站点入口")
                 .onAppear { viewStore.send(.task) }
+                // H5：离开本页时把编辑中的导航地址落盘（返回上一页 / 切 Tab 都会走这里）。
+                .onDisappear { viewStore.send(.commitNavigationURL) }
             }
         }
     }
@@ -43,8 +45,12 @@ struct SiteSettingsView: View {
             )
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
+            // H5：逐按键只改内存（`.setNavigationURL`），落盘统一走 `.commitNavigationURL`。
+            .onSubmit { viewStore.send(.commitNavigationURL) }
 
             Button {
+                // H5：先把编辑中的地址落盘，再拉取 —— 否则这次输入不会被记住。
+                viewStore.send(.commitNavigationURL)
                 viewStore.send(.fetchNavigationTapped)
             } label: {
                 HStack {

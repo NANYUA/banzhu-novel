@@ -40,6 +40,8 @@ public struct SiteFeature: Reducer {
         case task
         case loaded(SiteSettings)
         case setNavigationURL(String)
+        /// 把编辑中的导航地址真正落盘（回车 / 点拉取 / 离开页面时由 App 层发出）。见 H5。
+        case commitNavigationURL
         case fetchNavigationTapped
         case navigationSucceeded([SiteEntry])
         case navigationFailed(String)
@@ -72,12 +74,18 @@ public struct SiteFeature: Reducer {
                 return configure(state.settings, router: siteRouter)
 
             case let .setNavigationURL(value):
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else {
-                    state.notice = "导航地址不能为空。"
-                    return .none
-                }
-                state.settings.navigationURL = trimmed
+                // H5：只更新内存中的编辑值。原先这里逐按键 `saveAndConfigure` ——
+                // 每敲一个字符就落盘一次并重配引擎，纯属浪费，也会与 `.task` 的载入竞争。
+                // 落盘改由 `.commitNavigationURL` 在「回车 / 点拉取」时统一触发。
+                state.settings.navigationURL = value
+                return .none
+
+            case .commitNavigationURL:
+                // H5：提交入口。允许置空 —— 空值表示「未配置导航地址」，
+                // 由 `.fetchNavigationTapped` 提示「请先填写导航地址。」；
+                // 不再用「导航地址不能为空。」把「清空」与「输入非法」混为一谈。
+                state.settings.navigationURL = state.settings.navigationURL
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
 
             case .fetchNavigationTapped:

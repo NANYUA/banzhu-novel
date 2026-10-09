@@ -106,4 +106,70 @@ final class SiteFeatureTests: XCTestCase {
 
         XCTAssertEqual(settings.hosts.count, 1)
     }
+
+    // MARK: - H5：导航地址「编辑」与「落盘」分离
+
+    func test逐按键编辑导航地址不落盘提交才落盘() async {
+        var saved: [SiteSettings] = []
+        let store = TestStore(initialState: SiteFeature.State()) {
+            SiteFeature()
+        } withDependencies: {
+            $0.siteRouter.configure = { _ in }
+            $0.siteStore.save = { saved.append($0) }
+        }
+
+        // 逐按键只改内存：不落盘、不重配引擎（H5 的核心断言）。
+        await store.send(.setNavigationURL("https")) {
+            $0.settings.navigationURL = "https"
+        }
+        await store.send(.setNavigationURL("https://one.example")) {
+            $0.settings.navigationURL = "https://one.example"
+        }
+        await store.finish()
+        XCTAssertTrue(saved.isEmpty, "逐按键不应触发落盘（H5）")
+
+        // 带首尾空白的中间态同样不落盘。
+        await store.send(.setNavigationURL("  https://one.example  ")) {
+            $0.settings.navigationURL = "  https://one.example  "
+        }
+        await store.finish()
+        XCTAssertTrue(saved.isEmpty, "编辑中间态不应触发落盘")
+
+        // 提交时才落盘一次，并在这一层去掉首尾空白。
+        await store.send(.commitNavigationURL) {
+            $0.settings.navigationURL = "https://one.example"
+        }
+        await store.finish()
+        XCTAssertEqual(saved.count, 1, "提交应恰好落盘一次")
+        XCTAssertEqual(saved.last?.navigationURL, "https://one.example")
+    }
+
+    func test清空导航地址不被拦截由拉取给出提示() async {
+        var saved: [SiteSettings] = []
+        let store = TestStore(
+            initialState: SiteFeature.State(
+                settings: SiteSettings(navigationURL: "https://example.com")
+            )
+        ) {
+            SiteFeature()
+        } withDependencies: {
+            $0.siteRouter.configure = { _ in }
+            $0.siteStore.save = { saved.append($0) }
+        }
+
+        // 清空是合法编辑（=「未配置导航地址」），不再被「导航地址不能为空。」拦下。
+        await store.send(.setNavigationURL("")) {
+            $0.settings.navigationURL = ""
+        }
+        await store.send(.commitNavigationURL)
+        await store.finish()
+        XCTAssertEqual(saved.last?.navigationURL, "")
+
+        // 空地址点拉取 → 明确提示，且不发请求、不进 loading。
+        await store.send(.fetchNavigationTapped) {
+            $0.notice = "请先填写导航地址。"
+        }
+        await store.finish()
+        XCTAssertFalse(store.state.isFetchingNavigation)
+    }
 }
