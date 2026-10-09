@@ -137,7 +137,7 @@ final class HostRoutingTests: XCTestCase {
     // MARK: - B0-6 Step 3：导航页是 JS 加载器壳时用渲染结果兜底
 
     /// 只返回 `<script src>` 的加载器壳：纯 GET 0 命中，但渲染后就该拿到候选。
-    private static let shellHTML = "<html><body><script src=\"loader.js\"></script></body></html>"
+    private static let shellHTML = "<html><body><script src=\"app.js\"></script></body></html>"
 
     func test纯GET零命中时用渲染结果再匹配出候选() async throws {
         let transport = FakeTransport { _ in Self.shellHTML }
