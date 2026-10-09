@@ -23,19 +23,25 @@ final class SiteFeatureTests: XCTestCase {
         await store.send(.navigationSucceeded([
             SiteEntry(value: "https://mirror001.com/", isFromNavigation: true),
             SiteEntry(value: "https://mirror002.com", isFromNavigation: true),
-        ])) {
-            // mirror001 与已有条目规范化后相同 → 只更新标记，不新增。
-            $0.settings.hosts = [
-                SiteEntry(id: keptID, value: "https://mirror001.com", isFromNavigation: true),
-                SiteEntry(value: "https://mirror002.com", isFromNavigation: true),
-            ]
-            $0.discoveredHosts = [
-                SiteEntry(value: "https://mirror001.com/", isFromNavigation: true),
-                SiteEntry(value: "https://mirror002.com", isFromNavigation: true),
-            ]
-            $0.isHostListExpanded = true
-        }
+        ]))
         await store.finish()
+
+        // mirror001 与已有条目规范化后相同 → 保留原 id，只更新标记。
+        XCTAssertEqual(store.state.settings.hosts.count, 2)
+        XCTAssertEqual(store.state.settings.hosts[0].id, keptID)
+        XCTAssertTrue(store.state.settings.hosts[0].isFromNavigation)
+        XCTAssertEqual(
+            SiteSettings.canonicalHostKey(store.state.settings.hosts[0].value),
+            SiteSettings.canonicalHostKey("https://mirror001.com")
+        )
+        // mirror002 为新条目，按规范化 key 追加，不与已有条目重复。
+        XCTAssertEqual(
+            SiteSettings.canonicalHostKey(store.state.settings.hosts[1].value),
+            SiteSettings.canonicalHostKey("https://mirror002.com")
+        )
+        XCTAssertTrue(store.state.settings.hosts[1].isFromNavigation)
+        XCTAssertEqual(store.state.discoveredHosts.count, 2)
+        XCTAssertTrue(store.state.isHostListExpanded)
 
         XCTAssertEqual(settings.hosts.count, 2)
         XCTAssertEqual(
