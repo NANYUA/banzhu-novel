@@ -9,6 +9,7 @@ struct BookDetailView: View {
     let downloadStore: StoreOf<DownloadFeature>
 
     @State private var isIntroExpanded = false
+    @State private var isShowingChapterList = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(book: Book, downloadStore: StoreOf<DownloadFeature>) {
@@ -37,18 +38,8 @@ struct BookDetailView: View {
                     introSection(viewStore.detail.intro)
                     infoSection(viewStore.detail)
 
-                    NavigationLink {
-                        ChapterListView(
-                            store: Store(
-                                initialState: ChapterListFeature.State(
-                                    bookPath: viewStore.detail.bookPath,
-                                    bookTitle: viewStore.detail.title
-                                )
-                            ) {
-                                ChapterListFeature()
-                            },
-                            downloadStore: downloadStore
-                        )
+                    Button {
+                        isShowingChapterList = true
                     } label: {
                         Label("开始阅读", systemImage: "book.pages")
                             .frame(maxWidth: .infinity)
@@ -62,6 +53,19 @@ struct BookDetailView: View {
             .navigationTitle("书籍详情")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
+            .navigationDestination(isPresented: $isShowingChapterList) {
+                ChapterListView(
+                    store: Store(
+                        initialState: ChapterListFeature.State(
+                            bookPath: viewStore.detail.bookPath,
+                            bookTitle: viewStore.detail.title
+                        )
+                    ) {
+                        ChapterListFeature()
+                    },
+                    downloadStore: downloadStore
+                )
+            }
             .task { viewStore.send(.onAppear) }
         }
     }
