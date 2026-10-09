@@ -15,8 +15,9 @@ import UIKit
 /// 1. 取 `text[from...]`（剩余全部文字）
 /// 2. 按 configuration 构建带样式的 attributed string（字号/行距/内边距）
 /// 3. 建一个尺寸 = configuration.containerSize 的 `NSTextContainer`
-/// 4. `NSLayoutManager` 排版后，`glyphRange(for:)` 得到本页能装下的字符数
-/// 5. 返回该字符数（UTF-16 单位，与 `PageRange.location` 一致）
+/// 4. `NSLayoutManager` 排版后，`glyphRange(for:)` 得到本页能装下的范围
+/// 5. 把该范围的 **UTF-16 长度**换算成 **Character 个数**后返回
+///    （与 `PageRange.length`、`Paginator` 游标的单位一致；见 H1 与 `TextCursor`）
 public struct TextKitMeasuring: TextMeasuring {
     public init() {}
 
@@ -66,6 +67,12 @@ public struct TextKitMeasuring: TextMeasuring {
         // 全量排版后，取本容器覆盖的字符范围
         let glyphRange = layoutManager.glyphRange(for: container)
         let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-        return charRange.length
+
+        // H1：`charRange.length` 是 **UTF-16 码元**数，而本协议的游标是 **Character**
+        // （`Paginator` 用 `Array(text)` 切分，守恒律写的是 `sum(pages.length) == text.count`）。
+        // 两者在纯 CJK / ASCII 下恰好相等，含 emoji / 代理对生僻字 / 组合字符时才会错开
+        // —— 不换算就会把每页多塞进若干字符。换算逻辑在 NovelCore 的 `TextCursor` 里，
+        // 那边是纯 Swift，能被 CI 单测覆盖（本文件依赖 UIKit，CI 只编译不测试）。
+        return TextCursor.characterCount(ofUTF16Length: charRange.length, in: tail)
     }
 }
