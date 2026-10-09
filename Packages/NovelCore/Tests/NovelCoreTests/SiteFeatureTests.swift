@@ -156,6 +156,54 @@ final class SiteFeatureTests: XCTestCase {
         XCTAssertEqual(settings.hosts[0].sources, [.user, .navigation])
     }
 
+    func test默认端口归一后与省略端口写法合并() {
+        XCTAssertEqual(
+            SiteSettings.canonicalHostKey("https://same.example:443"),
+            SiteSettings.canonicalHostKey("https://same.example")
+        )
+        XCTAssertEqual(
+            SiteSettings.canonicalHostKey("http://same.example:80"),
+            SiteSettings.canonicalHostKey("http://same.example")
+        )
+        XCTAssertNotEqual(
+            SiteSettings.canonicalHostKey("https://same.example:8443"),
+            SiteSettings.canonicalHostKey("https://same.example")
+        )
+
+        let settings = SiteSettings(
+            hosts: [
+                SiteEntry(value: "https://same.example:443", source: .user),
+                SiteEntry(value: "https://same.example", source: .navigation),
+            ]
+        )
+
+        XCTAssertEqual(settings.hosts.count, 1)
+        XCTAssertEqual(settings.hosts[0].sources, [.user, .navigation])
+    }
+
+    func test淘汰跳过正在探测或验证中的host() {
+        var probing = SiteEntry(value: "https://probing.example", source: .navigation)
+        probing.hostStatus = .unavailable
+        var verifying = SiteEntry(value: "https://verifying.example", source: .navigation)
+        verifying.hostStatus = .unavailable
+        var idle = SiteEntry(value: "https://idle.example", source: .navigation)
+        idle.hostStatus = .unavailable
+
+        var settings = SiteSettings(
+            hosts: [probing, verifying, idle],
+            navigationHostLimit: 3
+        )
+        settings.navigationHostLimit = 1
+        settings.normalize(protectedHosts: [
+            "https://probing.example",
+            "https://verifying.example",
+        ])
+
+        XCTAssertTrue(settings.hosts.contains { $0.value == "https://probing.example" })
+        XCTAssertTrue(settings.hosts.contains { $0.value == "https://verifying.example" })
+        XCTAssertFalse(settings.hosts.contains { $0.value == "https://idle.example" })
+    }
+
     func test导航host上限会淘汰低优先级条目() {
         var unavailable = SiteEntry(value: "https://a.example", source: .navigation)
         unavailable.hostStatus = .unavailable

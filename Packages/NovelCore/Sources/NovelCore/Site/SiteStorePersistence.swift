@@ -6,6 +6,8 @@ actor SiteStorePersistence {
 
     private let storageKey = "site.settings.v1"
     private var cached: SiteSettings?
+    /// 引擎正在探测 / 正在验证的 host。内存态、不持久化：淘汰时必须跳过。
+    private var protectedHosts: Set<String> = []
 
     func load() -> SiteSettings {
         if let cached {
@@ -21,7 +23,7 @@ actor SiteStorePersistence {
 
     func save(_ settings: SiteSettings) {
         var normalized = settings
-        normalized.normalize()
+        normalized.normalize(protectedHosts: protectedHosts)
         cached = normalized
         guard let data = try? JSONEncoder().encode(normalized) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
@@ -34,6 +36,7 @@ actor SiteStorePersistence {
     }
 
     func updateHostState(_ update: HostStateUpdate) {
+        protectedHosts = update.protectedHosts
         var settings = load()
         settings.updateHostState(
             value: update.value,

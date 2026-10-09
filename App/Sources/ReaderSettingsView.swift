@@ -192,9 +192,13 @@ struct ReaderSettingsView: View {
                             lineWidth: isSelected ? 3 : 1
                         )
                 )
+                // 视觉 28pt，命中区补到 44pt（HIG 最小可点区域）
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(style.displayName)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
 

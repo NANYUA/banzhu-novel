@@ -51,16 +51,20 @@ public struct HostStateUpdate: Sendable, Equatable {
     public init(
         value: String,
         status: RouteHostStatus,
-        coolingUntil: Date? = nil
+        coolingUntil: Date? = nil,
+        protectedHosts: Set<String> = []
     ) {
         self.value = value
         self.status = status
         self.coolingUntil = coolingUntil
+        self.protectedHosts = protectedHosts
     }
 
     public var value: String
     public var status: RouteHostStatus
     public var coolingUntil: Date?
+    /// 正在探测 / 正在验证中的 host：持久化淘汰时必须跳过（R8「永不淘汰」）。
+    public var protectedHosts: Set<String>
 }
 
 public enum NavigationOutcome: Sendable, Equatable {
@@ -131,6 +135,11 @@ public actor NovelEngine {
     private var hostRouteStates: [String: HostRouteState] = [:]
     private var navigationRouteStates: [String: RouteNavigationStatus] = [:]
     private var cooldowns: [String: Date] = [:]
+    /// 一次恢复流程全部失败后的冷却截止时间。
+    /// 冷却期内不再探测其它 host、不解析导航，只允许对当前 host 手动重试。
+    private var recoveryCooldownUntil: Date?
+    /// 正在探测 / 正在验证中的 host：上报给持久化层，淘汰时跳过（R8）。
+    private var inFlightHosts = Set<String>()
     private let net: any NetworkTransport
 
     public init() {
@@ -143,6 +152,8 @@ public actor NovelEngine {
 
     public func configureRouting(_ configuration: SiteRoutingConfiguration) {
         routing = configuration
+        // 用户改设置 = 明确的人工动作，清掉恢复冷却，让新配置立刻生效。
+        recoveryCooldownUntil = nil
         hostRouteStates = Dictionary(
             uniqueKeysWithValues: configuration.hostStates.map {
                 (Self.normalizedHost($0.value), $0)
@@ -250,6 +261,25 @@ public actor NovelEngine {
         var guardedQueue: [String] = []
         var enterGuardImmediately = false
         var attemptedFirstVerification: String?
+
+        // 上一轮恢复全部失败 → 冷却期：不探测其它 host、不解析导航、不跑并发验证，
+        // 只对当前 host 走一次重试（撞到验证时按正常验证流程处理）。
+        if isRecoveryCooling() {
+            do {
+                let html = try await fetchFromHostWithGuard(
+                    startingHost,
+                    path: path,
+                    body: body,
+                    notifyHostChange: true
+                )
+                markHost(startingHost, status: .unguarded)
+                return html
+            } catch {
+                config = SiteConfig(host: startingHost)
+                throw error
+            }
+        }
+
         let candidates = routing.autoSwitchHost
             ? orderedCandidates(startingHost: startingHost)
             : [startingHost]
@@ -412,6 +442,8 @@ public actor NovelEngine {
             }
         }
 
+        // 本轮所有候选都失败 → 进入恢复冷却，避免下一个请求立刻重跑同一轮探测。
+        startRecoveryCooldown()
         config = SiteConfig(host: startingHost)
         throw lastError
     }
@@ -454,9 +486,9 @@ public actor NovelEngine {
         while index < hosts.count {
             let end = min(index + 3, hosts.count)
             let batch = Array(hosts[index..<end])
-            let batchResults = await withTaskGroup(
+            let (batchResults, foundUnguarded) = await withTaskGroup(
                 of: (String, ProbeResult).self,
-                returning: [(String, ProbeResult)].self
+                returning: ([(String, ProbeResult)], Bool).self
             ) { group in
                 for host in batch {
                     group.addTask {
@@ -464,16 +496,20 @@ public actor NovelEngine {
                     }
                 }
                 var collected: [(String, ProbeResult)] = []
+                var won = false
                 for await result in group {
                     collected.append(result)
+                    // 找到免验证 host 立即胜出：取消同批其余探测，不再开下一批。
+                    if case .success = result.1 {
+                        won = true
+                        group.cancelAll()
+                        break
+                    }
                 }
-                return collected
+                return (collected, won)
             }
             results.append(contentsOf: batchResults)
-            if batchResults.contains(where: {
-                if case .success = $0.1 { return true }
-                return false
-            }) {
+            if foundUnguarded {
                 break
             }
             index = end
@@ -485,6 +521,8 @@ public actor NovelEngine {
         guard let url = SiteConfig(host: host).url(path) else {
             return .unavailable
         }
+        inFlightHosts.insert(host)
+        defer { inFlightHosts.remove(host) }
         do {
             return .success(try await perform(url: url, body: body))
         } catch let error as NetworkError {
@@ -531,6 +569,8 @@ public actor NovelEngine {
             unguardedHosts.insert(host)
             guardedHosts.remove(host)
             cooldowns[host] = nil
+            // 有 host 能用了 → 恢复流程结束，冷却立即作废。
+            recoveryCooldownUntil = nil
         case .guarded:
             guardedHosts.insert(host)
             unguardedHosts.remove(host)
@@ -541,7 +581,12 @@ public actor NovelEngine {
             cooldowns[host] = coolingUntil
         }
         routing.onHostStateChanged?(
-            HostStateUpdate(value: host, status: status, coolingUntil: coolingUntil)
+            HostStateUpdate(
+                value: host,
+                status: status,
+                coolingUntil: coolingUntil,
+                protectedHosts: inFlightHosts
+            )
         )
     }
 
@@ -553,6 +598,26 @@ public actor NovelEngine {
             return true
         }
         return false
+    }
+
+    /// 是否处于「本轮恢复全部失败」后的冷却期。到期即惰性清除，不用定时器。
+    private func isRecoveryCooling() -> Bool {
+        guard let until = recoveryCooldownUntil else { return false }
+        if until > Date() {
+            return true
+        }
+        recoveryCooldownUntil = nil
+        return false
+    }
+
+    /// 进入恢复冷却。冷却时间复用用户设置的 host 冷却；设为 0（关闭）时不冷却。
+    private func startRecoveryCooldown() {
+        let seconds = TimeInterval(routing.hostCooldownSeconds)
+        guard seconds > 0 else {
+            recoveryCooldownUntil = nil
+            return
+        }
+        recoveryCooldownUntil = Date().addingTimeInterval(seconds)
     }
 
     private func standbyHost() -> String? {
@@ -627,6 +692,8 @@ public actor NovelEngine {
     ) async throws -> String {
         config = SiteConfig(host: host)
         guard let url = config.url(path) else { throw NetworkError.badResponse }
+        inFlightHosts.insert(host)
+        defer { inFlightHosts.remove(host) }
         let html = try await performWithGuard(url: url, body: body)
         if notifyHostChange {
             routing.onHostChanged?(host)

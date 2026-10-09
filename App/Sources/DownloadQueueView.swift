@@ -112,6 +112,8 @@ private struct DownloadNoticeRow: View {
             Button(action: onDismiss) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("关闭提示")
@@ -217,6 +219,8 @@ private struct DownloadBookHeader: View {
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.title3)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("本书下载操作")
         }

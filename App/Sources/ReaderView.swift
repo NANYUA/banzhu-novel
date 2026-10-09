@@ -355,6 +355,14 @@ private extension ReaderView {
             .accessibilityLabel("隐藏控制栏")
         }
         .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            reduceTransparency
+                ? AnyShapeStyle(Color(.systemBackground))
+                : AnyShapeStyle(.regularMaterial),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
+        .padding(.horizontal, 14)
         .padding(.top, 8)
     }
 

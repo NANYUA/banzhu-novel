@@ -152,6 +152,30 @@ extension HostRoutingTests {
         XCTAssertEqual(hosts, ["start.example"])
     }
 
+    func test冻结导航本轮host不加入探索() async {
+        let transport = FakeTransport { url in
+            if url.host == "nav.example.com" {
+                return "<a href=\"https://mirror001.com\">入口</a>"
+            }
+            throw NetworkError.httpStatus(503)
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                hosts: [],
+                navigationURLs: ["https://nav.example.com"],
+                autoSwitchHost: true,
+                currentHost: "https://start.example",
+                navigationStates: ["https://nav.example.com": .frozen]
+            )
+        )
+
+        _ = try? await engine.requestForTesting(path: "/chapter.html")
+
+        let hosts = await transport.requestedHosts()
+        XCTAssertEqual(hosts, ["start.example"])
+    }
+
     func test导航自动host超过一个时不拉取导航() async {
         let transport = FakeTransport { _ in
             throw NetworkError.httpStatus(503)
@@ -393,81 +417,5 @@ extension HostRoutingTests {
 
         XCTAssertEqual(first.first?.path, "/49/49034/1.html")
         XCTAssertEqual(first.first?.path, second.first?.path)
-    }
-}
-
-private actor FakeTransport: NetworkTransport {
-    private let handler: @Sendable (URL) async throws -> String
-    private var urls: [URL] = []
-
-    init(handler: @escaping @Sendable (URL) async throws -> String) {
-        self.handler = handler
-    }
-
-    func get(_ url: URL) async throws -> String {
-        urls.append(url)
-        return try await handler(url)
-    }
-
-    func post(_ url: URL, bodyString _: String) async throws -> String {
-        urls.append(url)
-        return try await handler(url)
-    }
-
-    func requestedHosts() -> [String] {
-        urls.compactMap(\.host)
-    }
-}
-
-private actor GuardGate {
-    private var didPass = false
-    private var count = 0
-
-    func consumePass() -> Bool {
-        didPass
-    }
-
-    func markPassed() {
-        didPass = true
-        count += 1
-    }
-
-    func passCount() -> Int {
-        count
-    }
-}
-
-private actor ConcurrencyProbe {
-    private var active = 0
-    private var maximumActive = 0
-
-    func enter() {
-        active += 1
-        maximumActive = max(maximumActive, active)
-    }
-
-    func leave() {
-        active = max(0, active - 1)
-    }
-
-    func maximum() -> Int {
-        maximumActive
-    }
-}
-
-private final class HostChangeRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var hosts: [String] = []
-
-    func record(_ host: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        hosts.append(host)
-    }
-
-    func values() -> [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return hosts
     }
 }

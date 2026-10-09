@@ -72,6 +72,18 @@ Five gates on every push:
 `package-unsigned` does not run on push. It is manual-only:
 run the `CI` workflow with `workflow_dispatch` and set `run_package=true`.
 
+### Packaging
+
+Two packaging paths. Neither of them runs on push.
+
+- **Fast test build** — run the `Package Dev` workflow (`workflow_dispatch`).
+  It skips verify, lint and tests, does a Release build only, and uploads an
+  unsigned IPA named `BanzhuNovel-dev-unsigned-unverified-<sha>.ipa`.
+  It is for installing and testing only — never publish it.
+- **Final build** — run the `CI` workflow with `run_package=true`. The package
+  job needs the verify job to pass on the same commit, then uploads the
+  unsigned IPA.
+
 ## License
 
 MIT
