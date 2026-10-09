@@ -39,7 +39,7 @@ struct SearchView: View {
                 }
                 .task(id: viewStore.notice) {
                     guard viewStore.notice != nil else { return }
-                    try? await Task.sleep(for: .seconds(2.5))
+                    try? await Task.sleep(for: .seconds(1.0))
                     guard !Task.isCancelled else { return }
                     viewStore.send(.noticeDismissed)
                 }
