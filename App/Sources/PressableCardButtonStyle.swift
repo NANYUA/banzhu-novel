@@ -8,9 +8,10 @@ import SwiftUI
 ///
 /// ## 设计取值
 /// - 按下：轻微缩小 + 略微变暗；抬手复原。
-/// - 时长 0.12s、`easeOut`，属于克制反馈，不做弹跳（弹跳只留给有惯性输入的拖拽）。
+/// - 用**临界阻尼弹簧**（`dampingFraction: 1`，无回弹）而非固定时长缓动：
+///   弹簧可被打断、从当前值出发，手指半途移开也不会跳变。弹性只留给有惯性输入的拖拽。
 /// - 只动 `scale` 与 `opacity`，走合成器，不掉帧。
-/// - 「减弱动态效果」开启时不做缩放，退化为纯透明度变化（HIG 的无前庭刺激等价反馈）。
+/// - 「减弱动态效果」开启时不做缩放，退化为纯透明度变化，并把响应压短（HIG 的无前庭刺激等价反馈）。
 ///
 /// ## 基线
 /// iOS 18 的材质与控件体系；**不使用** iOS 26 的液态玻璃材质。
@@ -33,7 +34,7 @@ struct PressableCardButtonStyle: ButtonStyle {
                 .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : pressedScale)
                 .opacity(configuration.isPressed ? 0.88 : 1)
                 .animation(
-                    .easeOut(duration: reduceMotion ? 0.08 : 0.12),
+                    .spring(response: reduceMotion ? 0.1 : 0.2, dampingFraction: 1),
                     value: configuration.isPressed
                 )
         }

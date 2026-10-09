@@ -145,7 +145,6 @@ private struct DownloadSummarySection: View {
                 }
 
                 ProgressView(value: progress)
-                    .tint(.blue)
 
                 Text(summaryText)
                     .font(.caption)
@@ -236,7 +235,7 @@ private struct DownloadTaskRow: View {
             Image(systemName: statusIcon)
                 .font(.body)
                 .foregroundStyle(statusColor)
-                .frame(width: 22)
+                .frame(minWidth: 22)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(task.chapterNumber). \(task.chapterName)")

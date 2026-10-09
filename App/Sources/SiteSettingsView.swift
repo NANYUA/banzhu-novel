@@ -10,20 +10,22 @@ struct SiteSettingsView: View {
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
-            Form {
-                navigationSection(viewStore)
-                hostSection(viewStore)
+            NavigationStack {
+                Form {
+                    navigationSection(viewStore)
+                    hostSection(viewStore)
 
-                if let notice = viewStore.notice {
-                    Section {
-                        Text(notice)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if let notice = viewStore.notice {
+                        Section {
+                            Text(notice)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
+                .navigationTitle("站点入口")
+                .onAppear { viewStore.send(.task) }
             }
-            .navigationTitle("站点入口")
-            .onAppear { viewStore.send(.task) }
         }
     }
 

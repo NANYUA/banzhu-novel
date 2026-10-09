@@ -191,6 +191,8 @@ private extension BookshelfView {
                     Image(systemName: "plus.circle.fill")
                         .font(.title3)
                         .foregroundStyle(.tint)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("新建分组")
             }

@@ -44,7 +44,7 @@ struct ChapterListView: View {
                                     : "arrow.down.circle")
                                     .font(.title3)
                                     .foregroundStyle(chapter.isDownloaded ? .green : .blue)
-                                    .frame(width: 32, height: 44)
+                                    .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.borderless)
                             .disabled(chapter.isDownloaded)
@@ -133,7 +133,7 @@ private struct ChapterRow: View {
             Text("\(chapter.number)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 40, alignment: .trailing)
+                .frame(minWidth: 40, alignment: .trailing)
 
             Text(chapter.name)
                 .font(.body)

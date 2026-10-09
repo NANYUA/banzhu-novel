@@ -17,7 +17,6 @@ struct GuardOverlayView: View {
                     request: request,
                     viewStore: viewStore
                 )
-                .ignoresSafeArea()
             }
         }
     }
@@ -31,8 +30,12 @@ struct GuardOverlayView: View {
                 Text("手动过验证")
                     .font(.headline)
                 Spacer()
-                Button("返回") {
+                Button {
                     viewStore.send(.cancelled)
+                } label: {
+                    Text("返回")
+                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                        .contentShape(Rectangle())
                 }
             }
             .padding(.horizontal, 16)
@@ -62,7 +65,11 @@ struct GuardOverlayView: View {
             }
             .padding(16)
         }
-        .background(.regularMaterial)
+        .background {
+            Rectangle()
+                .fill(.regularMaterial)
+                .ignoresSafeArea()
+        }
         .task(id: request.id) {
             manualController.onComplete = {
                 viewStore.send(.manualCompleted)

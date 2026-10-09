@@ -126,7 +126,7 @@ struct BookDetailView: View {
                     .lineLimit(isIntroExpanded ? nil : 4)
 
                 Button(isIntroExpanded ? "收起" : "展开") {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
                         isIntroExpanded.toggle()
                     }
                 }
@@ -156,7 +156,7 @@ private struct DetailInfoRow: View {
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .frame(width: 72, alignment: .leading)
+                .frame(minWidth: 72, alignment: .leading)
 
             Text(value.isEmpty ? "暂无" : value)
                 .font(.subheadline)

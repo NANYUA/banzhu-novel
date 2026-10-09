@@ -53,7 +53,7 @@ struct ReaderSettingsView: View {
                 Text("\(Int(configuration.fontSize))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .trailing)
+                    .frame(minWidth: 32, alignment: .trailing)
             }
 
             HStack {
@@ -62,7 +62,7 @@ struct ReaderSettingsView: View {
                 Text("\(Int(configuration.lineSpacing))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .trailing)
+                    .frame(minWidth: 32, alignment: .trailing)
             }
 
             HStack {
@@ -71,7 +71,7 @@ struct ReaderSettingsView: View {
                 Text("\(Int(configuration.paragraphSpacing))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .trailing)
+                    .frame(minWidth: 32, alignment: .trailing)
             }
 
             HStack {
@@ -80,7 +80,7 @@ struct ReaderSettingsView: View {
                 Text(String(format: "%.1f", configuration.characterSpacing))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .trailing)
+                    .frame(minWidth: 32, alignment: .trailing)
             }
 
             Toggle("字体加粗", isOn: binding(\.isBold))
@@ -130,7 +130,7 @@ struct ReaderSettingsView: View {
                 Text("\(Int(configuration.inset.top))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .trailing)
+                    .frame(minWidth: 32, alignment: .trailing)
             }
 
             Toggle("亮度跟随系统", isOn: binding(\.followsSystemBrightness))
