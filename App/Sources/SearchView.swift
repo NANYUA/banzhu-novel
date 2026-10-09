@@ -37,6 +37,9 @@ struct SearchView: View {
                     searchBar(viewStore)
                     content(viewStore)
                 }
+                // U0-3：整页底色统一成设置页那种 `systemGroupedBackground`（浅色 #F2F2F7）。
+                // 搜索栏、结果列表、加载 / 空 / 错误态都透出这一层，页面里不再有任何一块白底。
+                .background(Color(.systemGroupedBackground))
                 .navigationTitle("搜索")
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     noticeBanner(viewStore)
@@ -173,14 +176,20 @@ struct SearchView: View {
                     onAdd: { viewStore.send(.addRequested(book)) }
                 )
                 .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+                // 行背景清掉：plain List 的行 / 滚动背景默认是 `systemBackground`
+                // （浅色纯白），会把页面灰盖住，卡片之间的 6pt 间隙尤其明显。
+                .listRowBackground(Color.clear)
             }
 
             if viewStore.hasMore {
                 loadMoreRow(viewStore)
                     .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
             }
         }
         .listStyle(.plain)
+        // 让 List 自己的滚动背景透出页面色（U0-3 的那层白就是它）。
+        .scrollContentBackground(.hidden)
     }
 
     private func loadMoreRow(
@@ -277,13 +286,15 @@ private struct SearchResultRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(PressableCardButtonStyle())
+            // 强调层贴「打开详情」那块区域的轮廓；行尾「加入书架」是独立控件，不跟着变暗。
+            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: 8))))
 
             shelfAction
         }
         .padding(12)
         .contentShape(Rectangle())
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+        // U0-3：与页面同色（用户要求统一成设置页的 `systemGroupedBackground`）。
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// 「加入书架」入口。

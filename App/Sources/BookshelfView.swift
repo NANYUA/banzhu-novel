@@ -70,6 +70,9 @@ struct BookshelfView: View {
                         }
                     }
                 }
+                // U0-3：整页底色统一成设置页那种 `systemGroupedBackground`（浅色 #F2F2F7）。
+                // 分组栏、列表、加载 / 空 / 错误态都透出这一层，页面里不再有任何一块白底。
+                .background(Color(.systemGroupedBackground))
                 .navigationTitle("书架")
                 .onAppear { viewStore.send(.onAppear) }
                 .navigationDestination(isPresented: $isShowingDetail) {
@@ -298,8 +301,13 @@ private extension BookshelfView {
             rowContent(row, viewStore: viewStore)
                 .listRowSeparator(.hidden)
                 .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+                // 行背景也清掉：plain List 的行 / 滚动背景默认是 `systemBackground`
+                // （浅色纯白），会把页面灰盖住，卡片之间的 6pt 间隙尤其明显。
+                .listRowBackground(Color.clear)
         }
         .listStyle(.plain)
+        // 让 List 自己的滚动背景透出页面色（U0-3 的那层白就是它）。
+        .scrollContentBackground(.hidden)
         .refreshable {
             await viewStore.send(.onAppear).finish()
         }
@@ -322,6 +330,7 @@ private extension BookshelfView {
                     BookRow(row: row)
                 }
             }
+            // 编辑态整行都是按钮，强调层就按整行矩形铺（默认轮廓）。
             .buttonStyle(PressableCardButtonStyle())
         } else {
             // 🔴 这里刻意不用 NavigationLink：它的点击手势会和长按手势抢识别，
@@ -335,7 +344,8 @@ private extension BookshelfView {
             } label: {
                 BookRow(row: row)
             }
-            .buttonStyle(PressableCardButtonStyle())
+            // 强调层贴书卡自己的 8pt 圆角，避免按下瞬间在圆角外露出方角（U0-4）。
+            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: 8))))
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                     lastLongPressAt = Date()
@@ -373,7 +383,8 @@ private struct GroupChip: View {
                 )
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
         }
-        .buttonStyle(PressableCardButtonStyle(pressedScale: 0.96))
+        // 强调层贴胶囊轮廓，避免按下瞬间两端露出方角（U0-4）。
+        .buttonStyle(PressableCardButtonStyle(pressedScale: 0.96, shape: AnyShape(Capsule())))
     }
 }
 
@@ -439,7 +450,8 @@ private struct BookRow: View {
         }
         .padding(12)
         .contentShape(Rectangle()) // 整张卡片可点
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+        // U0-3：与页面同色（用户要求统一成设置页的 `systemGroupedBackground`）。
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var placeholder: some View {
