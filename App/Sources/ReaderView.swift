@@ -168,12 +168,11 @@ private extension ReaderView {
         if viewStore.isLoading, viewStore.text.isEmpty {
             ProgressView("加载中…")
         } else if let message = viewStore.errorMessage, viewStore.text.isEmpty {
-            VStack(spacing: 12) {
-                Text("加载失败")
-                    .font(.title3.bold())
+            ContentUnavailableView {
+                Label("加载失败", systemImage: "exclamationmark.triangle")
+            } description: {
                 Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            } actions: {
                 Button("重试") {
                     viewStore.send(.loadChapter(viewStore.chapterPath))
                 }
@@ -346,15 +345,6 @@ private extension ReaderView {
 
             readerBottomBar(viewStore)
         }
-        .background(
-            LinearGradient(
-                colors: [.black.opacity(0.25), .clear, .black.opacity(0.25)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-        )
     }
 
     private func readerTopBar(
@@ -553,9 +543,10 @@ private extension ReaderView {
         case .none:
             nil
         case .cover:
-            .easeInOut(duration: 0.2)
+            // §8 动效：用可中断的弹簧取代固定时长缓动，临界阻尼（无回弹）。
+            .spring(response: 0.3, dampingFraction: 1)
         case .curl:
-            .easeInOut(duration: 0.3)
+            .spring(response: 0.35, dampingFraction: 1)
         }
     }
 

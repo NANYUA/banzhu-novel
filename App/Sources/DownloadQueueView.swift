@@ -287,12 +287,15 @@ private struct DownloadTaskRow: View {
         }
     }
 
+    /// 状态色统一（§4 / §17）：进行中 = 强调色，已完成 = 系统绿，失败 = 系统红。
     private var statusColor: Color {
         switch task.state {
         case .queued:
             .secondary
-        case .downloading, .done:
-            .blue
+        case .downloading:
+            Color.accentColor
+        case .done:
+            .green
         case .paused:
             task.blockedByGuard ? .orange : .secondary
         case .failed:

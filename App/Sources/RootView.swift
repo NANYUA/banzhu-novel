@@ -27,39 +27,50 @@ struct RootView: View {
     }
 
     var body: some View {
-        TabView {
-            BookshelfView(store: bookshelfStore, downloadStore: downloadStore)
+        WithViewStore(guardStore, observe: \.isPresented) { viewStore in
+            TabView {
+                BookshelfView(store: bookshelfStore, downloadStore: downloadStore)
+                    .tabItem {
+                        Label("书架", systemImage: "books.vertical")
+                    }
+
+                SearchView(store: searchStore, downloadStore: downloadStore) { row in
+                    bookshelfStore.send(.addSucceeded(row))
+                }
                 .tabItem {
-                    Label("书架", systemImage: "books.vertical")
+                    Label("搜索", systemImage: "magnifyingglass")
                 }
 
-            SearchView(store: searchStore, downloadStore: downloadStore) { row in
-                bookshelfStore.send(.addSucceeded(row))
+                DownloadQueueView(store: downloadStore)
+                    .tabItem {
+                        Label("下载", systemImage: "arrow.down.circle")
+                    }
+
+                SiteSettingsView(store: siteStore)
+                    .tabItem {
+                        Label("设置", systemImage: "gearshape")
+                    }
             }
-            .tabItem {
-                Label("搜索", systemImage: "magnifyingglass")
-            }
-
-            DownloadQueueView(store: downloadStore)
-                .tabItem {
-                    Label("下载", systemImage: "arrow.down.circle")
-                }
-
-            SiteSettingsView(store: siteStore)
-                .tabItem {
-                    Label("设置", systemImage: "gearshape")
-                }
-        }
-        .overlay {
-            WithViewStore(guardStore, observe: \.isPresented) { viewStore in
+            // §10 / §12：验证是打断式的全屏任务，用 fullScreenCover 拿到真正的模态语义
+            // （VoiceOver 焦点隔离、底层内容不可点），替代原先无模态语义的 overlay。
+            // 关闭（返回 / 取消 / 手势外的程序化 dismissal）统一走 .cancelled。
+            .fullScreenCover(
+                isPresented: Binding(
+                    get: { viewStore.state },
+                    set: { isPresented in
+                        if !isPresented {
+                            guardStore.send(.cancelled)
+                        }
+                    }
+                )
+            ) {
                 GuardOverlayView(store: guardStore)
-                    .allowsHitTesting(viewStore.state)
             }
-        }
-        .task {
-            siteStore.send(.task)
-            guardStore.send(.task)
-            downloadStore.send(.task)
+            .task {
+                siteStore.send(.task)
+                guardStore.send(.task)
+                downloadStore.send(.task)
+            }
         }
     }
 }

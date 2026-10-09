@@ -45,7 +45,7 @@ struct ChapterListView: View {
                                     ? "checkmark.circle.fill"
                                     : "arrow.down.circle")
                                     .font(.title3)
-                                    .foregroundStyle(chapter.isDownloaded ? .green : .blue)
+                                    .foregroundStyle(chapter.isDownloaded ? Color.green : Color.accentColor)
                                     .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.borderless)
@@ -77,7 +77,7 @@ struct ChapterListView: View {
                                 } label: {
                                     Label("下载", systemImage: "arrow.down.circle")
                                 }
-                                .tint(.blue)
+                                .tint(Color.accentColor)
                             }
                         }
                     }
@@ -153,9 +153,10 @@ private struct ChapterRow: View {
             Spacer()
 
             if chapter.isDownloaded {
+                // 状态色统一（§4 / §17）：已下载与已缓存正文都属「已完成」→ 系统绿。
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.green)
             } else if chapter.hasLocalText {
                 Image(systemName: "checkmark.circle")
                     .font(.caption)

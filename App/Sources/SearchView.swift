@@ -86,7 +86,12 @@ struct SearchView: View {
         } else if let message = viewStore.errorMessage {
             errorView(message, viewStore: viewStore)
         } else if viewStore.results.isEmpty {
-            emptyView(title: viewStore.submittedKeyword.isEmpty ? "尚未搜索" : "没有找到相关书籍")
+            emptyView(
+                title: viewStore.submittedKeyword.isEmpty ? "尚未搜索" : "没有找到相关书籍",
+                message: viewStore.submittedKeyword.isEmpty
+                    ? "输入书名或作者后点击搜索。"
+                    : "换个关键词再试一次。"
+            )
         } else {
             resultsView(viewStore)
         }
@@ -101,32 +106,24 @@ struct SearchView: View {
         _ message: String,
         viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
     ) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("搜索失败")
-                .font(.title3.bold())
+        ContentUnavailableView {
+            Label("搜索失败", systemImage: "exclamationmark.triangle")
+        } description: {
             Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        } actions: {
             Button("重试") {
                 viewStore.send(.search)
             }
             .buttonStyle(.borderedProminent)
         }
-        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func emptyView(title: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.title3.bold())
+    private func emptyView(title: String, message: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: "magnifyingglass")
+        } description: {
+            Text(message)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
