@@ -20,26 +20,37 @@ final class SiteFeatureTests: XCTestCase {
             }
         }
 
-        let entries = [
-            SiteEntry(value: "https://mirror001.com/", isFromNavigation: true),
-            SiteEntry(value: "https://mirror002.com", isFromNavigation: true),
-        ]
-        await store.send(.navigationSucceeded(entries)) {
+        let entry = SiteEntry(value: "https://mirror001.com/", isFromNavigation: true)
+        await store.send(.navigationSucceeded([entry])) {
             // mirror001 与已有条目规范化后相同 → 保留原 id，只更新标记。
             $0.settings.hosts = [
                 SiteEntry(id: keptID, value: "https://mirror001.com", isFromNavigation: true),
-                entries[1],
             ]
-            $0.discoveredHosts = entries
+            $0.discoveredHosts = [entry]
             $0.isHostListExpanded = true
         }
         await store.finish()
 
-        XCTAssertEqual(settings.hosts.count, 2)
+        XCTAssertEqual(store.state.settings.hosts.count, 1)
+        XCTAssertEqual(store.state.settings.hosts[0].id, keptID)
+        XCTAssertTrue(store.state.settings.hosts[0].isFromNavigation)
+        XCTAssertEqual(settings.hosts.count, 1)
         XCTAssertEqual(
             SiteSettings.canonicalHostKey(settings.hosts[0].value),
             SiteSettings.canonicalHostKey("https://mirror001.com")
         )
+    }
+
+    func test新增host追加进列表() {
+        var settings = SiteSettings(hosts: [SiteEntry(value: "https://one.example")])
+        settings.upsertHost("https://two.example", isFromNavigation: true)
+
+        XCTAssertEqual(settings.hosts.count, 2)
+        XCTAssertEqual(
+            SiteSettings.canonicalHostKey(settings.hosts[1].value),
+            SiteSettings.canonicalHostKey("https://two.example")
+        )
+        XCTAssertTrue(settings.hosts[1].isFromNavigation)
     }
 
     func test删除选中host后回落到第一条() async {
