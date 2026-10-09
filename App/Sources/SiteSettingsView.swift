@@ -36,8 +36,9 @@ struct SiteSettingsView: View {
     ) -> some View {
         Section("导航地址") {
             TextField(
-                // B0-6 收尾：占位改成中性格式提示，不再假装有个 example.com 可用。
-                "https://…",
+                // U1-3：占位改成纯中文语义提示 —— 不再用 `https://…` 这类半英文格式占位，
+                // 输入格式交给 keyboardType(.URL) 提示。
+                "请输入导航地址",
                 text: Binding(
                     get: { viewStore.settings.navigationURL },
                     set: { viewStore.send(.setNavigationURL($0)) }
@@ -60,7 +61,7 @@ struct SiteSettingsView: View {
                     } else {
                         Image(systemName: "arrow.down.circle")
                     }
-                    Text("拉取 host")
+                    Text("拉取域名")
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -69,7 +70,7 @@ struct SiteSettingsView: View {
             .disabled(viewStore.isFetchingNavigation)
 
             if !viewStore.discoveredHosts.isEmpty {
-                Text("本次发现 \(viewStore.discoveredHosts.count) 个 host，已并入下方列表")
+                Text("本次发现 \(viewStore.discoveredHosts.count) 个域名，已并入下方列表")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -81,7 +82,7 @@ struct SiteSettingsView: View {
     ) -> some View {
         Section {
             if viewStore.settings.hosts.isEmpty {
-                Text("暂无 host。点上方「拉取 host」或手动添加。")
+                Text("暂无域名。点上方「拉取域名」或手动添加。")
                     .foregroundStyle(.secondary)
             } else {
                 DisclosureGroup(
@@ -107,12 +108,12 @@ struct SiteSettingsView: View {
                         }
                     }
                 } label: {
-                    Text("host 列表（\(viewStore.settings.hosts.count)）")
+                    Text("域名列表（\(viewStore.settings.hosts.count)）")
                 }
             }
 
             HStack {
-                TextField("example.com", text: $newHost)
+                TextField("请输入域名", text: $newHost)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                 Button {
@@ -126,9 +127,9 @@ struct SiteSettingsView: View {
                 .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         } header: {
-            Text("host")
+            Text("域名")
         } footer: {
-            Text("相同 host 只保留一条；始终使用选中的 host，不会自动切换。")
+            Text("相同域名只保留一条；始终使用选中的域名，不会自动切换。")
         }
     }
 
