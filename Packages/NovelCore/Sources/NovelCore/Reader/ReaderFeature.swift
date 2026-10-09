@@ -31,8 +31,7 @@ public struct ReaderFeature: Reducer {
             chapterName: String = "",
             text: String = "",
             config: PaginationConfiguration = PaginationConfiguration(
-                containerSize: CGSize(width: 320, height: 480),
-                inset: PageInset(top: 16, leading: 16, bottom: 16, trailing: 16)
+                containerSize: CGSize(width: 320, height: 480)
             ),
             currentOffset: Int = 0,
             pageTurnDirection: PageTurnDirection = .forward,

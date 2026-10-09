@@ -89,7 +89,9 @@ public struct PageInset: Equatable, Sendable, Codable {
     public var bottom: CGFloat
     public var trailing: CGFloat
 
-    public init(top: CGFloat = 0, leading: CGFloat = 0, bottom: CGFloat = 0, trailing: CGFloat = 0) {
+    /// 默认四边 16pt：项目默认页边距（对齐设置面板滑杆 8…48 与 HIG 标准内容页边距 ≥16pt），
+    /// 避免「从未动过阅读设置」时正文顶满屏幕（B0-4）。
+    public init(top: CGFloat = 16, leading: CGFloat = 16, bottom: CGFloat = 16, trailing: CGFloat = 16) {
         self.top = top
         self.leading = leading
         self.bottom = bottom
