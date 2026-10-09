@@ -249,7 +249,7 @@ private struct SearchResultRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableCardButtonStyle())
 
             if isAdded {
                 Image(systemName: "checkmark.circle.fill")

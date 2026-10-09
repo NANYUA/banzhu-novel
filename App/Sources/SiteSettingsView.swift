@@ -122,7 +122,7 @@ struct SiteSettingsView: View {
                         isSelected: entry.id == viewStore.settings.currentNavigationID
                     )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableCardButtonStyle())
                 .swipeActions {
                     Button("删除", role: .destructive) {
                         viewStore.send(.deleteNavigationURL(entry.id))
@@ -178,7 +178,7 @@ struct SiteSettingsView: View {
                         isSelected: entry.id == viewStore.settings.currentHostID
                     )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableCardButtonStyle())
                 .swipeActions {
                     Button("删除", role: .destructive) {
                         viewStore.send(.deleteHost(entry.id))
@@ -216,7 +216,7 @@ struct SiteSettingsView: View {
                             isSelected: entry.id == viewStore.settings.currentHostID
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableCardButtonStyle())
                     .swipeActions {
                         Button("删除", role: .destructive) {
                             viewStore.send(.deleteHost(entry.id))

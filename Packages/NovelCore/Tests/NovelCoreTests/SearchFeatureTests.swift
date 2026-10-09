@@ -20,8 +20,12 @@ final class SearchFeatureTests: XCTestCase {
             SearchFeature()
         } withDependencies: {
             $0.searchService.search = { keyword, page in
-                XCTAssertEqual(keyword, "示例")
-                XCTAssertEqual(page, 1)
+                XCTAssertEqual(
+                    keyword,
+                    "示例",
+                    "首页搜索的 keyword 应为「示例」，实际收到「\(keyword)」"
+                )
+                XCTAssertEqual(page, 1, "首页搜索的 page 应为 1，实际收到 \(page)")
                 return [Self.book]
             }
         }

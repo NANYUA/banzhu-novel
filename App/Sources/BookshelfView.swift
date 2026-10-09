@@ -35,6 +35,8 @@ struct BookshelfView: View {
     /// 详情页目标。用显式 push 而不是 `NavigationLink`：见 `rowContent` 的注释。
     @State private var detailRow: ShelfRow?
     @State private var isShowingDetail = false
+    /// 最近一次长按时间：用来挡掉长按抬手时 Button 多触发的那次点击。
+    @State private var lastLongPressAt: Date?
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -301,22 +303,33 @@ private extension BookshelfView {
                     BookRow(row: row)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableCardButtonStyle())
         } else {
             // 🔴 这里刻意不用 NavigationLink：它的点击手势会和长按手势抢识别，
             // 结果「点书进不去详情」（长按进编辑是既有交互，不能砍）。
-            // 改成显式 tap + long press：两者互斥（快速松手=点击，按住=长按），
-            // 再用 navigationDestination 推详情页。
-            BookRow(row: row)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    detailRow = row
-                    isShowingDetail = true
-                }
-                .onLongPressGesture(minimumDuration: 0.5) {
+            // 用 Button 拿到按下反馈（HIG：按下即反馈），长按用 simultaneousGesture
+            // 并行识别；长按抬手时 Button 也会触发一次 action，用时间戳挡掉。
+            Button {
+                guard !isLongPressSuppressed else { return }
+                detailRow = row
+                isShowingDetail = true
+            } label: {
+                BookRow(row: row)
+            }
+            .buttonStyle(PressableCardButtonStyle())
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                    lastLongPressAt = Date()
                     viewStore.send(.editModeChanged(true))
                 }
+            )
         }
+    }
+
+    /// 长按抬手后 Button 也会收到一次 action，这里挡掉，避免「长按同时跳详情」。
+    private var isLongPressSuppressed: Bool {
+        guard let lastLongPressAt else { return false }
+        return Date().timeIntervalSince(lastLongPressAt) < 0.4
     }
 }
 
@@ -341,7 +354,7 @@ private struct GroupChip: View {
                 )
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardButtonStyle(pressedScale: 0.96))
     }
 }
 
