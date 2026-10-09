@@ -3,6 +3,10 @@ import ComposableArchitecture
 import NovelEngine
 import XCTest
 
+/// 详情页 reducer 测试。
+///
+/// ⚠️ 用例拆在多个 `@MainActor extension` 里：SwiftLint 的 `type_body_length`
+/// 按**每个类型声明**算，全塞在一个 class body 里必然超限（`BookshelfFeatureTests` 同款拆法）。
 @MainActor
 final class BookDetailFeatureTests: XCTestCase {
     private static let bookPath = "/1/"
@@ -15,6 +19,18 @@ final class BookDetailFeatureTests: XCTestCase {
         latestChapterName: "第三章",
         unreadCount: 3
     )
+
+    private static func makeChapter(number: Int, isDownloaded: Bool = false) -> ChapterItem {
+        ChapterItem(
+            number: number,
+            name: "第 \(number) 章",
+            path: "/1/\(number).html",
+            hasLocalText: isDownloaded,
+            isDownloaded: isDownloaded
+        )
+    }
+
+    // MARK: - 详情加载
 
     func test加载本地快照覆盖搜索字段() async {
         let local = BookDetail(
@@ -37,12 +53,18 @@ final class BookDetailFeatureTests: XCTestCase {
 
         await store.send(.onAppear) {
             $0.isLoading = true
+            $0.isLoadingChapters = true
         }
+        // 没配置站点：host 读出来就是空串（入口隐藏）。
+        await store.receive(.hostLoaded(""))
         await store.receive(.loaded(local)) {
             $0.detail = local
             $0.isLoading = false
             // 🔴 本地命中记录 == 已在书架：详情页据此显示「移出书架」。
             $0.isOnShelf = true
+        }
+        await store.receive(.chaptersLoaded([])) {
+            $0.isLoadingChapters = false
         }
         await store.finish()
     }
@@ -54,9 +76,14 @@ final class BookDetailFeatureTests: XCTestCase {
 
         await store.send(.onAppear) {
             $0.isLoading = true
+            $0.isLoadingChapters = true
         }
+        await store.receive(.hostLoaded(""))
         await store.receive(.loaded(nil)) {
             $0.isLoading = false
+        }
+        await store.receive(.chaptersLoaded([])) {
+            $0.isLoadingChapters = false
         }
         XCTAssertEqual(store.state.detail, Self.fallback)
         XCTAssertFalse(store.state.isOnShelf)
@@ -77,16 +104,248 @@ final class BookDetailFeatureTests: XCTestCase {
 
         await store.send(.onAppear) {
             $0.isLoading = true
+            $0.isLoadingChapters = true
         }
+        await store.receive(.hostLoaded(""))
         await store.receive(.loadFailed("加载失败")) {
             $0.isLoading = false
             $0.errorMessage = "加载失败"
+        }
+        await store.receive(.chaptersLoaded([])) {
+            $0.isLoadingChapters = false
         }
         XCTAssertEqual(store.state.detail, Self.fallback)
         XCTAssertFalse(store.state.isOnShelf)
         await store.finish()
     }
+}
 
+// MARK: - 详情映射 / 阅读位置
+
+@MainActor extension BookDetailFeatureTests {
+    func test详情映射回引擎书模型() {
+        let detail = BookDetail(
+            bookPath: "/49/49034/",
+            title: "楚香君游戏",
+            author: "某某某",
+            coverUrl: "https://example.com/cover.jpg",
+            intro: "简介",
+            status: "连载中",
+            category: "玄幻",
+            tags: ["热血", "升级"],
+            wordCount: "175万字",
+            lastChapter: "第 131 章",
+            lastUpdated: "2026-10-09"
+        )
+
+        let book = detail.book
+
+        XCTAssertEqual(book.path, detail.bookPath)
+        XCTAssertEqual(book.title, detail.title)
+        XCTAssertEqual(book.author, detail.author)
+        XCTAssertEqual(book.coverUrl, detail.coverUrl)
+        XCTAssertEqual(book.status, detail.status)
+        XCTAssertEqual(book.category, detail.category)
+        XCTAssertEqual(book.tags, detail.tags)
+        XCTAssertEqual(book.wordCount, detail.wordCount)
+        XCTAssertEqual(book.lastChapter, detail.lastChapter)
+        XCTAssertEqual(book.lastUpdated, detail.lastUpdated)
+    }
+
+    func test详情保留上次阅读章节且不影响回引擎书模型() {
+        let detail = BookDetail(
+            bookPath: Self.bookPath,
+            title: "本地书名",
+            lastReadChapterPath: "/1/7.html",
+            lastReadChapterName: "第七章"
+        )
+
+        XCTAssertEqual(detail.lastReadChapterPath, "/1/7.html")
+        XCTAssertEqual(detail.lastReadChapterName, "第七章")
+        // `Book` 没有阅读位置字段：映射回引擎模型时不受影响。
+        XCTAssertEqual(detail.book.path, Self.bookPath)
+        // 搜索回退出来的快照没有阅读位置。
+        XCTAssertNil(Self.fallback.lastReadChapterPath)
+    }
+}
+
+// MARK: - host / 原网站入口（U1-4）
+
+@MainActor extension BookDetailFeatureTests {
+    func test加载时顺带读站点host与目录() async {
+        let chapters = [
+            Self.makeChapter(number: 1),
+            Self.makeChapter(number: 2, isDownloaded: true),
+        ]
+        let store = TestStore(initialState: BookDetailFeature.State(fallback: Self.fallback)) {
+            BookDetailFeature()
+        } withDependencies: {
+            $0.siteStore.load = { SiteSettings(hosts: [SiteEntry(value: "demo.example")]) }
+            $0.chapterListLoader.load = { bookPath in
+                XCTAssertEqual(bookPath, Self.bookPath)
+                return chapters
+            }
+        }
+
+        await store.send(.onAppear) {
+            $0.isLoading = true
+            $0.isLoadingChapters = true
+        }
+        await store.receive(.hostLoaded("demo.example")) {
+            $0.host = "demo.example"
+        }
+        await store.receive(.loaded(nil)) {
+            $0.isLoading = false
+        }
+        await store.receive(.chaptersLoaded(chapters)) {
+            $0.chapters = chapters
+            $0.isLoadingChapters = false
+        }
+        // 原网站 URL 现场拼：无协议写法会补上 https。
+        XCTAssertEqual(store.state.sourceURL?.absoluteString, "https://demo.example/1/")
+        await store.finish()
+    }
+
+    func test未配置host时不给原网站入口() {
+        var state = BookDetailFeature.State(fallback: Self.fallback)
+        XCTAssertNil(state.sourceURL)
+
+        state.host = "   "
+        XCTAssertNil(state.sourceURL)
+    }
+
+    func test原网站URL由当前配置的host现场拼出() {
+        var state = BookDetailFeature.State(fallback: Self.fallback)
+        state.host = "demo.example"
+        XCTAssertEqual(state.sourceURL?.absoluteString, "https://demo.example/1/")
+
+        // 换一个 host 就必须换一个 URL —— 域名只能来自用户配置，不能写死。
+        state.host = "https://another.example"
+        XCTAssertEqual(state.sourceURL?.absoluteString, "https://another.example/1/")
+    }
+}
+
+// MARK: - 目录（U1-6）
+
+@MainActor extension BookDetailFeatureTests {
+    func test目录加载失败只记目录错误() async {
+        struct Failed: LocalizedError {
+            var errorDescription: String? {
+                "目录加载失败"
+            }
+        }
+        let store = TestStore(initialState: BookDetailFeature.State(fallback: Self.fallback)) {
+            BookDetailFeature()
+        } withDependencies: {
+            $0.chapterListLoader.load = { _ in throw Failed() }
+        }
+
+        await store.send(.onAppear) {
+            $0.isLoading = true
+            $0.isLoadingChapters = true
+        }
+        await store.receive(.hostLoaded(""))
+        await store.receive(.loaded(nil)) {
+            $0.isLoading = false
+        }
+        await store.receive(.chaptersFailed("目录加载失败")) {
+            $0.isLoadingChapters = false
+            $0.chapterErrorMessage = "目录加载失败"
+        }
+        // 目录失败不该污染详情本身。
+        XCTAssertNil(store.state.errorMessage)
+        await store.finish()
+    }
+
+    func test重试目录不再重新读详情() async {
+        struct Unexpected: Error {}
+        let chapters = [Self.makeChapter(number: 1)]
+        var initial = BookDetailFeature.State(fallback: Self.fallback)
+        initial.chapterErrorMessage = "目录加载失败"
+        let store = TestStore(initialState: initial) {
+            BookDetailFeature()
+        } withDependencies: {
+            // 详情加载器只要被调用就抛错：重试目录不该走详情那条路径。
+            $0.bookDetailLoader.load = { _ in throw Unexpected() }
+            $0.chapterListLoader.load = { _ in chapters }
+        }
+
+        await store.send(.reloadChapters) {
+            $0.isLoadingChapters = true
+            $0.chapterErrorMessage = nil
+        }
+        await store.receive(.chaptersLoaded(chapters)) {
+            $0.chapters = chapters
+            $0.isLoadingChapters = false
+        }
+        await store.finish()
+    }
+
+    func test目录默认只渲染前若干条展开后可看全部() async {
+        let chapters = (1 ... 20).map { Self.makeChapter(number: $0) }
+        var initial = BookDetailFeature.State(fallback: Self.fallback)
+        initial.chapters = chapters
+        let store = TestStore(initialState: initial) {
+            BookDetailFeature()
+        }
+
+        XCTAssertEqual(
+            store.state.visibleChapters.count,
+            BookDetailFeature.State.chapterPreviewLimit
+        )
+        XCTAssertTrue(store.state.hasHiddenChapters)
+
+        await store.send(.toggleAllChapters) {
+            $0.isShowingAllChapters = true
+        }
+        XCTAssertEqual(store.state.visibleChapters.count, chapters.count)
+        XCTAssertFalse(store.state.hasHiddenChapters)
+        await store.finish()
+    }
+
+    func test已下载章节计数按source标记统计() {
+        var state = BookDetailFeature.State(fallback: Self.fallback)
+        state.chapters = [
+            Self.makeChapter(number: 1, isDownloaded: true),
+            Self.makeChapter(number: 2),
+            Self.makeChapter(number: 3, isDownloaded: true),
+        ]
+
+        XCTAssertEqual(state.downloadedChapterCount, 2)
+        XCTAssertEqual(state.downloadableChapterCount, 1)
+    }
+}
+
+// MARK: - 继续阅读
+
+@MainActor extension BookDetailFeatureTests {
+    func test继续阅读命中上次读到的章节() {
+        var state = BookDetailFeature.State(fallback: BookDetail(
+            bookPath: Self.bookPath,
+            title: "本地书名",
+            lastReadChapterPath: "/1/7.html",
+            lastReadChapterName: "第七章"
+        ))
+        state.chapters = [Self.makeChapter(number: 1), Self.makeChapter(number: 7)]
+
+        XCTAssertEqual(state.continueChapter?.number, 7)
+    }
+
+    func test上次阅读章节已不在目录时退回开始阅读() {
+        var state = BookDetailFeature.State(fallback: BookDetail(
+            bookPath: Self.bookPath,
+            title: "本地书名",
+            lastReadChapterPath: "/1/99.html"
+        ))
+        state.chapters = [Self.makeChapter(number: 1)]
+
+        XCTAssertNil(state.continueChapter)
+    }
+}
+
+// MARK: - 加入 / 移出书架
+
+@MainActor extension BookDetailFeatureTests {
     func test加入书架成功后切换为已加入() async {
         struct WrongBook: Error {}
         let store = TestStore(initialState: BookDetailFeature.State(fallback: Self.fallback)) {
@@ -212,34 +471,5 @@ final class BookDetailFeatureTests: XCTestCase {
         }
         XCTAssertTrue(store.state.isOnShelf)
         await store.finish()
-    }
-
-    func test详情映射回引擎书模型() {
-        let detail = BookDetail(
-            bookPath: "/49/49034/",
-            title: "楚香君游戏",
-            author: "某某某",
-            coverUrl: "https://example.com/cover.jpg",
-            intro: "简介",
-            status: "连载中",
-            category: "玄幻",
-            tags: ["热血", "升级"],
-            wordCount: "175万字",
-            lastChapter: "第 131 章",
-            lastUpdated: "2026-10-09"
-        )
-
-        let book = detail.book
-
-        XCTAssertEqual(book.path, detail.bookPath)
-        XCTAssertEqual(book.title, detail.title)
-        XCTAssertEqual(book.author, detail.author)
-        XCTAssertEqual(book.coverUrl, detail.coverUrl)
-        XCTAssertEqual(book.status, detail.status)
-        XCTAssertEqual(book.category, detail.category)
-        XCTAssertEqual(book.tags, detail.tags)
-        XCTAssertEqual(book.wordCount, detail.wordCount)
-        XCTAssertEqual(book.lastChapter, detail.lastChapter)
-        XCTAssertEqual(book.lastUpdated, detail.lastUpdated)
     }
 }

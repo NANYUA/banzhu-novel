@@ -3,7 +3,17 @@ import NovelCore
 import NovelEngine
 import SwiftUI
 
-/// 书籍详情页。展示网站详情页字段，并作为进入目录/阅读的唯一入口。
+/// 书籍详情页。展示网站详情页字段，并作为进入阅读的唯一入口。
+///
+/// ## 目录就在本页（U1-6）
+/// 外层是 `ScrollView`，**不能**把 `List` 塞进去（`List` 需要自己的滚动上下文，
+/// 嵌进去高度会塌）。所以目录用 `LazyVStack` 渲染成普通内容，
+/// 默认只渲染前 `BookDetailFeature.State.chapterPreviewLimit` 条，
+/// 其余靠「查看全部目录」就地展开 —— 不再 push 单独的目录页。
+///
+/// ## 本站 / 原网站（U1-4）
+/// 右上角「转到原网站」的 URL 由**用户当前配置的 host** + 本书 `bookPath` 现场拼出
+/// （`BookDetailFeature.State.sourceURL`）；没配置 host 时这个入口整个不出现。
 struct BookDetailView: View {
     let store: StoreOf<BookDetailFeature>
     let downloadStore: StoreOf<DownloadFeature>
@@ -15,7 +25,17 @@ struct BookDetailView: View {
     let onRemovedFromShelf: (String) -> Void
 
     @State private var isIntroExpanded = false
-    @State private var isShowingChapterList = false
+    /// 简介「不被截断时的高度」与「4 行截断后的高度」，用来判断是否真的被截断（U1-5）。
+    @State private var introFullHeight: CGFloat = 0
+    @State private var introClampedHeight: CGFloat = 0
+    /// 要打开的那一章 + 显式 push 开关。
+    ///
+    /// 用 `Button` + 显式 push 而不是 `NavigationLink`：普通容器里的 `NavigationLink`
+    /// 没有可感知的按下反馈，而本项目的硬约束是「按下必须有反馈」。
+    @State private var readerChapter: ChapterItem?
+    @State private var isShowingReader = false
+    /// U1-7 的章节选择面板。
+    @State private var isShowingChapterPicker = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
@@ -54,38 +74,38 @@ struct BookDetailView: View {
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
                     header(viewStore.detail)
                     shelfSection(viewStore)
                     introSection(viewStore.detail.intro)
                     infoSection(viewStore.detail)
-
-                    Button {
-                        isShowingChapterList = true
-                    } label: {
-                        Label("开始阅读", systemImage: "book.pages")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    primaryActions(viewStore)
+                    directorySection(viewStore)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, DesignTokens.Spacing.md)
+                .padding(.vertical, DesignTokens.Spacing.sm)
             }
+            // 与书架 / 搜索页统一：整页底色走 `systemGroupedBackground`，
+            // 卡片（目录行、简介占位）压在它上面才有一级层次。
+            .background(AppTheme.Surface.page)
             .navigationTitle("书籍详情")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
-            .navigationDestination(isPresented: $isShowingChapterList) {
-                ChapterListView(
-                    store: Store(
-                        initialState: ChapterListFeature.State(
+            .toolbar { siteToolbarItem(viewStore) }
+            .navigationDestination(isPresented: $isShowingReader) {
+                readerDestination(viewStore)
+            }
+            .sheet(isPresented: $isShowingChapterPicker) {
+                ChapterDownloadPicker(
+                    chapters: viewStore.chapters,
+                    onConfirm: { selected in
+                        isShowingChapterPicker = false
+                        enqueue(
+                            selected,
                             bookPath: viewStore.detail.bookPath,
                             bookTitle: viewStore.detail.title
                         )
-                    ) {
-                        ChapterListFeature()
-                    },
-                    downloadStore: downloadStore
+                    }
                 )
             }
             .task { viewStore.send(.onAppear) }
@@ -101,71 +121,12 @@ struct BookDetailView: View {
             }
         }
     }
+}
 
-    // MARK: - 加入 / 移出书架
+// MARK: - 顶部 / 信息区
 
-    /// 书架开关。按 `isOnShelf` 切换，两条分支都用 `controlSize(.large)` 拿到 44pt 触控目标。
-    ///
-    /// 视觉分工（§9 主次分明）：未加入时它是页面上一眼可见的**主按钮**；
-    /// 已加入时退成次级按钮并把图标换成绿色 checkmark —— 状态一眼可辨，
-    /// 文字仍写动作（§11：按钮标签用动词），避免「已加入」当按钮却看不出点了会怎样。
-    private func shelfSection(
-        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if viewStore.isOnShelf {
-                Button {
-                    removeFromShelf(viewStore)
-                } label: {
-                    shelfLabel(viewStore, title: "移出书架", systemImage: "checkmark.circle.fill")
-                }
-                .buttonStyle(.bordered)
-                .tint(.green)
-            } else {
-                Button {
-                    viewStore.send(.addRequested)
-                } label: {
-                    shelfLabel(viewStore, title: "加入书架", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            if let notice = viewStore.shelfNotice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .controlSize(.large)
-        .disabled(viewStore.isShelfBusy)
-    }
-
-    @ViewBuilder
-    private func shelfLabel(
-        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>,
-        title: String,
-        systemImage: String
-    ) -> some View {
-        if viewStore.isShelfBusy {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-        } else {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
-        }
-    }
-
-    private func removeFromShelf(
-        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
-    ) {
-        // 与书架编辑态的删除保持一致：先把这本书在下载队列里的任务取消掉，
-        // 再删本地记录与已下载正文。
-        downloadStore.send(.cancelBook(viewStore.detail.bookPath))
-        viewStore.send(.removeRequested)
-    }
-
-    private func header(_ detail: BookDetail) -> some View {
+private extension BookDetailView {
+    func header(_ detail: BookDetail) -> some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
             AsyncImage(url: URL(string: detail.coverUrl)) { phase in
                 switch phase {
@@ -208,34 +169,7 @@ struct BookDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private func introSection(_ intro: String) -> some View {
-        if !intro.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("简介")
-                    .font(.headline)
-
-                Text(intro)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(isIntroExpanded ? nil : 4)
-
-                Button {
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
-                        isIntroExpanded.toggle()
-                    }
-                } label: {
-                    Text(isIntroExpanded ? "收起" : "展开")
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .font(.caption)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func infoSection(_ detail: BookDetail) -> some View {
+    func infoSection(_ detail: BookDetail) -> some View {
         VStack(spacing: 0) {
             DetailInfoRow(title: "字数", value: detail.wordCount)
             DetailInfoRow(title: "最新章节", value: detail.lastChapter)
@@ -243,15 +177,329 @@ struct BookDetailView: View {
             DetailInfoRow(title: "标签", value: detail.tags.joined(separator: " · "))
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
+        .background(
+            AppTheme.Surface.card,
+            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+        )
     }
 }
+
+// MARK: - 加入 / 移出书架
+
+private extension BookDetailView {
+    /// 书架开关。按 `isOnShelf` 切换，两条分支都用 `controlSize(.large)` 拿到 44pt 触控目标。
+    ///
+    /// 视觉分工（§9 主次分明）：未加入时它是页面上一眼可见的**主按钮**；
+    /// 已加入时退成次级按钮并把图标换成绿色 checkmark —— 状态一眼可辨，
+    /// 文字仍写动作（§11：按钮标签用动词），避免「已加入」当按钮却看不出点了会怎样。
+    func shelfSection(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            if viewStore.isOnShelf {
+                Button {
+                    removeFromShelf(viewStore)
+                } label: {
+                    shelfLabel(viewStore, title: "移出书架", systemImage: "checkmark.circle.fill")
+                }
+                .buttonStyle(.bordered)
+                .tint(.green)
+            } else {
+                Button {
+                    viewStore.send(.addRequested)
+                } label: {
+                    shelfLabel(viewStore, title: "加入书架", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            if let notice = viewStore.shelfNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .controlSize(.large)
+        .disabled(viewStore.isShelfBusy)
+    }
+
+    @ViewBuilder
+    func shelfLabel(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>,
+        title: String,
+        systemImage: String
+    ) -> some View {
+        if viewStore.isShelfBusy {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+        } else {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    func removeFromShelf(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
+    ) {
+        // 与书架编辑态的删除保持一致：先把这本书在下载队列里的任务取消掉，
+        // 再删本地记录与已下载正文。
+        downloadStore.send(.cancelBook(viewStore.detail.bookPath))
+        viewStore.send(.removeRequested)
+    }
+}
+
+// MARK: - 简介（U1-5）
+
+private extension BookDetailView {
+    /// 简介是否**真的**被 4 行截断。
+    ///
+    /// 量文字行数没有公开 API，硬猜字数又不可靠，所以改为量高度：
+    /// 一个隐藏的「不限行数」文本量出完整高度，和实际渲染的截断文本比 ——
+    /// 完整高度更高才是被截断。只有那时才显示「展开」。
+    var isIntroTruncated: Bool {
+        introFullHeight > introClampedHeight + 0.5
+    }
+
+    func introSection(_ intro: String) -> some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            Text("简介")
+                .font(.headline)
+
+            if intro.isEmpty {
+                introPlaceholder
+            } else {
+                Text(intro)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(isIntroExpanded ? nil : 4)
+                    .background(heightReader($introClampedHeight))
+                    .background(alignment: .top) {
+                        // 只用于量高度：不参与显示、不接受点击。
+                        Text(intro)
+                            .font(.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .hidden()
+                            .allowsHitTesting(false)
+                            .background(heightReader($introFullHeight))
+                    }
+
+                if isIntroExpanded || isIntroTruncated {
+                    Button {
+                        toggleIntro()
+                    } label: {
+                        Text(isIntroExpanded ? "收起" : "展开")
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 没有简介时的占位：给明确文案，而不是整块消失（页面塌出一截空白）。
+    var introPlaceholder: some View {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.xs) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+
+            Text("本书暂无简介")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(DesignTokens.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            AppTheme.Surface.card,
+            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+        )
+    }
+
+    /// 把视图当前高度写回绑定（测高用；不参与布局）。
+    func heightReader(_ height: Binding<CGFloat>) -> some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { height.wrappedValue = proxy.size.height }
+                .onChange(of: proxy.size.height) { _, newHeight in
+                    height.wrappedValue = newHeight
+                }
+        }
+    }
+
+    func toggleIntro() {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
+            isIntroExpanded.toggle()
+        }
+    }
+}
+
+// MARK: - 阅读入口（U1-6）
+
+private extension BookDetailView {
+    /// 主行动入口：有上次阅读记录就是「继续阅读」（+「从第一章开始」），否则是「开始阅读」。
+    ///
+    /// 目录还没加载出来时不摆一个点了没反应的按钮 —— 只显示加载中；失败 / 为空
+    /// 由下面的目录区块给出原因和重试。
+    @ViewBuilder
+    func primaryActions(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
+    ) -> some View {
+        if let continueChapter = viewStore.continueChapter {
+            VStack(spacing: DesignTokens.Spacing.xs) {
+                readButton(
+                    "继续阅读",
+                    systemImage: "book.pages",
+                    chapter: continueChapter,
+                    isProminent: true
+                )
+                if let first = viewStore.chapters.first, first.path != continueChapter.path {
+                    readButton(
+                        "从第一章开始",
+                        systemImage: "text.book.closed",
+                        chapter: first,
+                        isProminent: false
+                    )
+                }
+            }
+        } else if let first = viewStore.chapters.first {
+            readButton("开始阅读", systemImage: "book.pages", chapter: first, isProminent: true)
+        } else if viewStore.isLoadingChapters {
+            ProgressView("目录加载中…")
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DesignTokens.Spacing.sm)
+        }
+    }
+
+    @ViewBuilder
+    func readButton(
+        _ title: String,
+        systemImage: String,
+        chapter: ChapterItem,
+        isProminent: Bool
+    ) -> some View {
+        if isProminent {
+            Button {
+                openReader(chapter)
+            } label: {
+                readLabel(title, systemImage: systemImage)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        } else {
+            Button {
+                openReader(chapter)
+            } label: {
+                readLabel(title, systemImage: systemImage)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        }
+    }
+
+    func readLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+    }
+
+    func openReader(_ chapter: ChapterItem) {
+        readerChapter = chapter
+        isShowingReader = true
+    }
+}
+
+// MARK: - 目录与下载（U1-6 / U1-7）
+
+private extension BookDetailView {
+    /// 目录直接长在详情页里：数据是本地快照，由 reducer 自己加载。
+    func directorySection(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
+    ) -> some View {
+        ChapterListView(
+            data: ChapterDirectoryData(
+                visibleChapters: viewStore.visibleChapters,
+                totalCount: viewStore.chapters.count,
+                downloadedCount: viewStore.downloadedChapterCount,
+                hasHiddenChapters: viewStore.hasHiddenChapters,
+                isShowingAll: viewStore.isShowingAllChapters,
+                isLoading: viewStore.isLoadingChapters,
+                errorMessage: viewStore.chapterErrorMessage
+            ),
+            onToggleShowAll: { viewStore.send(.toggleAllChapters) },
+            onRetry: { viewStore.send(.reloadChapters) },
+            onSelect: { chapter in openReader(chapter) },
+            onDownloadChapter: { chapter in
+                enqueue(
+                    [chapter],
+                    bookPath: viewStore.detail.bookPath,
+                    bookTitle: viewStore.detail.title
+                )
+            },
+            onDownloadRequested: { isShowingChapterPicker = true }
+        )
+    }
+
+    /// 章节 → 下载队列。整本下载就是展开成 N 条按章请求（下载器一次只下一章）。
+    func enqueue(_ chapters: [ChapterItem], bookPath: String, bookTitle: String) {
+        guard !chapters.isEmpty else { return }
+        downloadStore.send(.enqueue(chapters.map {
+            DownloadChapterRequest(chapter: $0, bookPath: bookPath, bookTitle: bookTitle)
+        }))
+    }
+}
+
+// MARK: - 工具栏 / 导航（U1-4）
+
+private extension BookDetailView {
+    /// 右上角「转到原网站」。
+    ///
+    /// URL 由「用户当前配置的 host + 本书 bookPath」现场拼出（见 `State.sourceURL`），
+    /// 页面上不出现任何写死的域名 / 路径特征；没配置 host 时 `sourceURL` 为 nil，
+    /// 这里什么都不产出 —— 入口整体隐藏，而不是给一个点了没反应的按钮。
+    @ToolbarContentBuilder
+    func siteToolbarItem(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
+    ) -> some ToolbarContent {
+        if let url = viewStore.sourceURL {
+            ToolbarItem(placement: .topBarTrailing) {
+                Link(destination: url) {
+                    Image(systemName: "arrow.up.right.square")
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("转到原网站")
+            }
+        }
+    }
+
+    @ViewBuilder
+    func readerDestination(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
+    ) -> some View {
+        if let chapter = readerChapter {
+            ReaderView(
+                chapterPath: chapter.path,
+                chapterName: chapter.name,
+                bookPath: viewStore.detail.bookPath,
+                chapters: viewStore.chapters,
+                downloadStore: downloadStore
+            )
+        }
+    }
+}
+
+// MARK: - 信息行
 
 private struct DetailInfoRow: View {
     let title: String
     let value: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
