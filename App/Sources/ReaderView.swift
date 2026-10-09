@@ -28,6 +28,8 @@ struct ReaderView: View {
     @State private var isShowingDirectory = false
     @State private var isShowingSearch = false
     @State private var isChromeVisible = false
+    @State private var slideOffset: CGFloat = 0
+    @State private var slideIsHorizontal: Bool?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -271,33 +273,47 @@ private extension ReaderView {
         }
     }
 
-    private func slideGesture(
-        _ content: some View,
-        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        availableWidth: CGFloat,
-        onCenterTap: @escaping () -> Void
-    ) -> some View {
-        content.gesture(
-            DragGesture(minimumDistance: 30)
-                .onEnded { value in
-                    let horizontal = value.translation.width
-                    let vertical = value.translation.height
-                    guard abs(horizontal) > abs(vertical) else { return }
-                    if horizontal < -30 {
-                        viewStore.send(.nextPage)
-                    } else if horizontal > 30 {
-                        viewStore.send(.prevPage)
+    /// 滑动翻页：≥10pt 迟滞锁横向（§12）→ 1:1 跟手 + 边界橡皮筋（§6 / §9）→ 动量投射 + 速度交接（§12）。
+    private func slideGesture(_ content: some View, viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>, availableWidth: CGFloat, onCenterTap: @escaping () -> Void) -> some View {
+        content
+            .offset(x: slideOffset)
+            .gesture(
+                DragGesture(minimumDistance: 10)
+                    .onChanged { value in
+                        slideIsHorizontal = slideIsHorizontal ?? (abs(value.translation.width) > abs(value.translation.height))
+                        guard slideIsHorizontal == true, !reduceMotion else { return }
+                        let raw = value.translation.width, index = viewStore.currentPageIndex
+                        let edge = raw > 0 ? index <= 0 : index + 1 >= viewStore.pages.count
+                        slideOffset = edge ? raw * availableWidth * 0.55 / (availableWidth + 0.55 * abs(raw)) : raw
                     }
-                }
-        )
-        .simultaneousGesture(
-            SpatialTapGesture()
-                .onEnded { value in
-                    if isCenterTap(value.location.x, width: availableWidth) {
-                        onCenterTap()
+                    .onEnded { value in
+                        let wasHorizontal = slideIsHorizontal == true
+                        slideIsHorizontal = nil
+                        guard wasHorizontal else { return }
+                        let projected = value.predictedEndTranslation.width
+                        let target = viewStore.currentPageIndex + (projected < 0 ? 1 : -1)
+                        if abs(projected) > availableWidth / 2, viewStore.pages.indices.contains(target) {
+                            viewStore.send(projected < 0 ? .nextPage : .prevPage)
+                        }
+                        withAnimation(slideSettleAnimation(velocity: value.velocity.width, offset: slideOffset)) {
+                            slideOffset = 0
+                        }
                     }
-                }
-        )
+            )
+            .simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        if isCenterTap(value.location.x, width: availableWidth) {
+                            onCenterTap()
+                        }
+                    }
+            )
+    }
+
+    /// 弹簧吸附（等价 response 0.36 / ζ=1）：手势带动量时降到 ζ≈0.8，并把释放速度按剩余位移归一化交接给弹簧。
+    private func slideSettleAnimation(velocity: CGFloat, offset: CGFloat) -> Animation {
+        let relative = offset == 0 ? 0 : min(max(velocity / -offset, -8), 8)
+        return .interpolatingSpring(stiffness: 300, damping: abs(relative) > 0.5 ? 28 : 35, initialVelocity: Double(relative))
     }
 
     private func tapGesture(
