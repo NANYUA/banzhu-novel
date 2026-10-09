@@ -1,0 +1,122 @@
+name: Package Dev
+
+# 快速打包通道（action-rules.md §2.2）：只做 Release 构建，产出「未验证」未签名 IPA。
+#
+# 硬规则：
+#   1. 不跑 verify / 单元测试 / SwiftLint / SwiftFormat —— 唯一目的是快。
+#   2. 产物名必须带 dev + unsigned + unverified + commit sha，一眼能看出没验证过。
+#   3. 禁止发布到 Release，禁止当作正式交付，只能装机测试。
+#   4. 不随 push 触发：需要时手动 Run workflow（最终交付仍走 CI 的 package-unsigned）。
+on:
+  workflow_dispatch:
+
+jobs:
+  package-dev:
+    name: 快速打包未签名 IPA（未验证）
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # ── 缓存 1：SwiftPM 依赖 ────────────────────────────────
+      # 只缓存依赖，不改变任何质量门（快速通道本来就不跑质量门）。
+      - name: 缓存 SwiftPM 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ${{ runner.temp }}/BanzhuNovelDevDerivedData/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      # ── 缓存 2：DerivedData 编译中间物（增量编译）────────────
+      # key 只绑定很少变的构建定义（project.yml / Package.swift），源码改动不换 key，
+      # 靠 restore-keys 命中上一版目录，由 xcodebuild 增量编译。
+      # 只缓存 Build + ModuleCache，避开与上面的 SourcePackages 缓存互相覆盖。
+      # 出诡异链接/符号错误时，把 key 前缀 dd- 改成 dd2- 强制重建缓存。
+      - name: 缓存 DerivedData（增量编译）
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/BanzhuNovelDevDerivedData/Build
+            ${{ runner.temp }}/BanzhuNovelDevDerivedData/ModuleCache.noindex
+          key: dd-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('project.yml', 'Packages/**/Package.swift') }}
+          restore-keys: |
+            dd-${{ runner.os }}-${{ runner.arch }}-
+
+      # ── 缓存 3：XcodeGen 可执行文件（省掉每次 brew install）───
+      - name: 缓存 XcodeGen
+        id: xcodegen-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/xcodegen-bin/xcodegen
+          key: xcodegen-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: 安装 XcodeGen（仅缓存未命中时）
+        if: steps.xcodegen-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          mkdir -p "$HOME/.cache/xcodegen-bin"
+          cp "$(command -v xcodegen)" "$HOME/.cache/xcodegen-bin/xcodegen"
+          chmod +x "$HOME/.cache/xcodegen-bin/xcodegen"
+
+      - name: 生成 Xcode 工程
+        run: |
+          export PATH="$HOME/.cache/xcodegen-bin:$PATH"
+          xcodegen generate
+
+      - name: 构建 Release App（不签名）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project BanzhuNovel.xcodeproj \
+            -scheme BanzhuNovel \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/BanzhuNovelDevDerivedData" \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee package-dev-build.log
+
+      - name: 输出打包错误
+        if: failure()
+        run: |
+          if [ -f package-dev-build.log ]; then
+            grep -E "error: |fatal error: " package-dev-build.log | head -n 30 | while IFS= read -r line; do
+              echo "::error title=Xcode::$line"
+            done
+          fi
+
+      - name: 制作未验证 IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find "$RUNNER_TEMP/BanzhuNovelDevDerivedData/Build/Products/Release-iphoneos" \
+            -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$APP_PATH"
+          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+
+          mkdir -p artifacts/Payload
+          cp -R "$APP_PATH" artifacts/Payload/
+          (
+            cd artifacts
+            zip -qry "BanzhuNovel-dev-unsigned-unverified-${SHORT_SHA}.ipa" Payload
+          )
+          rm -rf artifacts/Payload
+
+          shasum -a 256 artifacts/*.ipa > artifacts/SHA256SUMS-dev.txt
+          ls -lh artifacts
+
+      - name: 上传未验证产物（仅供测试）
+        uses: actions/upload-artifact@v4
+        with:
+          name: BanzhuNovel-dev-unsigned-unverified-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 7
