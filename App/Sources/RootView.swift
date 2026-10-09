@@ -60,6 +60,11 @@ struct RootView: View {
                         Label("设置", systemImage: "gearshape")
                     }
             }
+            // §6：品牌强调色集中定义在 `AppTheme`，这里一次性注入环境，
+            // 系统控件（`.borderedProminent` 填充、分段控件、开关、搜索框、
+            // 标签栏选中项）与所有 `.foregroundStyle(.tint)` 自动跟随，
+            // 不再逐视图刷色。
+            .tint(AppTheme.accent)
             // §10 / §12：验证是打断式的全屏任务，用 fullScreenCover 拿到真正的模态语义
             // （VoiceOver 焦点隔离、底层内容不可点），替代原先无模态语义的 overlay。
             // 关闭（返回 / 取消 / 手势外的程序化 dismissal）统一走 .cancelled。

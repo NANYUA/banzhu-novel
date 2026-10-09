@@ -181,6 +181,7 @@ private extension ReaderView {
                     viewStore.send(.loadChapter(viewStore.chapterPath))
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
         } else {
             pageContent(viewStore, availableWidth: availableWidth)
@@ -361,6 +362,9 @@ private extension ReaderView {
                 Label("返回", systemImage: "chevron.left")
             }
             .buttonStyle(.bordered)
+            // HIG §9：`.bordered` 默认约 34pt 高。阅读页控制栏是阅读区内唯一的导航 /
+            // 关闭入口，命中区按 44pt 补足（控制栏高度 +10pt，视觉语言不变）。
+            .controlSize(.large)
 
             Spacer()
 
@@ -376,17 +380,18 @@ private extension ReaderView {
                 Image(systemName: "eye.slash")
             }
             .buttonStyle(.bordered)
+            .controlSize(.large)
             .accessibilityLabel("隐藏控制栏")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, DesignTokens.Spacing.md)
+        .padding(.vertical, DesignTokens.Spacing.sm)
         .background(
             reduceTransparency
                 ? AnyShapeStyle(Color(.systemBackground))
                 : AnyShapeStyle(.regularMaterial),
-            in: RoundedRectangle(cornerRadius: 16)
+            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
-        .padding(.horizontal, 14)
+        .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.top, 8)
     }
 
@@ -408,14 +413,14 @@ private extension ReaderView {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, DesignTokens.Spacing.sm)
         .background(
             reduceTransparency
                 ? AnyShapeStyle(Color(.systemBackground))
                 : AnyShapeStyle(.regularMaterial),
-            in: RoundedRectangle(cornerRadius: 16)
+            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
-        .padding(.horizontal, 14)
+        .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.bottom, 12)
     }
 

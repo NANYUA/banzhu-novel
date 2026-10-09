@@ -33,87 +33,74 @@ struct SearchView: View {
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             NavigationStack {
-                VStack(spacing: 0) {
-                    searchBar(viewStore)
-                    content(viewStore)
-                }
-                // U0-3：整页底色统一成设置页那种 `systemGroupedBackground`（浅色 #F2F2F7）。
-                // 搜索栏、结果列表、加载 / 空 / 错误态都透出这一层，页面里不再有任何一块白底。
-                .background(Color(.systemGroupedBackground))
-                .navigationTitle("搜索")
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    noticeBanner(viewStore)
-                }
-                .navigationDestination(isPresented: $isShowingDetail) {
-                    if let book = detailBook {
-                        BookDetailView(
-                            book: book,
-                            downloadStore: downloadStore,
-                            onAddedToShelf: { row in
-                                viewStore.send(.addSucceeded(row))
-                                // 详情页加入也走同一条同步路径。这里直接回调一次是必要的：
-                                // 「移出书架再当场加回来」时 `lastAddedRow` 没有变化，
-                                // 上面那个 onChange 不会再触发。重复一次不会插重复行
-                                // —— `BookshelfFeature.addSucceeded` 按 bookPath 去重。
-                                onBookAdded(row)
-                            },
-                            onRemovedFromShelf: { bookPath in
-                                viewStore.send(.removedFromShelf(bookPath: bookPath))
-                                onBookRemoved(bookPath)
-                            }
-                        )
+                content(viewStore)
+                    // U0-3：整页底色统一成设置页那种 `systemGroupedBackground`（浅色 #F2F2F7）。
+                    // 结果列表、加载 / 空 / 错误态都透出这一层，页面里不再有任何一块白底。
+                    .background(Color(.systemGroupedBackground))
+                    .navigationTitle("搜索")
+                    // §1 一致性：与同项目的 `ReaderSearchView` 统一到系统 `.searchable`
+                    // 范式，自绘搜索栏（TextField + 搜索按钮）已删除。
+                    // 提交语义不变，仍是同一个 `.search` action。
+                    //
+                    // 用 `.always` 而不是默认的 `.automatic`：本页的空 / 加载 / 错误态
+                    // 都不是可滚动视图，`.automatic` 靠滚动才把搜索框抽屉拉出来，
+                    // 在「尚未搜索」的首屏上搜索框会不可见 —— 搜索页上这是致命缺陷。
+                    .searchable(
+                        text: viewStore.binding(
+                            get: \.keyword,
+                            send: SearchFeature.Action.keywordChanged
+                        ),
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "书名或作者"
+                    )
+                    .onSubmit(of: .search) {
+                        viewStore.send(.search)
                     }
-                }
-                .onChange(of: viewStore.lastAddedRow) { _, row in
-                    if let row {
-                        onBookAdded(row)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        noticeBanner(viewStore)
                     }
-                }
-                .task(id: viewStore.notice) {
-                    guard viewStore.notice != nil else { return }
-                    try? await Task.sleep(for: .seconds(1.0))
-                    guard !Task.isCancelled else { return }
-                    viewStore.send(.noticeDismissed)
-                }
+                    .navigationDestination(isPresented: $isShowingDetail) {
+                        if let book = detailBook {
+                            BookDetailView(
+                                book: book,
+                                downloadStore: downloadStore,
+                                onAddedToShelf: { row in
+                                    viewStore.send(.addSucceeded(row))
+                                    // 详情页加入也走同一条同步路径。这里直接回调一次是必要的：
+                                    // 「移出书架再当场加回来」时 `lastAddedRow` 没有变化，
+                                    // 上面那个 onChange 不会再触发。重复一次不会插重复行
+                                    // —— `BookshelfFeature.addSucceeded` 按 bookPath 去重。
+                                    onBookAdded(row)
+                                },
+                                onRemovedFromShelf: { bookPath in
+                                    viewStore.send(.removedFromShelf(bookPath: bookPath))
+                                    onBookRemoved(bookPath)
+                                }
+                            )
+                        }
+                    }
+                    .onChange(of: viewStore.lastAddedRow) { _, row in
+                        if let row {
+                            onBookAdded(row)
+                        }
+                    }
+                    .task(id: viewStore.notice) {
+                        guard viewStore.notice != nil else { return }
+                        try? await Task.sleep(for: .seconds(1.0))
+                        guard !Task.isCancelled else { return }
+                        viewStore.send(.noticeDismissed)
+                    }
             }
         }
-    }
-
-    private func searchBar(
-        _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
-    ) -> some View {
-        HStack(spacing: 10) {
-            TextField(
-                "书名或作者",
-                text: viewStore.binding(get: \.keyword, send: SearchFeature.Action.keywordChanged)
-            )
-            .textFieldStyle(.roundedBorder)
-            .submitLabel(.search)
-            .onSubmit { viewStore.send(.search) }
-
-            Button {
-                viewStore.send(.search)
-            } label: {
-                if viewStore.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: "magnifyingglass")
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(viewStore.isLoading || viewStore.keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityLabel("搜索")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
     @ViewBuilder
     private func content(
         _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
     ) -> some View {
-        if viewStore.isLoading, viewStore.results.isEmpty {
+        // 去掉搜索栏后，搜索按钮上那圈 spinner 也没了；把 isLoading 提到最前面，
+        // 保证「改关键词再搜」时也有可见反馈（否则旧结果原样留着，看起来像没点中）。
+        if viewStore.isLoading {
             loadingView
         } else if let message = viewStore.errorMessage {
             errorView(message, viewStore: viewStore)
@@ -121,7 +108,7 @@ struct SearchView: View {
             emptyView(
                 title: viewStore.submittedKeyword.isEmpty ? "尚未搜索" : "没有找到相关书籍",
                 message: viewStore.submittedKeyword.isEmpty
-                    ? "输入书名或作者后点击搜索。"
+                    ? "在搜索框输入书名或作者，然后按键盘上的搜索。"
                     : "换个关键词再试一次。"
             )
         } else {
@@ -147,6 +134,7 @@ struct SearchView: View {
                 viewStore.send(.search)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -175,7 +163,14 @@ struct SearchView: View {
                     },
                     onAdd: { viewStore.send(.addRequested(book)) }
                 )
-                .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .listRowInsets(
+                    .init(
+                        top: DesignTokens.Spacing.xs,
+                        leading: DesignTokens.Spacing.md,
+                        bottom: DesignTokens.Spacing.xs,
+                        trailing: DesignTokens.Spacing.md
+                    )
+                )
                 // 行背景清掉：plain List 的行 / 滚动背景默认是 `systemBackground`
                 // （浅色纯白），会把页面灰盖住，卡片之间的 6pt 间隙尤其明显。
                 .listRowBackground(Color.clear)
@@ -195,13 +190,17 @@ struct SearchView: View {
     private func loadMoreRow(
         _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DesignTokens.Spacing.sm) {
             if viewStore.isLoadingMore {
                 ProgressView()
                     .controlSize(.small)
             }
-            Button("加载更多") {
+            Button {
                 viewStore.send(.loadMore)
+            } label: {
+                Text("加载更多")
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(viewStore.isLoadingMore)
         }
@@ -232,7 +231,7 @@ struct SearchView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
@@ -252,7 +251,7 @@ private struct SearchResultRow: View {
             // List 行里的 NavigationLink 会接管整行，行尾的「加入书架」会被一起吞掉。
             Button(action: onOpen) {
                 HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
                         .fill(Color(.tertiarySystemBackground))
                         .frame(width: 48, height: 64)
                         .overlay {
@@ -287,14 +286,17 @@ private struct SearchResultRow: View {
                 .contentShape(Rectangle())
             }
             // 强调层贴「打开详情」那块区域的轮廓；行尾「加入书架」是独立控件，不跟着变暗。
-            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: 8))))
+            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
 
             shelfAction
         }
         .padding(12)
         .contentShape(Rectangle())
         // U0-3：与页面同色（用户要求统一成设置页的 `systemGroupedBackground`）。
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+        .background(
+            Color(.systemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+        )
     }
 
     /// 「加入书架」入口。

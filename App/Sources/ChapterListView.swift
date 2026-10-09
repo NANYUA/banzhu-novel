@@ -25,13 +25,14 @@ struct ChapterListView: View {
                         Text(message).font(.caption).foregroundStyle(.secondary)
                         Button("重试") { viewStore.send(.onAppear) }
                             .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if viewStore.chapters.isEmpty {
                     emptyState
                 } else {
                     List(viewStore.chapters) { chapter in
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignTokens.Spacing.sm) {
                             Button {
                                 downloadStore.send(.enqueue([
                                     request(
@@ -45,7 +46,7 @@ struct ChapterListView: View {
                                     ? "checkmark.circle.fill"
                                     : "arrow.down.circle")
                                     .font(.title3)
-                                    .foregroundStyle(chapter.isDownloaded ? Color.green : Color.accentColor)
+                                    .foregroundStyle(chapter.isDownloaded ? Color.green : AppTheme.accent)
                                     .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.borderless)
@@ -77,7 +78,7 @@ struct ChapterListView: View {
                                 } label: {
                                     Label("下载", systemImage: "arrow.down.circle")
                                 }
-                                .tint(Color.accentColor)
+                                .tint(AppTheme.accent)
                             }
                         }
                         .listRowBackground(Color.clear)
@@ -168,7 +169,7 @@ private struct ChapterRow: View {
                     .foregroundStyle(.green)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, DesignTokens.Spacing.xxs)
     }
 }
 

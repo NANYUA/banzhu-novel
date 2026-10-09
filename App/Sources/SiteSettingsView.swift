@@ -58,6 +58,7 @@ struct SiteSettingsView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .disabled(viewStore.isFetchingNavigation)
 
             if !viewStore.discoveredHosts.isEmpty {
@@ -107,9 +108,13 @@ struct SiteSettingsView: View {
                 TextField("example.com", text: $newHost)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
-                Button("添加") {
+                Button {
                     viewStore.send(.addHost(newHost))
                     newHost = ""
+                } label: {
+                    Text("添加")
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -122,7 +127,7 @@ struct SiteSettingsView: View {
 
     private func hostRow(_ entry: SiteEntry, isSelected: Bool) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 Text(entry.value)
                     .lineLimit(1)
                 if entry.isFromNavigation {

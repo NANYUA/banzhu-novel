@@ -57,10 +57,13 @@ struct BookshelfView: View {
                                 Text(message)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                // HIG §9：系统 `.borderedProminent` 默认约 34pt 高，
+                                // `.controlSize(.large)` 把它抬到 44pt 命中区。
                                 Button("重试") {
                                     viewStore.send(.onAppear)
                                 }
                                 .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else if viewStore.visibleRows.isEmpty {
@@ -216,7 +219,7 @@ private extension BookshelfView {
         _ notice: String,
         viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
     ) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(.orange)
             Text(notice)
@@ -300,7 +303,14 @@ private extension BookshelfView {
         List(viewStore.visibleRows) { row in
             rowContent(row, viewStore: viewStore)
                 .listRowSeparator(.hidden)
-                .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .listRowInsets(
+                    .init(
+                        top: DesignTokens.Spacing.xs,
+                        leading: DesignTokens.Spacing.md,
+                        bottom: DesignTokens.Spacing.xs,
+                        trailing: DesignTokens.Spacing.md
+                    )
+                )
                 // 行背景也清掉：plain List 的行 / 滚动背景默认是 `systemBackground`
                 // （浅色纯白），会把页面灰盖住，卡片之间的 6pt 间隙尤其明显。
                 .listRowBackground(Color.clear)
@@ -326,7 +336,7 @@ private extension BookshelfView {
                 HStack(spacing: 12) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(isSelected ? AppTheme.accent : Color.secondary)
                     BookRow(row: row)
                 }
             }
@@ -345,7 +355,7 @@ private extension BookshelfView {
                 BookRow(row: row)
             }
             // 强调层贴书卡自己的 8pt 圆角，避免按下瞬间在圆角外露出方角（U0-4）。
-            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: 8))))
+            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                     lastLongPressAt = Date()
@@ -374,11 +384,11 @@ private struct GroupChip: View {
             Text(title)
                 .font(.subheadline.weight(isSelected ? .semibold : .regular))
                 .lineLimit(1)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
+                .padding(.horizontal, DesignTokens.Spacing.md)
+                .padding(.vertical, DesignTokens.Spacing.xs)
                 .background(
                     Capsule().fill(
-                        isSelected ? Color.accentColor : Color(.tertiarySystemFill)
+                        isSelected ? AppTheme.accent : Color(.tertiarySystemFill)
                     )
                 )
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
@@ -412,10 +422,10 @@ private struct BookRow: View {
             }
             .frame(width: 60, height: 80)
             .background(Color(.tertiarySystemBackground))
-            .cornerRadius(6)
+            .cornerRadius(DesignTokens.Radius.sm)
 
             // 文字区
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 Text(row.title)
                     .font(.headline)
                     .foregroundStyle(.primary)
@@ -451,7 +461,10 @@ private struct BookRow: View {
         .padding(12)
         .contentShape(Rectangle()) // 整张卡片可点
         // U0-3：与页面同色（用户要求统一成设置页的 `systemGroupedBackground`）。
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+        .background(
+            Color(.systemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+        )
     }
 
     private var placeholder: some View {

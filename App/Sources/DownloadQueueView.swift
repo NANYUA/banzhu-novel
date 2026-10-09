@@ -101,7 +101,7 @@ private struct DownloadNoticeRow: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(.orange)
 
@@ -134,7 +134,7 @@ private struct DownloadSummarySection: View {
 
     var body: some View {
         Section {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
                 HStack {
                     Text("总进度")
                         .font(.subheadline.weight(.semibold))
@@ -164,12 +164,17 @@ private struct DownloadSummarySection: View {
             if failedCount > 0 {
                 Button(action: onRetryFailed) {
                     Label("重试失败项（\(failedCount)）", systemImage: "arrow.clockwise")
+                        // HIG §9：`.frame` 必须落在 label 上才真的撑开命中区（套在 Button 外面无效）。
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
             }
 
             if blockedCount > 0 {
                 Button(action: onRetryBlocked) {
                     Label("验证后重试（\(blockedCount)）", systemImage: "checkmark.shield")
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .tint(.orange)
             }
@@ -197,7 +202,7 @@ private struct DownloadBookHeader: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 Text(section.title)
                     .font(.headline)
                     .lineLimit(1)
@@ -254,7 +259,7 @@ private struct DownloadTaskRow: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, DesignTokens.Spacing.xxs)
     }
 
     private var statusTitle: String {
@@ -293,7 +298,7 @@ private struct DownloadTaskRow: View {
         case .queued:
             .secondary
         case .downloading:
-            Color.accentColor
+            AppTheme.accent
         case .done:
             .green
         case .paused:

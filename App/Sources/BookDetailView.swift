@@ -166,7 +166,7 @@ struct BookDetailView: View {
     }
 
     private func header(_ detail: BookDetail) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
             AsyncImage(url: URL(string: detail.coverUrl)) { phase in
                 switch phase {
                 case let .success(image):
@@ -181,9 +181,9 @@ struct BookDetailView: View {
                 }
             }
             .frame(width: 92, height: 124)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 Text(detail.title.isEmpty ? "暂无书名" : detail.title)
                     .font(.title3.bold())
                     .lineLimit(2)
@@ -242,7 +242,7 @@ struct BookDetailView: View {
             DetailInfoRow(title: "更新时间", value: detail.lastUpdated)
             DetailInfoRow(title: "标签", value: detail.tags.joined(separator: " · "))
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, DesignTokens.Spacing.md)
     }
 }
 
@@ -261,7 +261,7 @@ private struct DetailInfoRow: View {
                 .font(.subheadline)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, DesignTokens.Spacing.sm)
         .overlay(alignment: .bottom) {
             Divider()
         }

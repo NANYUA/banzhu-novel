@@ -57,11 +57,13 @@ struct GuardOverlayView: View {
                     viewStore.send(.cancelled)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
 
                 Button("验证已完成") {
                     manualController.finish()
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
             .padding(16)
         }
