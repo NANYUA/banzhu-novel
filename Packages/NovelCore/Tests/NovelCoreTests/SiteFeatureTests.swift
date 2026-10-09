@@ -10,6 +10,7 @@ final class SiteFeatureTests: XCTestCase {
             navigationURL: "https://192.2.245.225",
             hosts: [SiteEntry(value: "https://mirror001.com")]
         )
+        let keptID = settings.hosts[0].id
         let store = TestStore(initialState: SiteFeature.State(settings: settings)) {
             SiteFeature()
         } withDependencies: {
@@ -25,7 +26,7 @@ final class SiteFeatureTests: XCTestCase {
         ])) {
             // mirror001 与已有条目规范化后相同 → 只更新标记，不新增。
             $0.settings.hosts = [
-                SiteEntry(id: settings.hosts[0].id, value: "https://mirror001.com", isFromNavigation: true),
+                SiteEntry(id: keptID, value: "https://mirror001.com", isFromNavigation: true),
                 SiteEntry(value: "https://mirror002.com", isFromNavigation: true),
             ]
             $0.discoveredHosts = [
