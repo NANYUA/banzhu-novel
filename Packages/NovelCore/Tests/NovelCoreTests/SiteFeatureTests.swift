@@ -5,34 +5,6 @@ import XCTest
 
 @MainActor
 final class SiteFeatureTests: XCTestCase {
-    private actor NavigationStub {
-        private var result: Result<[String], Error>?
-
-        func set(_ newResult: Result<[String], Error>) {
-            result = newResult
-        }
-
-        func hosts() throws -> [String] {
-            try result.unwrap()
-        }
-    }
-
-    private func makeStore(
-        settings: SiteSettings = SiteSettings(
-            navigationURL: "https://192.2.245.225",
-            hosts: []
-        ),
-        stub _: NavigationStub
-    ) -> TestStore<SiteFeature.State, SiteFeature.Action> {
-        TestStore(initialState: SiteFeature.State(settings: settings)) {
-            SiteFeature()
-        } withDependencies: {
-            // 拉取走引擎真实解析，stub 网络 + 真实引擎实例都重；这里直接换引擎不现实，
-            // 改在 navigationSucceeded 之前的 reducer 层做（引擎方法是 actor final）。
-            $0.siteRouter.configure = { _ in }
-        }
-    }
-
     func test拉取成功合并进列表且互斥去重() async {
         var settings = SiteSettings(
             navigationURL: "https://192.2.245.225",
