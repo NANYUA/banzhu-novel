@@ -3,6 +3,12 @@ import NovelCore
 import SwiftUI
 import UIKit
 
+/// 一项候选字体：Picker 显示 `displayName`，写回 `configuration.fontName` 的是 `familyName`。
+private struct ReaderFontOption {
+    let displayName: String
+    let familyName: String
+}
+
 /// 阅读设置面板。
 ///
 /// 面板只负责把用户选择整理成新的 `PaginationConfiguration`，
@@ -15,7 +21,22 @@ struct ReaderSettingsView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    private let fontFamilies = UIFont.familyNames.sorted()
+    /// 字体白名单：默认系统字体（SF Pro），另给几个适合中文正文阅读的字体族。
+    /// 不用 `UIFont.familyNames`，避免把 Roboto / Inter 等第三方字体灌进 Picker。
+    private static let fontFamilyWhitelist: [ReaderFontOption] = [
+        ReaderFontOption(displayName: "苹方（黑体）", familyName: "PingFang SC"),
+        ReaderFontOption(displayName: "宋体", familyName: "Songti SC"),
+        ReaderFontOption(displayName: "楷体", familyName: "Kaiti SC"),
+        ReaderFontOption(displayName: "圆体", familyName: "Yuanti SC"),
+        ReaderFontOption(displayName: "行楷", familyName: "Xingkai SC"),
+    ]
+
+    /// 白名单按本机可用性过滤；解析方式与 `ReadingFontFactory` 一致
+    /// （先 PostScript name、再退回字族名），过滤后列表里每一项都真能渲染。
+    private static let availableFontFamilies: [ReaderFontOption] = fontFamilyWhitelist.filter {
+        UIFont(name: $0.familyName, size: 12) != nil
+            || !UIFont.fontNames(forFamilyName: $0.familyName).isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -42,8 +63,8 @@ struct ReaderSettingsView: View {
         Section("文字") {
             Picker("字体", selection: fontNameBinding) {
                 Text("系统字体").tag("")
-                ForEach(fontFamilies, id: \.self) { family in
-                    Text(family).tag(family)
+                ForEach(Self.availableFontFamilies, id: \.familyName) { option in
+                    Text(option.displayName).tag(option.familyName)
                 }
             }
 
