@@ -2,293 +2,117 @@ import Dependencies
 import Foundation
 import NovelEngine
 
-/// 入口来源。重叠 host 可同时属于多个来源。
-public enum SiteEntrySource: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
-    case user
-    case navigation
-}
-
-/// host 当前探测状态。
-public enum HostStatus: String, Codable, Equatable, Hashable, Sendable {
-    case unknown
-    case unguarded
-    case guarded
-    case unavailable
-}
-
-/// 导航站状态。优先级：disabled > frozen > cooling > active。
-public enum NavigationStatus: String, Codable, Equatable, Sendable {
-    case active
-    case cooling
-    case frozen
-    case disabled
-}
-
-/// 一个站点入口。导航网址和 host 都是同一站点的入口，不做多站适配。
+/// 站点入口。手动模式下不区分来源：导航拉到的与手填的都在同一列表，按 key 去重互斥。
 public struct SiteEntry: Codable, Equatable, Identifiable, Sendable {
-    public init(
-        id: UUID = UUID(),
-        value: String,
-        source: SiteEntrySource = .user
-    ) {
-        self.init(id: id, value: value, sources: [source])
-    }
-
-    public init(
-        id: UUID = UUID(),
-        value: String,
-        sources: Set<SiteEntrySource>
-    ) {
+    public init(id: UUID = UUID(), value: String, isFromNavigation: Bool = false) {
         self.id = id
         self.value = value
-        self.sources = sources
+        self.isFromNavigation = isFromNavigation
     }
 
     public var id: UUID
     public var value: String
-    public var sources: Set<SiteEntrySource> = []
-    public var originNavigationIDs: Set<UUID> = []
-    public var hostStatus: HostStatus = .unknown
-    public var coolingUntil: Date?
-    public var lastProbedAt: Date?
-    public var lastVerifiedAt: Date?
-    public var lastSucceededAt: Date?
-    public var isStandby = false
+    /// UI 标记用（「导航发现」角标），不参与行为差异。
+    public var isFromNavigation = false
 
-    // 导航站专用状态。host 条目不使用。
-    public var navigationStatus: NavigationStatus = .active
-    public var consecutiveFailures = 0
-    public var navigationCoolingUntil: Date?
-    public var frozenUntil: Date?
-    public var isDisabled = false
-
-    /// 兼容旧调用点：用户来源优先。
-    public var source: SiteEntrySource {
-        get { sources.contains(.user) ? .user : .navigation }
-        set { sources = [newValue] }
-    }
-
-    public var isUserHost: Bool {
-        sources.contains(.user)
-    }
-
-    public var isNavigationHost: Bool {
-        sources.contains(.navigation)
-    }
-
-    public func resolvedNavigationStatus(at now: Date = Date()) -> NavigationStatus {
-        if isDisabled {
-            return .disabled
-        }
-        if let frozenUntil, frozenUntil > now {
-            return .frozen
-        }
-        if let navigationCoolingUntil, navigationCoolingUntil > now {
-            return .cooling
-        }
-        return .active
-    }
-
-    public func isCooling(at now: Date = Date()) -> Bool {
-        if let coolingUntil, coolingUntil > now {
-            return true
-        }
-        return false
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case value
-        case source
-        case sources
-        case originNavigationIDs
-        case hostStatus
-        case coolingUntil
-        case lastProbedAt
-        case lastVerifiedAt
-        case lastSucceededAt
-        case isStandby
-        case navigationStatus
-        case consecutiveFailures
-        case navigationCoolingUntil
-        case frozenUntil
-        case isDisabled
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        value = try container.decode(String.self, forKey: .value)
-        let legacySource = try container.decodeIfPresent(SiteEntrySource.self, forKey: .source)
-        let decodedSources = try container.decodeIfPresent(
-            Set<SiteEntrySource>.self,
-            forKey: .sources
-        )
-        sources = decodedSources ?? [legacySource ?? .user]
-        originNavigationIDs = try container.decodeIfPresent(
-            Set<UUID>.self,
-            forKey: .originNavigationIDs
-        ) ?? []
-        hostStatus = try container.decodeIfPresent(HostStatus.self, forKey: .hostStatus) ?? .unknown
-        coolingUntil = try container.decodeIfPresent(Date.self, forKey: .coolingUntil)
-        lastProbedAt = try container.decodeIfPresent(Date.self, forKey: .lastProbedAt)
-        lastVerifiedAt = try container.decodeIfPresent(Date.self, forKey: .lastVerifiedAt)
-        lastSucceededAt = try container.decodeIfPresent(Date.self, forKey: .lastSucceededAt)
-        isStandby = try container.decodeIfPresent(Bool.self, forKey: .isStandby) ?? false
-        navigationStatus = try container.decodeIfPresent(
-            NavigationStatus.self,
-            forKey: .navigationStatus
-        ) ?? .active
-        consecutiveFailures = try container.decodeIfPresent(
-            Int.self,
-            forKey: .consecutiveFailures
-        ) ?? 0
-        navigationCoolingUntil = try container.decodeIfPresent(
-            Date.self,
-            forKey: .navigationCoolingUntil
-        )
-        frozenUntil = try container.decodeIfPresent(Date.self, forKey: .frozenUntil)
-        isDisabled = try container.decodeIfPresent(Bool.self, forKey: .isDisabled) ?? false
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(value, forKey: .value)
-        try container.encode(sources, forKey: .sources)
-        try container.encode(originNavigationIDs, forKey: .originNavigationIDs)
-        try container.encode(hostStatus, forKey: .hostStatus)
-        try container.encodeIfPresent(coolingUntil, forKey: .coolingUntil)
-        try container.encodeIfPresent(lastProbedAt, forKey: .lastProbedAt)
-        try container.encodeIfPresent(lastVerifiedAt, forKey: .lastVerifiedAt)
-        try container.encodeIfPresent(lastSucceededAt, forKey: .lastSucceededAt)
-        try container.encode(isStandby, forKey: .isStandby)
-        try container.encode(navigationStatus, forKey: .navigationStatus)
-        try container.encode(consecutiveFailures, forKey: .consecutiveFailures)
-        try container.encodeIfPresent(navigationCoolingUntil, forKey: .navigationCoolingUntil)
-        try container.encodeIfPresent(frozenUntil, forKey: .frozenUntil)
-        try container.encode(isDisabled, forKey: .isDisabled)
+    public var normalizedKey: String {
+        SiteSettings.canonicalHostKey(value)
     }
 }
 
-/// 站点入口设置的持久化快照。
+/// 站点入口设置的持久化快照（手动模式）。
 public struct SiteSettings: Codable, Equatable, Sendable {
     public init(
-        navigationURLs: [SiteEntry] = [],
+        navigationURL: String = "https://192.2.245.225",
         hosts: [SiteEntry] = [],
-        currentNavigationID: UUID? = nil,
-        currentHostID: UUID? = nil,
-        autoSwitchHost: Bool = true,
-        verificationStartTier: VerificationStartTier = .second,
-        hostCooldownSeconds: Int = 300,
-        navigationHostLimit: Int = 9,
-        standbyTTLSeconds: Int = 900
+        currentHostID: UUID? = nil
     ) {
-        self.navigationURLs = navigationURLs
+        self.navigationURL = navigationURL
         self.hosts = hosts
-        self.currentNavigationID = currentNavigationID
         self.currentHostID = currentHostID
-        self.autoSwitchHost = autoSwitchHost
-        self.verificationStartTier = verificationStartTier
-        self.hostCooldownSeconds = hostCooldownSeconds
-        self.navigationHostLimit = navigationHostLimit
-        self.standbyTTLSeconds = standbyTTLSeconds
         normalize()
     }
 
-    public var navigationURLs: [SiteEntry]
+    public var navigationURL: String
     public var hosts: [SiteEntry]
-    public var currentNavigationID: UUID?
     public var currentHostID: UUID?
-    public var autoSwitchHost: Bool
-    public var verificationStartTier: VerificationStartTier
-    public var hostCooldownSeconds: Int
-    public var navigationHostLimit: Int
-    public var standbyTTLSeconds: Int
 
     private enum CodingKeys: String, CodingKey {
-        case navigationURLs
+        case navigationURL
         case hosts
-        case currentNavigationID
         case currentHostID
-        case autoSwitchHost
-        case verificationStartTier
-        case hostCooldownSeconds
-        case navigationHostLimit
-        case standbyTTLSeconds
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        navigationURLs = try container.decodeIfPresent([SiteEntry].self, forKey: .navigationURLs) ?? []
+        navigationURL = try container.decodeIfPresent(String.self, forKey: .navigationURL)
+            ?? "https://192.2.245.225"
         hosts = try container.decodeIfPresent([SiteEntry].self, forKey: .hosts) ?? []
-        currentNavigationID = try container.decodeIfPresent(UUID.self, forKey: .currentNavigationID)
         currentHostID = try container.decodeIfPresent(UUID.self, forKey: .currentHostID)
-        autoSwitchHost = try container.decodeIfPresent(Bool.self, forKey: .autoSwitchHost) ?? true
-        verificationStartTier = try container.decodeIfPresent(
-            VerificationStartTier.self,
-            forKey: .verificationStartTier
-        ) ?? .second
-        hostCooldownSeconds = try container.decodeIfPresent(
-            Int.self,
-            forKey: .hostCooldownSeconds
-        ) ?? 300
-        navigationHostLimit = try container.decodeIfPresent(
-            Int.self,
-            forKey: .navigationHostLimit
-        ) ?? 9
-        standbyTTLSeconds = try container.decodeIfPresent(
-            Int.self,
-            forKey: .standbyTTLSeconds
-        ) ?? 900
         normalize()
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(navigationURLs, forKey: .navigationURLs)
+        try container.encode(navigationURL, forKey: .navigationURL)
         try container.encode(hosts, forKey: .hosts)
-        try container.encodeIfPresent(currentNavigationID, forKey: .currentNavigationID)
         try container.encodeIfPresent(currentHostID, forKey: .currentHostID)
-        try container.encode(autoSwitchHost, forKey: .autoSwitchHost)
-        try container.encode(verificationStartTier, forKey: .verificationStartTier)
-        try container.encode(hostCooldownSeconds, forKey: .hostCooldownSeconds)
-        try container.encode(navigationHostLimit, forKey: .navigationHostLimit)
-        try container.encode(standbyTTLSeconds, forKey: .standbyTTLSeconds)
     }
 
-    public var currentNavigationURL: String? {
-        navigationURLs.first { $0.id == currentNavigationID }?.value
+    public var currentHost: SiteEntry? {
+        hosts.first { $0.id == currentHostID }
     }
 
-    public var currentHost: String? {
-        hosts.first { $0.id == currentHostID }?.value
+    public var currentHostValue: String? {
+        currentHost?.value
     }
 
-    /// 用户来源优先；重叠 host 同时出现在两组里供 UI 标记。
-    public var userHosts: [SiteEntry] {
-        hosts.filter(\.isUserHost)
-    }
-
-    public var navigationHosts: [SiteEntry] {
-        hosts.filter(\.isNavigationHost)
-    }
-
-    /// 首次启动时的默认值：只从已有站点配置和环境变量读取。
     public static var `default`: SiteSettings {
-        let hostValues = SiteConfig.mirrors.isEmpty
-            ? [SiteConfig.default.host]
-            : SiteConfig.mirrors
-        let hosts = hostValues.map { SiteEntry(value: $0, source: .user) }
-        let navigationValues = environmentNavigationURLs()
-        let navigationURLs = navigationValues.map { SiteEntry(value: $0, source: .user) }
+        SiteSettings()
+    }
 
-        return SiteSettings(
-            navigationURLs: navigationURLs,
-            hosts: hosts,
-            currentNavigationID: navigationURLs.first?.id,
-            currentHostID: hosts.first?.id
-        )
+    /// 去重互斥：同一 host 只保留一条；无选中时回落到第一条。
+    public mutating func normalize() {
+        var seen = Set<String>()
+        hosts = hosts.filter { seen.insert($0.normalizedKey).inserted }
+        if currentHostID == nil || !hosts.contains(where: { $0.id == currentHostID }) {
+            currentHostID = hosts.first?.id
+        }
+    }
+
+    public mutating func upsertHost(_ rawValue: String, isFromNavigation: Bool) {
+        let key = SiteSettings.canonicalHostKey(rawValue)
+        guard !key.isEmpty else { return }
+        if let index = hosts.firstIndex(where: { $0.normalizedKey == key }) {
+            if isFromNavigation {
+                hosts[index].isFromNavigation = true
+            }
+        } else {
+            hosts.append(SiteEntry(value: rawValue, isFromNavigation: isFromNavigation))
+        }
+        normalize()
+    }
+
+    public static func canonicalHostKey(_ raw: String) -> String {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while value.hasSuffix("/") {
+            value.removeLast()
+        }
+        guard !value.isEmpty else { return "" }
+        if !value.contains("://") {
+            value = "https://" + value
+        }
+        guard let components = URLComponents(string: value),
+              let host = components.host?.lowercased()
+        else {
+            return value.lowercased()
+        }
+        let scheme = (components.scheme ?? "https").lowercased()
+        let defaultPort = scheme == "https" ? 443 : 80
+        guard let port = components.port, port != defaultPort else {
+            return "\(scheme)://\(host)"
+        }
+        return "\(scheme)://\(host):\(port)"
     }
 }
 
@@ -296,7 +120,6 @@ public struct SiteSettings: Codable, Equatable, Sendable {
 struct SiteStore: Sendable {
     var load: @Sendable () async -> SiteSettings
     var save: @Sendable (SiteSettings) async -> Void
-    var recordHost: @Sendable (String) async -> Void
 }
 
 extension DependencyValues {
@@ -308,28 +131,12 @@ extension DependencyValues {
     private enum SiteStoreKey: DependencyKey {
         static let liveValue = SiteStore(
             load: { await SiteStorePersistence.shared.load() },
-            save: { settings in await SiteStorePersistence.shared.save(settings) },
-            recordHost: { host in await SiteStorePersistence.shared.recordHost(host) }
+            save: { await SiteStorePersistence.shared.save($0) }
         )
 
         static let testValue = SiteStore(
             load: { .default },
-            save: { _ in },
-            recordHost: { _ in }
+            save: { _ in }
         )
     }
-}
-
-/// 首次启动时从环境变量读取导航网址（仅 DEBUG）。
-/// 放在 `SiteStore.swift` 而不是归一化扩展里：`SiteSettings.default` 要用它，
-/// 而扩展里的 `private` 只在扩展所在文件可见。
-private func environmentNavigationURLs() -> [String] {
-    #if DEBUG
-    if let env = ProcessInfo.processInfo.environment["SITE_NAVIGATION_URLS"] {
-        if !env.isEmpty {
-            return env.components(separatedBy: ",").filter { !$0.isEmpty }
-        }
-    }
-    #endif
-    return []
 }

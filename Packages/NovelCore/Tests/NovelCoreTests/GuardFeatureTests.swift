@@ -16,25 +16,31 @@ final class GuardFeatureTests: XCTestCase {
         }
     }
 
-    func test自动验证成功后关闭覆盖层() async {
+    func test请求到达时直接弹出手动验证() async {
         let request = GuardRequest(siteURL: "https://example.com/")
-        let recorder = Recorder()
         let store = TestStore(initialState: GuardFeature.State()) {
             GuardFeature()
+        }
+
+        await store.send(.requested(request)) {
+            $0.request = request
+        }
+        await store.finish()
+    }
+
+    func test手动完成后resolve为true并关闭弹窗() async {
+        let request = GuardRequest(siteURL: "https://example.com/")
+        let recorder = Recorder()
+        let store = TestStore(initialState: GuardFeature.State(request: request)) {
+            GuardFeature()
         } withDependencies: {
-            $0.guardService.autoPass = { _ in true }
             $0.guardService.resolve = { id, passed in
                 await recorder.record(id, passed: passed)
             }
         }
 
-        await store.send(.requested(request)) {
-            $0.request = request
-            $0.phase = .autoPassing
-        }
-        await store.receive(.autoPassSucceeded) {
+        await store.send(.manualCompleted) {
             $0.request = nil
-            $0.phase = .idle
         }
         await store.finish()
 
@@ -42,48 +48,23 @@ final class GuardFeatureTests: XCTestCase {
         XCTAssertEqual(values.map(\.1), [true])
     }
 
-    func test自动验证失败后进入手动并可取消() async {
+    func test取消后resolve为false并关闭弹窗() async {
         let request = GuardRequest(siteURL: "https://example.com/")
         let recorder = Recorder()
-        let store = TestStore(initialState: GuardFeature.State()) {
+        let store = TestStore(initialState: GuardFeature.State(request: request)) {
             GuardFeature()
         } withDependencies: {
-            $0.guardService.autoPass = { _ in false }
             $0.guardService.resolve = { id, passed in
                 await recorder.record(id, passed: passed)
             }
         }
 
-        await store.send(.requested(request)) {
-            $0.request = request
-            $0.phase = .autoPassing
-        }
-        await store.receive(.autoPassFailed) {
-            $0.phase = .manual
-            $0.message = "自动验证未通过，请手动拖动滑块。"
-        }
         await store.send(.cancelled) {
             $0.request = nil
-            $0.phase = .idle
-            $0.message = nil
         }
         await store.finish()
 
         let values = await recorder.values()
         XCTAssertEqual(values.map(\.1), [false])
-    }
-
-    func test自动验证中可切手动() async {
-        let request = GuardRequest(siteURL: "https://example.com/")
-        let store = TestStore(
-            initialState: GuardFeature.State(request: request, phase: .autoPassing)
-        ) {
-            GuardFeature()
-        }
-
-        await store.send(.switchToManual) {
-            $0.phase = .manual
-        }
-        await store.finish()
     }
 }

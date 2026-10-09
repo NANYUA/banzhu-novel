@@ -3,7 +3,10 @@ import Dependencies
 import Foundation
 import NovelEngine
 
-/// 站点入口管理：导航网址、host、当前项与自动切换开关。
+/// 站点入口管理（手动模式）：
+/// - 只能点「拉取」按钮从导航地址拉 host，不自动拉取。
+/// - 拉到的与手填的 host 在同一列表，按规范化 key 去重互斥。
+/// - 始终使用用户选中的 host，不自动切换。
 public struct SiteFeature: Reducer {
     public init() {}
 
@@ -11,34 +14,39 @@ public struct SiteFeature: Reducer {
         public init(
             settings: SiteSettings = .default,
             isLoading: Bool = false,
+            isFetchingNavigation: Bool = false,
+            discoveredHosts: [SiteEntry] = [],
+            isHostListExpanded: Bool = true,
             notice: String? = nil
         ) {
             self.settings = settings
             self.isLoading = isLoading
+            self.isFetchingNavigation = isFetchingNavigation
+            self.discoveredHosts = discoveredHosts
+            self.isHostListExpanded = isHostListExpanded
             self.notice = notice
         }
 
         public var settings: SiteSettings
-        public var isLoading: Bool
+        public var isLoading = false
+        public var isFetchingNavigation = false
+        /// 最近一次按钮拉取的结果（用于「本次发现」高亮与空结果提示）。
+        public var discoveredHosts: [SiteEntry]
+        public var isHostListExpanded = true
         public var notice: String?
     }
 
     public enum Action: Equatable {
         case task
         case loaded(SiteSettings)
-        case addNavigationURL(String)
-        case deleteNavigationURL(UUID)
-        case selectNavigationURL(UUID)
+        case setNavigationURL(String)
+        case fetchNavigationTapped
+        case navigationSucceeded([SiteEntry])
+        case navigationFailed(String)
+        case toggleHostList
         case addHost(String)
         case deleteHost(UUID)
         case selectHost(UUID)
-        case setAutoSwitch(Bool)
-        case setVerificationStartTier(VerificationStartTier)
-        case setHostCooldown(Int)
-        case setNavigationHostLimit(Int)
-        case setStandbyTTL(Int)
-        case setNavigationDisabled(UUID, Bool)
-        case reloadNavigation(UUID)
         case failed(String)
         case noticeDismissed
     }
@@ -61,31 +69,50 @@ public struct SiteFeature: Reducer {
             case let .loaded(settings):
                 state.settings = settings
                 state.isLoading = false
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
+                return configure(state.settings, router: siteRouter)
 
-            case let .addNavigationURL(value):
+            case let .setNavigationURL(value):
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
-                    state.notice = "导航网址不能为空。"
+                    state.notice = "导航地址不能为空。"
                     return .none
                 }
-                let entry = SiteEntry(value: trimmed, source: .user)
-                state.settings.navigationURLs.append(entry)
-                state.settings.currentNavigationID = entry.id
-                state.settings.normalize()
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
+                state.settings.navigationURL = trimmed
+                return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
 
-            case let .deleteNavigationURL(id):
-                state.settings.navigationURLs.removeAll { $0.id == id }
-                state.settings.normalize()
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .selectNavigationURL(id):
-                guard state.settings.navigationURLs.contains(where: { $0.id == id }) else {
-                    return .none
+            case .fetchNavigationTapped:
+                guard !state.isFetchingNavigation else { return .none }
+                state.isFetchingNavigation = true
+                state.notice = nil
+                let navURL = state.settings.navigationURL
+                return .run { send in
+                    do {
+                        let hosts = try await NovelEngine.shared.resolveCandidates(fromNav: navURL)
+                        await send(.navigationSucceeded(
+                            hosts.map { SiteEntry(value: $0, isFromNavigation: true) }
+                        ))
+                    } catch {
+                        await send(.navigationFailed(error.localizedDescription))
+                    }
                 }
-                state.settings.currentNavigationID = id
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
+
+            case let .navigationSucceeded(entries):
+                state.isFetchingNavigation = false
+                for entry in entries {
+                    state.settings.upsertHost(entry.value, isFromNavigation: true)
+                }
+                state.discoveredHosts = entries
+                state.isHostListExpanded = true
+                return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
+
+            case let .navigationFailed(message):
+                state.isFetchingNavigation = false
+                state.notice = "拉取失败：\(message)"
+                return .none
+
+            case .toggleHostList:
+                state.isHostListExpanded.toggle()
+                return .none
 
             case let .addHost(value):
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -93,58 +120,20 @@ public struct SiteFeature: Reducer {
                     state.notice = "host 不能为空。"
                     return .none
                 }
-                let entry = SiteEntry(value: trimmed)
-                state.settings.hosts.append(entry)
-                state.settings.currentHostID = entry.id
-                state.settings.normalize()
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
+                state.settings.upsertHost(trimmed, isFromNavigation: false)
+                return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
 
             case let .deleteHost(id):
-                if let index = state.settings.hosts.firstIndex(where: { $0.id == id }) {
-                    if state.settings.hosts[index].isNavigationHost {
-                        state.settings.hosts[index].sources.remove(.user)
-                    } else {
-                        state.settings.hosts.remove(at: index)
-                    }
-                }
+                state.settings.hosts.removeAll { $0.id == id }
                 state.settings.normalize()
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
+                return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
 
             case let .selectHost(id):
                 guard state.settings.hosts.contains(where: { $0.id == id }) else {
                     return .none
                 }
                 state.settings.currentHostID = id
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .setAutoSwitch(enabled):
-                state.settings.autoSwitchHost = enabled
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .setVerificationStartTier(tier):
-                state.settings.verificationStartTier = tier
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .setHostCooldown(seconds):
-                state.settings.hostCooldownSeconds = max(0, seconds)
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .setNavigationHostLimit(limit):
-                state.settings.navigationHostLimit = max(1, limit)
-                state.settings.normalize()
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .setStandbyTTL(seconds):
-                state.settings.standbyTTLSeconds = max(0, seconds)
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .setNavigationDisabled(id, disabled):
-                state.settings.setNavigationDisabled(id: id, disabled: disabled)
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
-
-            case let .reloadNavigation(id):
-                state.settings.resetNavigationFailure(id: id)
-                return configureAndSave(state.settings, store: siteStore, router: siteRouter)
+                return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
 
             case let .failed(message):
                 state.isLoading = false
@@ -159,7 +148,7 @@ public struct SiteFeature: Reducer {
     }
 }
 
-/// 把持久化设置同步给引擎。
+/// 把持久化设置同步给引擎（手动模式：只有当前 host + 弹窗回调）。
 struct SiteRouter: Sendable {
     var configure: @Sendable (SiteSettings) async -> Void
 }
@@ -174,77 +163,28 @@ extension DependencyValues {
         static let liveValue = SiteRouter { settings in
             await NovelEngine.shared.configureRouting(
                 SiteRoutingConfiguration(
-                    hosts: settings.hosts.map(\.value),
-                    navigationURLs: settings.navigationURLs.map(\.value),
-                    autoSwitchHost: settings.autoSwitchHost,
-                    verificationStartTier: settings.verificationStartTier,
-                    currentHost: settings.currentHost,
-                    hostStates: settings.hosts.map { entry in
-                        HostRouteState(
-                            value: entry.value,
-                            status: Self.mapHostStatus(entry.hostStatus),
-                            coolingUntil: entry.coolingUntil,
-                            lastSucceededAt: entry.lastSucceededAt,
-                            isUser: entry.isUserHost,
-                            isStandby: entry.isStandby
-                        )
-                    },
-                    navigationStates: Dictionary(
-                        uniqueKeysWithValues: settings.navigationURLs.map { entry in
-                            (
-                                entry.value,
-                                Self.mapNavigationStatus(entry.resolvedNavigationStatus())
-                            )
-                        }
-                    ),
-                    hostCooldownSeconds: settings.hostCooldownSeconds,
-                    standbyTTLSeconds: settings.standbyTTLSeconds,
+                    host: settings.currentHostValue ?? "",
                     guardPass: { url in
                         await GuardCoordinator.shared.requestPass(siteURL: url)
-                    },
-                    onHostChanged: { host in
-                        Task { await SiteStorePersistence.shared.recordHost(host) }
-                    },
-                    onHostStateChanged: { update in
-                        Task { await SiteStorePersistence.shared.updateHostState(update) }
-                    },
-                    onNavigationOutcome: { url, outcome in
-                        Task {
-                            await SiteStorePersistence.shared.recordNavigationOutcome(
-                                url: url,
-                                outcome: outcome
-                            )
-                        }
                     }
                 )
             )
         }
 
         static let testValue = SiteRouter { _ in }
-
-        private static func mapHostStatus(_ status: HostStatus) -> RouteHostStatus {
-            switch status {
-            case .unknown: .unknown
-            case .unguarded: .unguarded
-            case .guarded: .guarded
-            case .unavailable: .unavailable
-            }
-        }
-
-        private static func mapNavigationStatus(
-            _ status: NavigationStatus
-        ) -> RouteNavigationStatus {
-            switch status {
-            case .active: .active
-            case .cooling: .cooling
-            case .frozen: .frozen
-            case .disabled: .disabled
-            }
-        }
     }
 }
 
-private func configureAndSave(
+private func configure(
+    _ settings: SiteSettings,
+    router: SiteRouter
+) -> Effect<SiteFeature.Action> {
+    .run { _ in
+        await router.configure(settings)
+    }
+}
+
+private func saveAndConfigure(
     _ settings: SiteSettings,
     store: SiteStore,
     router: SiteRouter

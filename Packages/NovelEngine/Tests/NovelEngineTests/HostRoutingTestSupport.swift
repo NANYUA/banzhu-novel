@@ -25,6 +25,7 @@ actor FakeTransport: NetworkTransport {
     }
 }
 
+/// 手动验证门的测试桩：consumePass 返回当前是否应放行，markPassed 记录弹窗回调。
 actor GuardGate {
     private var didPass = false
     private var count = 0
