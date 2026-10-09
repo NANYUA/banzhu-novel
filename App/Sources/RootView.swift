@@ -34,9 +34,18 @@ struct RootView: View {
                         Label("书架", systemImage: "books.vertical")
                     }
 
-                SearchView(store: searchStore, downloadStore: downloadStore) { row in
-                    bookshelfStore.send(.addSucceeded(row))
-                }
+                SearchView(
+                    store: searchStore,
+                    downloadStore: downloadStore,
+                    onBookAdded: { row in
+                        bookshelfStore.send(.addSucceeded(row))
+                    },
+                    onBookRemoved: { bookPath in
+                        // 详情页（从搜索进入）移出书架后，书架列表也要立刻摘掉这一行。
+                        // 复用书架批量删除的完成 action，不新造单本移除的状态迁移。
+                        bookshelfStore.send(.booksDeleted([bookPath]))
+                    }
+                )
                 .tabItem {
                     Label("搜索", systemImage: "magnifyingglass")
                 }

@@ -170,7 +170,7 @@ final class SearchFeatureTests: XCTestCase {
         await store.finish()
     }
 
-    func test加入失败清除该书加载态并显示人话提示() async {
+    func test加入时发现已在书架则切到已加入并显示人话提示() async {
         let store = TestStore(initialState: SearchFeature.State(results: [Self.book])) {
             SearchFeature()
         } withDependencies: {
@@ -182,8 +182,14 @@ final class SearchFeatureTests: XCTestCase {
         await store.send(.addRequested(Self.book)) {
             $0.addingPaths = [Self.book.path]
         }
-        await store.receive(.addFailed(bookPath: Self.book.path, message: "《示例书》已经在书架里了。")) {
+        await store.receive(.addFailed(
+            bookPath: Self.book.path,
+            message: "《示例书》已经在书架里了。",
+            alreadyExists: true
+        )) {
             $0.addingPaths = []
+            // 🔴 已经在书架里 == 该行状态就是「已加入」，不能停在「加入书架」等用户反复点。
+            $0.addedPaths = [Self.book.path]
             $0.notice = "《示例书》已经在书架里了。"
         }
         await store.finish()
@@ -203,11 +209,29 @@ final class SearchFeatureTests: XCTestCase {
         await store.send(
             .addFailed(
                 bookPath: Self.book.path,
-                message: "《示例书》已经在书架里了。"
+                message: "《示例书》已经在书架里了。",
+                alreadyExists: false
             )
         ) {
             $0.addingPaths = [otherBook.path]
             $0.notice = "《示例书》已经在书架里了。"
+        }
+        await store.finish()
+    }
+
+    func test详情页移出书架后不再显示已加入() async {
+        let store = TestStore(
+            initialState: SearchFeature.State(
+                results: [Self.book],
+                addedPaths: [Self.book.path]
+            )
+        ) {
+            SearchFeature()
+        }
+
+        await store.send(.removedFromShelf(bookPath: Self.book.path)) {
+            // 不取消「已加入」的话，该行既显示「已加入」又挡住「加入书架」，用户没路可走。
+            $0.addedPaths = []
         }
         await store.finish()
     }

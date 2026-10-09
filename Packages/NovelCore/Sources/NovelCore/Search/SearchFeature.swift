@@ -100,8 +100,11 @@ public struct SearchFeature: Reducer {
         case addRequested(Book)
         /// 加入成功。
         case addSucceeded(ShelfRow)
-        /// 加入失败。
-        case addFailed(bookPath: String, message: String)
+        /// 加入失败。`alreadyExists` 为 `true` 表示失败原因是「这本书已在书架里」——
+        /// 界面要据此把该行切到「已加入」，而不是留在「加入书架」让用户反复点。
+        case addFailed(bookPath: String, message: String, alreadyExists: Bool)
+        /// 详情页把这本书移出书架，搜索结果要同步取消「已加入」状态。
+        case removedFromShelf(bookPath: String)
         /// 关闭提示。
         case noticeDismissed
     }
@@ -193,8 +196,24 @@ public struct SearchFeature: Reducer {
                     do {
                         let row = try await adder.add(book)
                         await send(.addSucceeded(row))
+                    } catch let error as ShelfAdderError {
+                        // 🔴 单独识别「已在书架」：用户点「加入书架」时这本书可能早就加过了
+                        // （上一次启动加的），提示之外还得把按钮切成「已加入」。
+                        // 显式 switch 而非 `if case`：`ShelfAdderError` 将来加 case 时这里会编译报错。
+                        switch error {
+                        case .alreadyExists:
+                            await send(.addFailed(
+                                bookPath: book.path,
+                                message: error.localizedDescription,
+                                alreadyExists: true
+                            ))
+                        }
                     } catch {
-                        await send(.addFailed(bookPath: book.path, message: error.localizedDescription))
+                        await send(.addFailed(
+                            bookPath: book.path,
+                            message: error.localizedDescription,
+                            alreadyExists: false
+                        ))
                     }
                 }
 
@@ -205,9 +224,18 @@ public struct SearchFeature: Reducer {
                 state.lastAddedRow = row
                 return .none
 
-            case let .addFailed(bookPath, message):
+            case let .addFailed(bookPath, message, alreadyExists):
                 state.addingPaths.remove(bookPath)
+                // 已经在书架里 == 状态其实是「已加入」，顺手把该行切对。
+                if alreadyExists {
+                    state.addedPaths.insert(bookPath)
+                }
                 state.notice = message
+                return .none
+
+            case let .removedFromShelf(bookPath):
+                // 详情页移出书架后，搜索结果不能继续显示「已加入」并挡住「加入书架」。
+                state.addedPaths.remove(bookPath)
                 return .none
 
             case .noticeDismissed:

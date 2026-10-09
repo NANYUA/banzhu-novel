@@ -77,7 +77,13 @@ struct BookshelfView: View {
                         BookDetailView(
                             bookPath: row.bookPath,
                             title: row.title,
-                            downloadStore: downloadStore
+                            downloadStore: downloadStore,
+                            // 详情页里移出 / 重新加入书架后，书架列表立刻跟上，
+                            // 不依赖「返回时重拉一次」这种时序假设。
+                            onAddedToShelf: { added in viewStore.send(.addSucceeded(added)) },
+                            onRemovedFromShelf: { bookPath in
+                                viewStore.send(.booksDeleted([bookPath]))
+                            }
                         )
                     }
                 }

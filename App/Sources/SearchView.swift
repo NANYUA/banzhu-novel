@@ -10,15 +10,24 @@ struct SearchView: View {
     let store: StoreOf<SearchFeature>
     let downloadStore: StoreOf<DownloadFeature>
     let onBookAdded: (ShelfRow) -> Void
+    let onBookRemoved: (String) -> Void
+
+    /// 详情页 push 目标。与书架页一致用**显式 push** 而不是 `NavigationLink`：
+    /// `List` 行里的 `NavigationLink` 会把整行接管成跳转目标（行尾的「加入书架」
+    /// 按钮因此被吞掉，这正是 B0-5「看不到按钮」的成因）。
+    @State private var detailBook: Book?
+    @State private var isShowingDetail = false
 
     init(
         store: StoreOf<SearchFeature>,
         downloadStore: StoreOf<DownloadFeature>,
-        onBookAdded: @escaping (ShelfRow) -> Void = { _ in }
+        onBookAdded: @escaping (ShelfRow) -> Void = { _ in },
+        onBookRemoved: @escaping (String) -> Void = { _ in }
     ) {
         self.store = store
         self.downloadStore = downloadStore
         self.onBookAdded = onBookAdded
+        self.onBookRemoved = onBookRemoved
     }
 
     var body: some View {
@@ -31,6 +40,26 @@ struct SearchView: View {
                 .navigationTitle("搜索")
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     noticeBanner(viewStore)
+                }
+                .navigationDestination(isPresented: $isShowingDetail) {
+                    if let book = detailBook {
+                        BookDetailView(
+                            book: book,
+                            downloadStore: downloadStore,
+                            onAddedToShelf: { row in
+                                viewStore.send(.addSucceeded(row))
+                                // 详情页加入也走同一条同步路径。这里直接回调一次是必要的：
+                                // 「移出书架再当场加回来」时 `lastAddedRow` 没有变化，
+                                // 上面那个 onChange 不会再触发。重复一次不会插重复行
+                                // —— `BookshelfFeature.addSucceeded` 按 bookPath 去重。
+                                onBookAdded(row)
+                            },
+                            onRemovedFromShelf: { bookPath in
+                                viewStore.send(.removedFromShelf(bookPath: bookPath))
+                                onBookRemoved(bookPath)
+                            }
+                        )
+                    }
                 }
                 .onChange(of: viewStore.lastAddedRow) { _, row in
                     if let row {
@@ -137,10 +166,12 @@ struct SearchView: View {
                     book: book,
                     isAdding: viewStore.addingPaths.contains(book.path),
                     isAdded: viewStore.addedPaths.contains(book.path),
-                    downloadStore: downloadStore
-                ) {
-                    viewStore.send(.addRequested(book))
-                }
+                    onOpen: {
+                        detailBook = book
+                        isShowingDetail = true
+                    },
+                    onAdd: { viewStore.send(.addRequested(book)) }
+                )
                 .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
             }
 
@@ -203,14 +234,14 @@ private struct SearchResultRow: View {
     let book: Book
     let isAdding: Bool
     let isAdded: Bool
-    let downloadStore: StoreOf<DownloadFeature>
+    let onOpen: () -> Void
     let onAdd: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            NavigationLink {
-                BookDetailView(book: book, downloadStore: downloadStore)
-            } label: {
+            // 🔴 整卡跳详情用 `Button` + 外层显式 push，不用 `NavigationLink`：
+            // List 行里的 NavigationLink 会接管整行，行尾的「加入书架」会被一起吞掉。
+            Button(action: onOpen) {
                 HStack(spacing: 12) {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color(.tertiarySystemBackground))
@@ -248,29 +279,43 @@ private struct SearchResultRow: View {
             }
             .buttonStyle(PressableCardButtonStyle())
 
-            if isAdded {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.green)
-                    .accessibilityLabel("已加入书架")
-            } else {
-                Button(action: onAdd) {
-                    if isAdding {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "plus.circle")
-                            .font(.title3)
-                    }
-                }
-                .buttonStyle(.borderless)
-                .disabled(isAdding)
-                .accessibilityLabel("加入书架：\(book.title)")
-            }
+            shelfAction
         }
         .padding(12)
         .contentShape(Rectangle())
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// 「加入书架」入口。
+    ///
+    /// 未加入 = 带文字的次级按钮（`bordered`），命中区按 HIG 补到 44pt；
+    /// 已加入 = 绿色 checkmark + 文字状态，一眼可辨，且不再重复发加书请求。
+    @ViewBuilder
+    private var shelfAction: some View {
+        if isAdded {
+            Label("已加入", systemImage: "checkmark.circle.fill")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.green)
+                .frame(minHeight: 44)
+                .accessibilityLabel("已在书架")
+        } else {
+            Button(action: onAdd) {
+                if isAdding {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(minHeight: 44)
+                } else {
+                    Label("加入书架", systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        // 命中区补到 44pt：`.frame` 必须落在 label 上，
+                        // 套在 Button 外面只是撑开布局，不会扩大真正的点击区域。
+                        .frame(minHeight: 44)
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isAdding)
+            .accessibilityLabel("加入书架：\(book.title)")
+        }
     }
 }
 
