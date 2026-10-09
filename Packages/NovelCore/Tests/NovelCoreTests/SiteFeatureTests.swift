@@ -7,7 +7,7 @@ import XCTest
 final class SiteFeatureTests: XCTestCase {
     func test拉取成功合并进列表且互斥去重() async {
         var settings = SiteSettings(
-            navigationURL: "https://192.2.245.225",
+            navigationURL: "https://example.com",
             hosts: [SiteEntry(value: "https://mirror001.com")]
         )
         let keptID = settings.hosts[0].id
@@ -77,7 +77,7 @@ final class SiteFeatureTests: XCTestCase {
 
     func test设置JSON往返保留导航地址与host() throws {
         var settings = SiteSettings(
-            navigationURL: "https://192.2.245.225",
+            navigationURL: "https://example.com",
             hosts: [
                 SiteEntry(value: "https://one.example"),
                 SiteEntry(value: "https://two.example", isFromNavigation: true),
@@ -90,7 +90,7 @@ final class SiteFeatureTests: XCTestCase {
         let decoded = try JSONDecoder().decode(SiteSettings.self, from: data)
 
         XCTAssertEqual(decoded, settings)
-        XCTAssertEqual(decoded.navigationURL, "https://192.2.245.225")
+        XCTAssertEqual(decoded.navigationURL, "https://example.com")
         XCTAssertEqual(decoded.hosts.count, 2)
     }
 

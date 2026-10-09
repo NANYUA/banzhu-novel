@@ -65,8 +65,9 @@ public actor NovelEngine {
 
     /// 从导航页抓取所有候选域名。只做一次请求，不缓存、不自动探索。
     public func resolveCandidates(fromNav navURL: String) async throws -> [String] {
-        guard let url = URL(string: navURL) else { throw NetworkError.badResponse }
-        let html = try await perform(url: url, body: nil)
+        let normalizedNav = SiteRoutingConfiguration.normalizedHost(navURL)
+        guard let url = URL(string: normalizedNav) else { throw NetworkError.badResponse }
+        let html = try await performWithGuard(url: url, body: nil)
         let patterns = SiteConfig.mirrorPatterns
         var found: [String] = []
         var seen = Set<String>()
@@ -140,6 +141,11 @@ public actor NovelEngine {
 
     private func fetch(path: String, body: String?) async throws -> String {
         guard let url = config.url(path) else { throw NetworkError.badResponse }
+        return try await performWithGuard(url: url, body: body)
+    }
+
+    /// 一次带验证兜底的请求：遇盾时通过 `guardPass` 弹窗，由用户手动完成后再重放一次。
+    private func performWithGuard(url: URL, body: String?) async throws -> String {
         do {
             return try await perform(url: url, body: body)
         } catch let error as NetworkError {

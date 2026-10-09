@@ -23,6 +23,17 @@ public struct SiteConfig: Codable, Equatable {
         SiteConfig(host: mirrors.first ?? "https://example.com")
     }
 
+    /// 导航地址（拉取 host 用）。从环境变量读取，未设置时用 example.com 占位。
+    public static var navigationURL: String {
+        #if DEBUG
+        if let env = ProcessInfo.processInfo.environment["SITE_NAVIGATION_URL"],
+           !env.isEmpty {
+            return env
+        }
+        #endif
+        return "https://example.com"
+    }
+
     /// 移动端 User-Agent。
     /// 从环境变量读取，未设置时用通用移动 UA。
     public static var userAgent: String {

@@ -22,6 +22,7 @@ struct PageTextView: UIViewRepresentable {
         textView.isSelectable = false
         textView.showsVerticalScrollIndicator = false
         textView.alwaysBounceVertical = true
+        textView.contentInsetAdjustmentBehavior = .never
         textView.textContainer.lineFragmentPadding = 0
         textView.delegate = context.coordinator
         return textView

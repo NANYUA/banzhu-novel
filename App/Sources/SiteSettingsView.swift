@@ -32,7 +32,7 @@ struct SiteSettingsView: View {
     ) -> some View {
         Section("导航地址") {
             TextField(
-                "https://192.2.245.225",
+                "https://example.com",
                 text: Binding(
                     get: { viewStore.settings.navigationURL },
                     set: { viewStore.send(.setNavigationURL($0)) }

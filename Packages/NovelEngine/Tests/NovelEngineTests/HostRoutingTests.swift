@@ -90,4 +90,47 @@ final class HostRoutingTests: XCTestCase {
 
         XCTAssertEqual(hosts, ["https://mirror001.com", "https://mirror002.com"])
     }
+
+    func test导航地址无协议时自动补https() async throws {
+        let transport = FakeTransport { url in
+            if url.absoluteString == "https://example.com" {
+                return "<a href=\"https://mirror001.com\">A</a>"
+            }
+            throw NetworkError.badResponse
+        }
+        let engine = NovelEngine(network: transport)
+
+        let discovered = try await engine.resolveCandidates(fromNav: "example.com")
+
+        XCTAssertEqual(discovered, ["https://mirror001.com"])
+        let requested = await transport.requestedHosts()
+        XCTAssertEqual(requested, ["example.com"])
+    }
+
+    func test导航解析遇到验证时弹窗并重放() async throws {
+        let gate = GuardGate()
+        let transport = FakeTransport { _ in
+            if await gate.consumePass() {
+                return "<a href=\"https://mirror001.com\">A</a>"
+            }
+            throw NetworkError.guarded
+        }
+        let engine = NovelEngine(network: transport)
+        await engine.configureRouting(
+            SiteRoutingConfiguration(
+                host: "https://example.com",
+                guardPass: { url in
+                    guard url.contains("nav.example.com") else { return false }
+                    await gate.markPassed()
+                    return true
+                }
+            )
+        )
+
+        let discovered = try await engine.resolveCandidates(fromNav: "https://nav.example.com")
+
+        XCTAssertEqual(discovered, ["https://mirror001.com"])
+        let passCount = await gate.passCount()
+        XCTAssertEqual(passCount, 1)
+    }
 }

@@ -69,15 +69,23 @@ struct ReaderView: View {
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             GeometryReader { geometry in
+                let contentSize = readerContentSize(
+                    size: geometry.size,
+                    safeAreaInsets: geometry.safeAreaInsets
+                )
                 ZStack {
                     backgroundColor(for: viewStore.config)
                         .ignoresSafeArea()
 
                     readerContent(
                         viewStore,
-                        availableWidth: geometry.size.width,
-                        availableHeight: geometry.size.height
+                        availableWidth: contentSize.width,
+                        availableHeight: contentSize.height
                     )
+                    .padding(.leading, geometry.safeAreaInsets.leading)
+                    .padding(.trailing, geometry.safeAreaInsets.trailing)
+                    .padding(.top, geometry.safeAreaInsets.top)
+                    .padding(.bottom, geometry.safeAreaInsets.bottom)
 
                     if isChromeVisible {
                         readerChrome(viewStore)
@@ -85,14 +93,21 @@ struct ReaderView: View {
                     }
                 }
                 .task {
-                    viewStore.send(.loadSavedSettings(geometry.size))
+                    viewStore.send(.loadSavedSettings(contentSize))
                     viewStore.send(
                         .loadChapterWithName(viewStore.chapterPath, viewStore.chapterName)
                     )
                 }
                 .onChange(of: geometry.size) { _, newSize in
                     // 旋转 / 分屏 / 换机型：把新尺寸交给 reducer 重新分页。
-                    viewStore.send(.containerSizeChanged(newSize))
+                    viewStore.send(
+                        .containerSizeChanged(
+                            readerContentSize(
+                                size: newSize,
+                                safeAreaInsets: geometry.safeAreaInsets
+                            )
+                        )
+                    )
                 }
             }
             .navigationTitle("")
@@ -132,6 +147,17 @@ struct ReaderView: View {
 
 private extension ReaderView {
     // MARK: - 内容
+
+    /// 阅读正文可用的安全区尺寸（全屏减去状态栏 / 灵动岛 / Home Indicator）。
+    private func readerContentSize(
+        size: CGSize,
+        safeAreaInsets: EdgeInsets
+    ) -> CGSize {
+        CGSize(
+            width: max(0, size.width - safeAreaInsets.leading - safeAreaInsets.trailing),
+            height: max(0, size.height - safeAreaInsets.top - safeAreaInsets.bottom)
+        )
+    }
 
     @ViewBuilder
     private func readerContent(
