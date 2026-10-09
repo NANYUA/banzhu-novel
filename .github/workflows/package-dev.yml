@@ -47,26 +47,56 @@ jobs:
           restore-keys: |
             dd-${{ runner.os }}-${{ runner.arch }}-
 
-      # ── 缓存 3：XcodeGen 可执行文件（省掉每次 brew install）───
-      - name: 缓存 XcodeGen
+      # ── 缓存 3：XcodeGen（可执行文件 + SettingPresets）─────────
+      # ⚠️ 只缓存可执行文件会踩坑：XcodeGen 依赖同目录 / share 下的 SettingPresets
+      #    提供 PRODUCT_NAME、PRODUCT_BUNDLE_IDENTIFIER 等默认构建设置。
+      #    presets 缺失时生成的工程产物名会变成空 → 构建报
+      #    `error: Multiple commands produce '.../Release-iphoneos/.app'`。
+      #    因此这里按 brew 的目录布局连 presets 一起缓存，并在生成前校验存在。
+      - name: 缓存 XcodeGen（含 SettingPresets）
         id: xcodegen-cache
         uses: actions/cache@v4
         with:
-          path: ~/.cache/xcodegen-bin/xcodegen
-          key: xcodegen-${{ runner.os }}-${{ runner.arch }}-v1
+          path: ~/.cache/xcodegen
+          key: xcodegen-${{ runner.os }}-${{ runner.arch }}-v2
 
       - name: 安装 XcodeGen（仅缓存未命中时）
         if: steps.xcodegen-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           brew install xcodegen
-          mkdir -p "$HOME/.cache/xcodegen-bin"
-          cp "$(command -v xcodegen)" "$HOME/.cache/xcodegen-bin/xcodegen"
-          chmod +x "$HOME/.cache/xcodegen-bin/xcodegen"
+          real="$(readlink -f "$(command -v xcodegen)")"
+          prefix="$(brew --prefix xcodegen)"
+          preset_src=""
+          for candidate in \
+            "$(dirname "$real")/../share/xcodegen/SettingPresets" \
+            "$(dirname "$real")/../SettingPresets" \
+            "$prefix/share/xcodegen/SettingPresets" \
+            "$prefix/SettingPresets"; do
+            if [ -d "$candidate" ]; then
+              preset_src="$candidate"
+              break
+            fi
+          done
+          # 找不到 presets 就直接失败，避免又生成一个缺默认设置的坏工程
+          test -n "$preset_src"
+          mkdir -p "$HOME/.cache/xcodegen/bin" \
+            "$HOME/.cache/xcodegen/share/xcodegen" \
+            "$HOME/.cache/xcodegen/SettingPresets"
+          cp "$real" "$HOME/.cache/xcodegen/bin/xcodegen"
+          chmod +x "$HOME/.cache/xcodegen/bin/xcodegen"
+          # 两处都放：XcodeGen 会按可执行文件同级或 share 布局查找
+          cp -R "$preset_src/." "$HOME/.cache/xcodegen/bin/SettingPresets"
+          cp -R "$preset_src/." "$HOME/.cache/xcodegen/share/xcodegen/SettingPresets"
+          cp -R "$preset_src/." "$HOME/.cache/xcodegen/SettingPresets"
 
       - name: 生成 Xcode 工程
         run: |
-          export PATH="$HOME/.cache/xcodegen-bin:$PATH"
+          set -euo pipefail
+          export PATH="$HOME/.cache/xcodegen/bin:$PATH"
+          export XCODEGEN_SETTING_PRESETS_PATH="$HOME/.cache/xcodegen/share/xcodegen/SettingPresets"
+          test -d "$XCODEGEN_SETTING_PRESETS_PATH"
+          xcodegen --version
           xcodegen generate
 
       - name: 构建 Release App（不签名）
@@ -93,6 +123,19 @@ jobs:
               echo "::error title=Xcode::$line"
             done
           fi
+
+      # 失败时把关键构建设置打出来：空 PRODUCT_NAME 会直接指向 XcodeGen presets 问题。
+      - name: 诊断构建失败
+        if: failure()
+        run: |
+          xcodebuild \
+            -project BanzhuNovel.xcodeproj \
+            -scheme BanzhuNovel \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -showBuildSettings 2>/dev/null \
+            | grep -E "^ +(PRODUCT_NAME|FULL_PRODUCT_NAME|TARGET_NAME|PRODUCT_BUNDLE_IDENTIFIER|EXECUTABLE_NAME) " \
+            | sort -u | head -n 10 || true
 
       - name: 制作未验证 IPA
         run: |

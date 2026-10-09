@@ -76,7 +76,7 @@ final class HostRoutingRecoveryTests: XCTestCase {
         XCTAssertTrue(probedDuringVerification)
     }
 
-    func test验证失败后切换下一个guarded host() async throws {
+    func test验证失败后切换下一个guardedHost() async throws {
         let gate = GuardGate()
         let transport = FakeTransport { url in
             if url.host == "one.example" || url.host == "two.example" {
