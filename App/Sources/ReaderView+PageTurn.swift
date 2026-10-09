@@ -54,11 +54,11 @@ extension ReaderView {
         }
         switch animation {
         case .none:
-            nil
+            return nil
         case .cover:
-            .spring(response: 0.3, dampingFraction: 1)
+            return .spring(response: 0.3, dampingFraction: 1)
         case .curl:
-            .spring(response: 0.35, dampingFraction: 1)
+            return .spring(response: 0.35, dampingFraction: 1)
         }
     }
 }
