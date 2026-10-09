@@ -220,9 +220,12 @@ private extension ReaderView {
         }
         .contentShape(Rectangle())
         .animation(
-            reduceMotion || configuration.pageTurnMode == .scroll
+            configuration.pageTurnMode == .scroll
                 ? nil
-                : pageAnimation(for: configuration.pageTurnAnimation),
+                : (reduceMotion
+                    // §13：Reduce Motion 退化为短淡入淡出（transition 已是 .opacity），而不是瞬切。
+                    ? .easeInOut(duration: 0.2)
+                    : pageAnimation(for: configuration.pageTurnAnimation)),
             value: viewStore.currentPageIndex
         )
 

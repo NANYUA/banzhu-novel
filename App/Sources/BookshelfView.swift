@@ -386,6 +386,8 @@ private struct GroupChip: View {
                 .lineLimit(1)
                 .padding(.horizontal, DesignTokens.Spacing.md)
                 .padding(.vertical, DesignTokens.Spacing.xs)
+                // §9 触控目标：胶囊本身做到 44pt —— 强调层贴的就是它，所以不会出现「按下变胖」。
+                .frame(minHeight: 44)
                 .background(
                     Capsule().fill(
                         isSelected ? AppTheme.accent : Color(.tertiarySystemFill)
