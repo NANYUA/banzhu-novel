@@ -160,13 +160,18 @@ actor NetworkClient {
                 }
                 EngineLog.log(.info, tag, "HTTP \(http.statusCode) · \(html.count) 字节 · \(url.absoluteString)")
                 return html
-            } catch let e as NetworkError {
-                // 盾与明确的 HTTP 状态错误不重试，直接上报；
-                // 否则 403 会被重试 3 次，正好撞在站方防护上。
-                if !e.shouldRetry { throw e }
-                lastError = e
             } catch {
-                lastError = NetworkError.transport(error)
+                // H4 收尾：把「错误收枘」与「是否重试」合并成**唯一**决策点。
+                //
+                // 原先这里是两个 catch：只有 `catch let e as NetworkError` 会查 `shouldRetry`，
+                // 而通用 catch 只是 `lastError = .transport(error)` —— 收枘完**直接进退避休眠，
+                // 从不查 shouldRetry**。偏偏 `URLSession` 抛的是 `URLError`（不是 `NetworkError`），
+                // 必然走通用分支，于是 `shouldRetry` 里对 `.transport` 的分类**在运行时从未被调用**，
+                // DNS 查不到 / 证书不受信 / 压根没网照样白等约 9 秒。
+                // 现在两条路径合一：先收枘，再问一次 shouldRetry。
+                let wrapped = Self.wrap(error)
+                if !wrapped.shouldRetry { throw wrapped }
+                lastError = wrapped
             }
             if attempt < retries {
                 EngineLog.log(.warning, "retry", "第 \(attempt + 1) 次失败，重试中… \(url.absoluteString)")
@@ -175,6 +180,15 @@ actor NetworkClient {
         }
         EngineLog.log(.error, "fail", "放弃：\((lastError as? LocalizedError)?.errorDescription ?? lastError.localizedDescription) \(url.absoluteString)")
         throw lastError
+    }
+
+    /// 把任意抛出的错误收枘成 `NetworkError` —— 重试循环与单测**共用**的唯一入口（H4 收尾）。
+    ///
+    /// 抽出来的理由：循环本身依赖真实 `URLSession`，在 `swift test` 里注入不了。
+    /// 于是「`shouldRetry` 的分类改对了，但循环压根没查它」这种错位，
+    /// 只有靠单测直接盯住这个入口才防得住 —— 这正是 H4 第一次改歪的方式。
+    static func wrap(_ error: any Error) -> NetworkError {
+        (error as? NetworkError) ?? .transport(error)
     }
 }
 

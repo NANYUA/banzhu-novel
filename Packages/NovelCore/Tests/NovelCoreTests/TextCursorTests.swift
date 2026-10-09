@@ -62,8 +62,10 @@ final class TextCursorTests: XCTestCase {
         let pages = paginate(text: text, utf16Budget: 10, convert: false)
 
         XCTAssertEqual(pages.map(\.length), [10, 10])
-        // 守恒律（sum == text.count）因为末页夹紧而侥幸成立，
-        // 但每页实际承载的 UTF-16 码元数是容量的两倍 → 真机上就是正文溢出被裁。
+        // 注意：守恒律（sum == text.count）在这里**依然成立**，但它成立是因为 `Paginator`
+        // 用 `clamped = min(pageLength, count - cursor)` 从结构上兜住了末尾 —— 不是分页算对了。
+        // 被这个错配破坏的是**一页的容量**：同样「一页 10 个码元」的预算，被当成 10 个字符用，
+        // 于是每页实际承载 20 个码元 —— 这才是真机上正文溢出被裁的来源。
         XCTAssertEqual(pages.reduce(0) { $0 + $1.length }, text.count)
     }
 

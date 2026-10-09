@@ -134,7 +134,7 @@ public struct SiteFeature: Reducer {
             case let .addHost(value):
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
-                    state.notice = "host 不能为空。"
+                    state.notice = "域名不能为空。"
                     return .none
                 }
                 state.settings.upsertHost(trimmed, isFromNavigation: false)
