@@ -104,16 +104,12 @@ struct ReaderView: View {
                         .loadChapterWithName(viewStore.chapterPath, viewStore.chapterName)
                     )
                 }
-                .onChange(of: geometry.size) { _, newSize in
-                    // 旋转 / 分屏 / 换机型：把新尺寸交给 reducer 重新分页。
-                    viewStore.send(
-                        .containerSizeChanged(
-                            readerContentSize(
-                                size: newSize,
-                                safeAreaInsets: geometry.safeAreaInsets
-                            )
-                        )
-                    )
+                // 监听「安全区可用盒」而不是 `geometry.size`：翻转 / 分屏 / 换机型改的是 `size`，
+                // 而通话或录屏状态栏、外接键盘导致的 Home Indicator 变化**只改 `safeAreaInsets`**
+                // —— 后者原先漏监听，安全区变了却不重新分页（H2）。
+                // 两者都会改变 `contentSize`，所以统一派生值触发即可，不必挂两个 onChange。
+                .onChange(of: contentSize) { _, newSize in
+                    viewStore.send(.containerSizeChanged(newSize))
                 }
             }
             .navigationTitle("")
