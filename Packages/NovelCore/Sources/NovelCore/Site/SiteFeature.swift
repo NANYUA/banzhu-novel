@@ -82,9 +82,18 @@ public struct SiteFeature: Reducer {
 
             case .fetchNavigationTapped:
                 guard !state.isFetchingNavigation else { return .none }
+                // B0-6 Step 2：没配置导航地址时直接给出明确提示，不发请求——
+                // 否则会拿空地址去打网络、最终报「服务器响应异常」，把「没配置」伪装成故障。
+                let normalized = state.settings.navigationURL
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalized.isEmpty else {
+                    state.notice = "请先填写导航地址。"
+                    return .none
+                }
+                state.settings.navigationURL = normalized
                 state.isFetchingNavigation = true
                 state.notice = nil
-                let navURL = state.settings.navigationURL
+                let navURL = normalized
                 return .run { send in
                     do {
                         let hosts = try await NovelEngine.shared.resolveCandidates(fromNav: navURL)

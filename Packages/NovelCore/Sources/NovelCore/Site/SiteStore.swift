@@ -23,7 +23,9 @@ public struct SiteEntry: Codable, Equatable, Identifiable, Sendable {
 /// 站点入口设置的持久化快照（手动模式）。
 public struct SiteSettings: Codable, Equatable, Sendable {
     public init(
-        navigationURL: String = SiteConfig.navigationURL,
+        // B0-6 Step 2：默认留空，由用户在设置页显式填写；
+        // 避免「没配置」伪装成「服务器响应异常」（见执行文档 B0-6）。
+        navigationURL: String = "",
         hosts: [SiteEntry] = [],
         currentHostID: UUID? = nil
     ) {
@@ -46,7 +48,7 @@ public struct SiteSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         navigationURL = try container.decodeIfPresent(String.self, forKey: .navigationURL)
-            ?? SiteConfig.navigationURL
+            ?? ""
         hosts = try container.decodeIfPresent([SiteEntry].self, forKey: .hosts) ?? []
         currentHostID = try container.decodeIfPresent(UUID.self, forKey: .currentHostID)
         normalize()
