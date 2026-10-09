@@ -33,13 +33,40 @@ public enum NetworkError: LocalizedError {
     ///
     /// 盾与明确的 HTTP 状态错误都不重试：前者需要用户去处理验证，
     /// 后者是服务器已经给出决定（如 403），继续重试只会加剧风险。
-    /// 解码失败和传输层抖动属瞬时问题，交由上层重试。
+    /// 解码失败属瞬时问题，交由上层重试。
     public var shouldRetry: Bool {
         switch self {
         case .guarded, .httpStatus, .noCandidates:
             return false
-        case .badResponse, .decodeFailed, .transport:
+        case .badResponse, .decodeFailed:
             return true
+        case let .transport(error):
+            return Self.isTransientTransportError(error)
+        }
+    }
+
+    /// 传输层错误是否值得重试（H4）。
+    ///
+    /// 原先 `.transport` **一律**重试：调用侧共 4 次尝试、退避 `1.5s × (attempt+1)`
+    /// ≈ **9 秒**。但 DNS 解析不了、证书不受信、根本没联网这类错误
+    /// **不可能因为再等 9 秒就自愈**，用户只是白等一场。
+    ///
+    /// 这里改成**白名单**：只有确实可能是瞬时抖动的错误才重试；未列出的
+    /// （含非 `URLError` 的情形，例如任务取消产生的 `CancellationError`）一律不重试，
+    /// 立刻把真实原因交给用户。
+    private static func isTransientTransportError(_ error: any Error) -> Bool {
+        guard let urlError = error as? URLError else {
+            return false
+        }
+        switch urlError.code {
+        case .timedOut,
+             .networkConnectionLost,
+             .cannotConnectToHost,
+             .resourceUnavailable:
+            // 超时 / 连接中途断开 / 拒绝连接 / 资源暂不可用：换一次常能成功。
+            return true
+        default:
+            return false
         }
     }
 
