@@ -140,6 +140,8 @@ public struct ReaderFeature: Reducer {
         case precacheCountChanged(Int)
         /// 从持久化恢复阅读设置
         case loadSavedSettings(CGSize)
+        /// 页面容器尺寸变化（首次布局 / 旋转 / 分屏 / 换机型）
+        case containerSizeChanged(CGSize)
         /// 持久化设置读取完成（带页面容器尺寸，恢复时合并出完整配置）
         case settingsLoaded(ReadingSettings, CGSize)
     }
@@ -278,11 +280,20 @@ public struct ReaderFeature: Reducer {
                 }
 
             case let .loadSavedSettings(size):
+                // 🔴 容器尺寸永远以页面布局为准（ReadingSettings 刻意不落盘）。
+                // 没有已保存设置时也要写进去，否则分页会一直按默认 320×480 算，
+                // 正文只占屏幕一部分（比例错乱）。
+                applyContainerSize(size, to: &state, using: paginationService)
                 let settingsStore = readingSettingsStore
                 return .run { send in
                     guard let settings = settingsStore.load() else { return }
                     await send(.settingsLoaded(settings, size))
                 }
+
+            case let .containerSizeChanged(size):
+                // 旋转 / 分屏 / 换机型：尺寸变了重新分页，currentOffset 不重置。
+                applyContainerSize(size, to: &state, using: paginationService)
+                return .none
 
             case let .settingsLoaded(settings, size):
                 let merged = settings.mergedConfiguration(containerSize: size)
@@ -306,4 +317,15 @@ private func saveProgress(
     .run { _ in
         try? await store.markRead(chapterPath, offset, Date())
     }
+}
+
+/// 把真实容器尺寸写进配置；只有变了才重新分页（`currentOffset` 语义不变，不重置）。
+private func applyContainerSize(
+    _ size: CGSize,
+    to state: inout ReaderFeature.State,
+    using paginationService: PaginationService
+) {
+    guard state.config.containerSize != size else { return }
+    state.config.containerSize = size
+    state.pages = paginationService.paginate(state.displayText, state.config)
 }

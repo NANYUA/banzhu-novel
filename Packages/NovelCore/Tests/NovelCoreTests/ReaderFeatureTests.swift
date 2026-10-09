@@ -348,8 +348,9 @@ final class ReaderFeatureTests: XCTestCase {
         XCTAssertEqual(store.state.precacheCount, 5)
     }
 
-    /// 没有持久化设置时保持默认配置，不产生恢复动作。
-    func test无保存设置保持默认() async {
+    /// 没有持久化设置时：除容器尺寸外保持默认，且不产生恢复动作。
+    /// 🔴 容器尺寸必须用真实布局尺寸，否则分页按 320×480 算，正文只占屏幕一部分。
+    func test无保存设置时容器尺寸用真实布局尺寸() async {
         let store = makeStore(
             text: "",
             loader: { _ in "" },
@@ -359,10 +360,28 @@ final class ReaderFeatureTests: XCTestCase {
             )
         )
 
-        await store.send(.loadSavedSettings(CGSize(width: 400, height: 600)))
+        await store.send(.loadSavedSettings(CGSize(width: 400, height: 600))) {
+            $0.config.containerSize = CGSize(width: 400, height: 600)
+        }
         await store.finish()
-        XCTAssertEqual(store.state.config.containerSize, CGSize(width: 320, height: 480))
+        XCTAssertEqual(
+            store.state.config,
+            PaginationConfiguration(containerSize: CGSize(width: 400, height: 600))
+        )
         XCTAssertEqual(store.state.precacheCount, ReaderFeature.defaultPrecacheCount)
+    }
+
+    /// 旋转 / 分屏 / 换机型：尺寸变化要重新分页，但 currentOffset 不丢。
+    func test容器尺寸变化重新分页且offset不丢() async {
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
+        await store.send(.nextPage) { $0.currentOffset = 5 }
+
+        await store.send(.containerSizeChanged(CGSize(width: 400, height: 600))) {
+            $0.config.containerSize = CGSize(width: 400, height: 600)
+        }
+        await store.finish()
+        XCTAssertEqual(store.state.currentOffset, 5, "尺寸变化后 offset 不应丢")
     }
 
     /// 修改阅读配置后必须持久化（含预缓存章数）。

@@ -32,6 +32,9 @@ struct BookshelfView: View {
     @State private var renamingGroup: ShelfGroupSnapshot?
     @State private var renameGroupName = ""
     @State private var isConfirmingDelete = false
+    /// 详情页目标。用显式 push 而不是 `NavigationLink`：见 `rowContent` 的注释。
+    @State private var detailRow: ShelfRow?
+    @State private var isShowingDetail = false
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -65,6 +68,15 @@ struct BookshelfView: View {
                 }
                 .navigationTitle("书架")
                 .onAppear { viewStore.send(.onAppear) }
+                .navigationDestination(isPresented: $isShowingDetail) {
+                    if let row = detailRow {
+                        BookDetailView(
+                            bookPath: row.bookPath,
+                            title: row.title,
+                            downloadStore: downloadStore
+                        )
+                    }
+                }
                 .toolbar {
                     toolbarContent(viewStore)
                 }
@@ -291,18 +303,19 @@ private extension BookshelfView {
             }
             .buttonStyle(.plain)
         } else {
-            NavigationLink {
-                BookDetailView(
-                    bookPath: row.bookPath,
-                    title: row.title,
-                    downloadStore: downloadStore
-                )
-            } label: {
-                BookRow(row: row)
-            }
-            .onLongPressGesture {
-                viewStore.send(.editModeChanged(true))
-            }
+            // 🔴 这里刻意不用 NavigationLink：它的点击手势会和长按手势抢识别，
+            // 结果「点书进不去详情」（长按进编辑是既有交互，不能砍）。
+            // 改成显式 tap + long press：两者互斥（快速松手=点击，按住=长按），
+            // 再用 navigationDestination 推详情页。
+            BookRow(row: row)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    detailRow = row
+                    isShowingDetail = true
+                }
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    viewStore.send(.editModeChanged(true))
+                }
         }
     }
 }

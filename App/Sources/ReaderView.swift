@@ -90,6 +90,10 @@ struct ReaderView: View {
                         .loadChapterWithName(viewStore.chapterPath, viewStore.chapterName)
                     )
                 }
+                .onChange(of: geometry.size) { _, newSize in
+                    // 旋转 / 分屏 / 换机型：把新尺寸交给 reducer 重新分页。
+                    viewStore.send(.containerSizeChanged(newSize))
+                }
             }
             .navigationTitle("")
             .navigationBarBackButtonHidden(true)
