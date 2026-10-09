@@ -63,6 +63,8 @@ struct BookshelfView: View {
                                 .buttonStyle(.borderedProminent)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if viewStore.visibleRows.isEmpty {
+                            emptyState
                         } else {
                             shelfList(viewStore)
                         }
@@ -274,6 +276,15 @@ private extension BookshelfView {
 // MARK: - 列表
 
 private extension BookshelfView {
+    /// 空状态（§10 Wayfinding）：没有书时也要回答「有什么 / 怎么加书」。
+    var emptyState: some View {
+        ContentUnavailableView(
+            "书架为空",
+            systemImage: "books.vertical",
+            description: Text("在「搜索」页找到想读的书，加入书架后会显示在这里。")
+        )
+    }
+
     func shelfList(
         _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
     ) -> some View {
@@ -389,7 +400,7 @@ private struct BookRow: View {
             // 文字区
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.title)
-                    .font(.body.bold())
+                    .font(.headline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 

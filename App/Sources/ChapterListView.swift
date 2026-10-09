@@ -27,6 +27,8 @@ struct ChapterListView: View {
                             .buttonStyle(.borderedProminent)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewStore.chapters.isEmpty {
+                    emptyState
                 } else {
                     List(viewStore.chapters) { chapter in
                         HStack(spacing: 10) {
@@ -107,6 +109,15 @@ struct ChapterListView: View {
             }
             .onAppear { viewStore.send(.onAppear) }
         }
+    }
+
+    /// 空状态（§10 Wayfinding）：目录为空时也要回答「有什么 / 怎么办」。
+    private var emptyState: some View {
+        ContentUnavailableView(
+            "暂无章节",
+            systemImage: "list.bullet",
+            description: Text("本地目录快照中还没有章节，可稍后重试。")
+        )
     }
 
     private func request(

@@ -225,7 +225,7 @@ private struct SearchResultRow: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(book.title)
-                            .font(.body.bold())
+                            .font(.headline)
                             .lineLimit(1)
 
                         Text(book.author.isEmpty ? "未知作者" : book.author)

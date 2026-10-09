@@ -125,10 +125,14 @@ struct BookDetailView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(isIntroExpanded ? nil : 4)
 
-                Button(isIntroExpanded ? "收起" : "展开") {
+                Button {
                     withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
                         isIntroExpanded.toggle()
                     }
+                } label: {
+                    Text(isIntroExpanded ? "收起" : "展开")
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .font(.caption)
             }
