@@ -280,7 +280,7 @@ public struct SiteSettings: Codable, Equatable, Sendable {
             ? [SiteConfig.default.host]
             : SiteConfig.mirrors
         let hosts = hostValues.map { SiteEntry(value: $0, source: .user) }
-        let navigationValues = Self.environmentNavigationURLs()
+        let navigationValues = environmentNavigationURLs()
         let navigationURLs = navigationValues.map { SiteEntry(value: $0, source: .user) }
 
         return SiteSettings(
@@ -318,4 +318,18 @@ extension DependencyValues {
             recordHost: { _ in }
         )
     }
+}
+
+/// 首次启动时从环境变量读取导航网址（仅 DEBUG）。
+/// 放在 `SiteStore.swift` 而不是归一化扩展里：`SiteSettings.default` 要用它，
+/// 而扩展里的 `private` 只在扩展所在文件可见。
+private func environmentNavigationURLs() -> [String] {
+    #if DEBUG
+    if let env = ProcessInfo.processInfo.environment["SITE_NAVIGATION_URLS"] {
+        if !env.isEmpty {
+            return env.components(separatedBy: ",").filter { !$0.isEmpty }
+        }
+    }
+    #endif
+    return []
 }

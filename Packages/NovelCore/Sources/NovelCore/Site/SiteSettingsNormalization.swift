@@ -213,17 +213,6 @@ public extension SiteSettings {
         case (nil, nil): nil
         }
     }
-
-    private static func environmentNavigationURLs() -> [String] {
-        #if DEBUG
-        if let env = ProcessInfo.processInfo.environment["SITE_NAVIGATION_URLS"] {
-            if !env.isEmpty {
-                return env.components(separatedBy: ",").filter { !$0.isEmpty }
-            }
-        }
-        #endif
-        return []
-    }
 }
 
 /// 导航 host 上限淘汰（R8）。
