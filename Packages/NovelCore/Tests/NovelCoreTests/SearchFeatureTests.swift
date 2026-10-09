@@ -16,16 +16,14 @@ final class SearchFeatureTests: XCTestCase {
     )
 
     func test输入关键词后提交搜索并填入结果() async {
+        let recorder = SearchCallRecorder()
         let store = TestStore(initialState: SearchFeature.State()) {
             SearchFeature()
         } withDependencies: {
             $0.searchService.search = { keyword, page in
-                XCTAssertEqual(
-                    keyword,
-                    "示例",
-                    "首页搜索的 keyword 应为「示例」，实际收到「\(keyword)」"
-                )
-                XCTAssertEqual(page, 1, "首页搜索的 page 应为 1，实际收到 \(page)")
+                // 🔴 不要在 effect 闭包里直接 XCTAssert：它在后台任务上执行，
+                // 失败会挂到不相关的用例上。先记录，store.finish() 后再断言。
+                await recorder.record(keyword: keyword, page: page)
                 return [Self.book]
             }
         }
@@ -43,6 +41,13 @@ final class SearchFeatureTests: XCTestCase {
             $0.hasMore = false
         }
         await store.finish()
+        let call = await recorder.last()
+        XCTAssertEqual(
+            call?.keyword,
+            "示例",
+            "首页搜索的 keyword 应为「示例」，实际收到「\(call?.keyword ?? "nil")」"
+        )
+        XCTAssertEqual(call?.page, 1, "首页搜索的 page 应为 1，实际收到 \(call?.page as Any)")
     }
 
     func test空关键词不会发起搜索() async {
@@ -205,5 +210,18 @@ final class SearchFeatureTests: XCTestCase {
             $0.notice = "《示例书》已经在书架里了。"
         }
         await store.finish()
+    }
+}
+
+/// 记录搜索服务收到的调用，供测试在 `store.finish()` 后断言。
+private actor SearchCallRecorder {
+    private var calls: [(keyword: String, page: Int)] = []
+
+    func record(keyword: String, page: Int) {
+        calls.append((keyword, page))
+    }
+
+    func last() -> (keyword: String, page: Int)? {
+        calls.last
     }
 }

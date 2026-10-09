@@ -334,7 +334,10 @@ final class ReaderFeatureTests: XCTestCase {
         )
 
         await loadSample(into: store)
-        await store.send(.loadSavedSettings(CGSize(width: 400, height: 600)))
+        // reducer 现在会立即应用真实容器尺寸（比例修复的一部分），所以 send 要带断言。
+        await store.send(.loadSavedSettings(CGSize(width: 400, height: 600))) {
+            $0.config.containerSize = CGSize(width: 400, height: 600)
+        }
         await store.receive(.settingsLoaded(saved, CGSize(width: 400, height: 600))) {
             $0.config.containerSize = CGSize(width: 400, height: 600)
             $0.config.fontSize = 20
