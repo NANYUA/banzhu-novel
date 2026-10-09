@@ -5,6 +5,14 @@ public enum NetworkError: LocalizedError {
     case guarded          // 被人机验证盾拦截
     case httpStatus(Int)  // 明确的 HTTP 错误状态（如 403）
     case badResponse
+
+    /// 导航页拿到了，但一条候选 host 都没匹配到（带响应字节数）。
+    ///
+    /// 与 `.badResponse` 分开，是因为这两类原因的排查方向完全不同：
+    /// `.badResponse` 是响应本身不合法，而这个是「页面合法但没有可用地址」
+    /// （例如页面只是个 JS 加载器壳，真正清单要执行脚本后才出现）。
+    case noCandidates(Int)
+
     case decodeFailed
     case transport(any Error)
 
@@ -14,6 +22,8 @@ public enum NetworkError: LocalizedError {
         case .guarded:            return "需要人机验证，请完成验证后重试。"
         case .httpStatus(let code): return "服务器返回错误（HTTP \(code)）。"
         case .badResponse:        return "服务器响应异常。"
+        case .noCandidates(let bytes):
+            return "已取回页面（\(bytes) 字节），但没匹配到任何候选地址。"
         case .decodeFailed:       return "内容解码失败。"
         case .transport(let e):   return "网络错误：\(e.localizedDescription)"
         }
@@ -26,7 +36,7 @@ public enum NetworkError: LocalizedError {
     /// 解码失败和传输层抖动属瞬时问题，交由上层重试。
     public var shouldRetry: Bool {
         switch self {
-        case .guarded, .httpStatus:
+        case .guarded, .httpStatus, .noCandidates:
             return false
         case .badResponse, .decodeFailed, .transport:
             return true
@@ -44,7 +54,7 @@ public enum NetworkError: LocalizedError {
     /// 是否属于当前 host 不可用，可尝试切换到下一个 host。
     public var isHostUnavailable: Bool {
         switch self {
-        case .guarded, .decodeFailed:
+        case .guarded, .decodeFailed, .noCandidates:
             return false
         case .httpStatus, .badResponse, .transport:
             return true

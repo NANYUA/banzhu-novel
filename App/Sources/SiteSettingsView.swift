@@ -34,7 +34,8 @@ struct SiteSettingsView: View {
     ) -> some View {
         Section("导航地址") {
             TextField(
-                "https://example.com",
+                // B0-6 收尾：占位改成中性格式提示，不再假装有个 example.com 可用。
+                "https://…",
                 text: Binding(
                     get: { viewStore.settings.navigationURL },
                     set: { viewStore.send(.setNavigationURL($0)) }

@@ -90,7 +90,16 @@ public actor NovelEngine {
                 }
             }
         }
-        if found.isEmpty { throw NetworkError.badResponse }
+        if found.isEmpty {
+            // 与「响应异常」区分开：这里是页面拿到了、但没匹配到地址。
+            // 记一条诊断（页面字节数 + 正则条数），便于区分「壳页 / 正则不匹配」两类原因。
+            EngineLog.log(
+                .warning,
+                "nav",
+                "0 候选：页面 \(html.utf8.count) 字节，patterns \(patterns.count) 条"
+            )
+            throw NetworkError.noCandidates(html.utf8.count)
+        }
         return found
     }
 

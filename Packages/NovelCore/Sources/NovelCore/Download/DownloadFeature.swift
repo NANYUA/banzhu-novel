@@ -51,7 +51,7 @@ func classifyDownloadFailure(_ error: any Error) -> DownloadFailure {
         return DownloadFailure(source: .guardRequired, message: networkError.localizedDescription)
     case .httpStatus(403):
         return DownloadFailure(source: .forbidden, message: networkError.localizedDescription)
-    case .httpStatus, .badResponse, .decodeFailed, .transport:
+    case .httpStatus, .badResponse, .noCandidates, .decodeFailed, .transport:
         return DownloadFailure(source: .other, message: networkError.localizedDescription)
     }
 }
