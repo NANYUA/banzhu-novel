@@ -31,7 +31,7 @@ struct ReaderView: View {
     @State private var slideOffset: CGFloat = 0
     @State private var slideIsHorizontal: Bool?
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
@@ -524,57 +524,6 @@ private extension ReaderView {
     ) -> String {
         guard viewStore.config.pageTurnMode != .scroll else { return "scroll" }
         return "page-\(viewStore.currentPageIndex)"
-    }
-
-    private func pageTransition(
-        for animation: PageTurnAnimation,
-        direction: PageTurnDirection
-    ) -> AnyTransition {
-        if reduceMotion {
-            return .opacity
-        }
-        switch animation {
-        case .none:
-            return .identity
-        case .cover:
-            if direction == .forward {
-                return .asymmetric(
-                    insertion: .move(edge: .trailing),
-                    removal: .move(edge: .leading)
-                )
-            } else {
-                return .asymmetric(
-                    insertion: .move(edge: .leading),
-                    removal: .move(edge: .trailing)
-                )
-            }
-        case .curl:
-            if direction == .forward {
-                return .asymmetric(
-                    insertion: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity),
-                    removal: .scale(scale: 0.94, anchor: .leading).combined(with: .opacity)
-                )
-            } else {
-                return .asymmetric(
-                    insertion: .scale(scale: 0.94, anchor: .leading).combined(with: .opacity),
-                    removal: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity)
-                )
-            }
-        }
-    }
-
-    private func pageAnimation(for animation: PageTurnAnimation) -> Animation? {
-        // §13：Reduce Motion 退化为短淡入淡出（transition 已是 .opacity），而不是瞬切。
-        if reduceMotion { return .easeInOut(duration: 0.2) }
-        switch animation {
-        case .none:
-            nil
-        case .cover:
-            // §8 动效：用可中断的弹簧取代固定时长缓动，临界阻尼（无回弹）。
-            .spring(response: 0.3, dampingFraction: 1)
-        case .curl:
-            .spring(response: 0.35, dampingFraction: 1)
-        }
     }
 
     // MARK: - 分页定位
