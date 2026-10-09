@@ -23,7 +23,7 @@ struct ReaderSettingsView: View {
 
     /// 字体白名单：默认系统字体（SF Pro），另给几个适合中文正文阅读的字体族。
     /// 不用 `UIFont.familyNames`，避免把 Roboto / Inter 等第三方字体灌进 Picker。
-    private static let fontFamilyWhitelist: [ReaderFontOption] = [
+    private static let fontFamilyAllowlist: [ReaderFontOption] = [
         ReaderFontOption(displayName: "苹方（黑体）", familyName: "PingFang SC"),
         ReaderFontOption(displayName: "宋体", familyName: "Songti SC"),
         ReaderFontOption(displayName: "楷体", familyName: "Kaiti SC"),
@@ -33,7 +33,7 @@ struct ReaderSettingsView: View {
 
     /// 白名单按本机可用性过滤；解析方式与 `ReadingFontFactory` 一致
     /// （先 PostScript name、再退回字族名），过滤后列表里每一项都真能渲染。
-    private static let availableFontFamilies: [ReaderFontOption] = fontFamilyWhitelist.filter {
+    private static let availableFontFamilies: [ReaderFontOption] = fontFamilyAllowlist.filter {
         UIFont(name: $0.familyName, size: 12) != nil
             || !UIFont.fontNames(forFamilyName: $0.familyName).isEmpty
     }
