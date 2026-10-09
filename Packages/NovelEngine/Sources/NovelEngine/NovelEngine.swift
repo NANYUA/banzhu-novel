@@ -54,7 +54,7 @@ public actor NovelEngine {
     }
 
     public func setHost(_ host: String) {
-        let normalized = Self.normalizedHost(host)
+        let normalized = SiteRoutingConfiguration.normalizedHost(host)
         guard !normalized.isEmpty else { return }
         config = SiteConfig(host: normalized)
     }
@@ -83,7 +83,7 @@ public actor NovelEngine {
                 options: [],
                 range: NSRange(location: 0, length: ns.length)
             ) {
-                let host = Self.normalizedHost(ns.substring(with: match.range))
+                let host = SiteRoutingConfiguration.normalizedHost(ns.substring(with: match.range))
                 if !host.isEmpty, seen.insert(host).inserted {
                     found.append(host)
                 }
