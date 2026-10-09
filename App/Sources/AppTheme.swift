@@ -36,7 +36,8 @@ enum AppTheme {
     /// - `page` 浅色下是系统分组灰（≈ `#F2F2F7`），深色下自动转黑；
     /// - `card` 浅色下是白，压在页面灰底上形成**一级层次**（卡片与页面同色是 U0-3 的旧取舍，
     ///   U1-1 明确要求卡片化，所以卡面重新与页面分开）；
-    /// - `separator` 是系统分隔线色，本身就是 1px 发丝级，符合「细微分隔线」。
+    /// - 细微分隔线**不在这里定义**：一律用系统 `Divider()`（本身就是发丝级 + 自动配色），
+    ///   不要再加一个色值令牌去手绘 1px 线。
     ///
     /// → 因此**不要**在这里写 `Color(white:)` / 十六进制值。
     enum Surface {
@@ -46,7 +47,5 @@ enum AppTheme {
         static let card = Color(.secondarySystemGroupedBackground)
         /// 卡面上的次级区块（卡片内再嵌一层）。
         static let inset = Color(.tertiarySystemGroupedBackground)
-        /// 细微分隔线。
-        static let separator = Color(.separator)
     }
 }
