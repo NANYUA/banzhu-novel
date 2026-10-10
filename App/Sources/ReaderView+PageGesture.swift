@@ -28,40 +28,22 @@ extension ReaderView {
         viewStore.config.pageTurnMode == .slide && !reduceMotion && !viewStore.pages.isEmpty
     }
 
-    // MARK: - 手势分发
+    // MARK: - 手势入口
 
-    /// 按翻页方式分发手势。三种方式的手势互斥，各自只装一套。
-    @ViewBuilder
+    /// 阅读页唯一的手势：左右滑动翻页（`PageTurnMode` 只剩 `.slide`，点击 / 滚动两套手势已删）。
+    /// 中央点击呼出 / 收起控制栏仍由 `slideGesture` 里那个 `SpatialTapGesture` 负责。
     func readerGesture(
         _ content: some View,
         viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         availableWidth: CGFloat,
         onCenterTap: @escaping () -> Void
     ) -> some View {
-        switch viewStore.config.pageTurnMode {
-        case .slide:
-            slideGesture(
-                content,
-                viewStore: viewStore,
-                availableWidth: availableWidth,
-                onCenterTap: onCenterTap
-            )
-
-        case .tap:
-            tapGesture(
-                content,
-                viewStore: viewStore,
-                availableWidth: availableWidth,
-                onCenterTap: onCenterTap
-            )
-
-        case .scroll:
-            scrollGesture(
-                content,
-                availableWidth: availableWidth,
-                onCenterTap: onCenterTap
-            )
-        }
+        slideGesture(
+            content,
+            viewStore: viewStore,
+            availableWidth: availableWidth,
+            onCenterTap: onCenterTap
+        )
     }
 
     // MARK: - 平移翻页（全景图）
@@ -274,43 +256,7 @@ extension ReaderView {
         .timingCurve(0.22, 1, 0.36, 1, duration: 0.22)
     }
 
-    // MARK: - 点击 / 滚动
-
-    private func tapGesture(
-        _ content: some View,
-        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        availableWidth: CGFloat,
-        onCenterTap: @escaping () -> Void
-    ) -> some View {
-        content.gesture(
-            SpatialTapGesture()
-                .onEnded { value in
-                    let locationX = value.location.x
-                    if isCenterTap(locationX, width: availableWidth) {
-                        onCenterTap()
-                    } else if locationX < availableWidth / 2 {
-                        viewStore.send(.prevPage)
-                    } else {
-                        viewStore.send(.nextPage)
-                    }
-                }
-        )
-    }
-
-    private func scrollGesture(
-        _ content: some View,
-        availableWidth: CGFloat,
-        onCenterTap: @escaping () -> Void
-    ) -> some View {
-        content.simultaneousGesture(
-            SpatialTapGesture()
-                .onEnded { value in
-                    if isCenterTap(value.location.x, width: availableWidth) {
-                        onCenterTap()
-                    }
-                }
-        )
-    }
+    // MARK: - 中央点击判定
 
     /// 屏幕中间三分之一算「中央点击」（呼出 / 收起控制栏），左右两侧留给翻页。
     private func isCenterTap(_ locationX: CGFloat, width: CGFloat) -> Bool {

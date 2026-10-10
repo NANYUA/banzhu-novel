@@ -165,12 +165,12 @@ final class ReaderFeatureTests: XCTestCase {
 
         var appearance = store.state.config
         appearance.backgroundStyle = .black
-        appearance.pageTurnMode = .scroll
+        appearance.customBackgroundColorDark = ReadingColor(red: 0.08, green: 0.08, blue: 0.1)
         appearance.appearanceMode = .dark
 
         await store.send(.configChanged(appearance)) {
             $0.config.backgroundStyle = .black
-            $0.config.pageTurnMode = .scroll
+            $0.config.customBackgroundColorDark = ReadingColor(red: 0.08, green: 0.08, blue: 0.1)
             $0.config.appearanceMode = .dark
         }
         await store.finish()
@@ -317,11 +317,14 @@ final class ReaderFeatureTests: XCTestCase {
 
 @MainActor extension ReaderFeatureTests {
     /// 打开阅读页时读取持久化设置：配置与预缓存章数一起恢复。
+    ///
+    /// `pageTurnMode` 已收敛为单一取值（`.slide`），无法再作为「设置是否被恢复」的证据，
+    /// 改用新增的暗色自定义背景色承担这个覆盖点。
     func test读取保存设置恢复() async {
         let saved = ReadingSettings(
             fontSize: 20,
             lineSpacing: 8,
-            pageTurnMode: .tap,
+            customBackgroundColorDark: ReadingColor(red: 0.12, green: 0.12, blue: 0.14),
             precacheCount: 5
         )
         let store = makeStore(
@@ -342,12 +345,15 @@ final class ReaderFeatureTests: XCTestCase {
             $0.config.containerSize = CGSize(width: 400, height: 600)
             $0.config.fontSize = 20
             $0.config.lineSpacing = 8
-            $0.config.pageTurnMode = .tap
+            $0.config.customBackgroundColorDark = ReadingColor(red: 0.12, green: 0.12, blue: 0.14)
             $0.precacheCount = 5
         }
         await store.finish()
         XCTAssertEqual(store.state.config.fontSize, 20)
-        XCTAssertEqual(store.state.config.pageTurnMode, .tap)
+        XCTAssertEqual(
+            store.state.config.customBackgroundColorDark,
+            ReadingColor(red: 0.12, green: 0.12, blue: 0.14)
+        )
         XCTAssertEqual(store.state.precacheCount, 5)
     }
 

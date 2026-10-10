@@ -40,9 +40,10 @@ struct PageTextView: UIViewRepresentable {
         context.coordinator.appliedText = text
         context.coordinator.appliedConfiguration = configuration
 
-        uiView.isScrollEnabled = configuration.pageTurnMode == .scroll
+        // `PageTurnMode` 只剩 `.slide`：永远是单页渲染，滚动恒关闭。
+        uiView.isScrollEnabled = false
         uiView.textContainer.lineFragmentPadding = 0
-        // 上面切换了 `isScrollEnabled`（UITextView 会因此重配文本容器），此处重新钉一次宽度不变量。
+        // 上面关掉了 `isScrollEnabled`（UITextView 会因此重配文本容器），此处重新钉一次宽度不变量。
         // 高度**不钉**：容器高由 UITextView 自己维护——滚动模式靠它把整章排完（contentSize 完整），
         // 分页模式靠它排完本页；手动设定会与滚动开关的切换交互，属未验证改动。
         uiView.textContainer.widthTracksTextView = true
@@ -53,13 +54,10 @@ struct PageTextView: UIViewRepresentable {
             right: configuration.inset.trailing
         )
         uiView.backgroundColor = configuration.backgroundStyle.uiColor(
-            custom: configuration.customBackgroundColor
+            custom: configuration.customBackgroundColor,
+            customDark: configuration.customBackgroundColorDark
         )
         uiView.attributedText = makeAttributedString()
-
-        if configuration.pageTurnMode == .scroll {
-            context.coordinator.scrollToOffset(offset, in: uiView)
-        }
     }
 
     /// 把渲染盒钉死在**父级提案**（可用盒）上，而不是让 SwiftUI 按 `UITextView` 自己的尺寸协商定 frame 宽。
@@ -83,7 +81,8 @@ struct PageTextView: UIViewRepresentable {
         paragraphStyle.firstLineHeadIndent = configuration.firstLineHeadIndent
 
         let backgroundColor = configuration.backgroundStyle.uiColor(
-            custom: configuration.customBackgroundColor
+            custom: configuration.customBackgroundColor,
+            customDark: configuration.customBackgroundColorDark
         )
         let attributes: [NSAttributedString.Key: Any] = [
             .font: ReadingFontFactory.makeFont(configuration: configuration),
@@ -121,9 +120,7 @@ struct PageTextView: UIViewRepresentable {
         }
 
         private func reportOffset(_ scrollView: UIScrollView) {
-            guard parent.configuration.pageTurnMode == .scroll,
-                  let textView = scrollView as? UITextView
-            else {
+            guard let textView = scrollView as? UITextView else {
                 return
             }
 

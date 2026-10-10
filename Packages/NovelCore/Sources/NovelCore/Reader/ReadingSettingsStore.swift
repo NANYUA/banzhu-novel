@@ -18,6 +18,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     public var inset: PageInset
     public var backgroundStyle: ReadingBackgroundStyle
     public var customBackgroundColor: ReadingColor
+    public var customBackgroundColorDark: ReadingColor
     public var textColorMode: ReadingTextColorMode
     public var customTextColor: ReadingColor
     public var followsSystemBrightness: Bool
@@ -38,6 +39,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         inset: PageInset = PageInset(),
         backgroundStyle: ReadingBackgroundStyle = .white,
         customBackgroundColor: ReadingColor = .defaultCustomBackground,
+        customBackgroundColorDark: ReadingColor = .defaultCustomBackground,
         textColorMode: ReadingTextColorMode = .automatic,
         customTextColor: ReadingColor = .defaultCustomText,
         followsSystemBrightness: Bool = true,
@@ -57,6 +59,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         self.inset = inset
         self.backgroundStyle = backgroundStyle
         self.customBackgroundColor = customBackgroundColor
+        self.customBackgroundColorDark = customBackgroundColorDark
         self.textColorMode = textColorMode
         self.customTextColor = customTextColor
         self.followsSystemBrightness = followsSystemBrightness
@@ -79,6 +82,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             inset: configuration.inset,
             backgroundStyle: configuration.backgroundStyle,
             customBackgroundColor: configuration.customBackgroundColor,
+            customBackgroundColorDark: configuration.customBackgroundColorDark,
             textColorMode: configuration.textColorMode,
             customTextColor: configuration.customTextColor,
             followsSystemBrightness: configuration.followsSystemBrightness,
@@ -104,6 +108,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             firstLineHeadIndent: firstLineHeadIndent,
             backgroundStyle: backgroundStyle,
             customBackgroundColor: customBackgroundColor,
+            customBackgroundColorDark: customBackgroundColorDark,
             textColorMode: textColorMode,
             customTextColor: customTextColor,
             followsSystemBrightness: followsSystemBrightness,

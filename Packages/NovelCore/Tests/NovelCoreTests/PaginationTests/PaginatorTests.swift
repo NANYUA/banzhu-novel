@@ -122,14 +122,16 @@ final class PaginatorTests: XCTestCase {
     }
 
     /// ⑬ 外观 / 翻页类设置不影响分页。
+    ///
+    /// `pageTurnMode` / `pageTurnAnimation` 已收敛为单一取值（见 ⑱），无法再通过改值验证，
+    /// 这里改用新增的暗色自定义背景色作为「只影响渲染」的代表字段。
     func test外观设置不影响分页() {
         let base = config()
         var appearance = base
         appearance.backgroundStyle = .black
+        appearance.customBackgroundColorDark = ReadingColor(red: 0.1, green: 0.1, blue: 0.12)
         appearance.textColorMode = .custom
         appearance.followsSystemBrightness = false
-        appearance.pageTurnMode = .tap
-        appearance.pageTurnAnimation = .cover
         appearance.appearanceMode = .dark
         XCTAssertFalse(appearance.affectsPagination(comparedTo: base))
     }
@@ -174,5 +176,23 @@ final class PaginatorTests: XCTestCase {
     func test分页配置与阅读设置的默认页边距同源() {
         XCTAssertEqual(config().inset, PageInset())
         XCTAssertEqual(ReadingSettings().inset, PageInset())
+    }
+
+    // MARK: - 阅读界面改版：翻页方式 / 动画收敛、亮暗自定义背景色
+
+    /// ⑱ 翻页方式只剩「左右滑动」、翻页动画只剩默认（无动画）。
+    ///
+    /// owner 决定删除 `PageTurnMode.tap` / `.scroll` 与 `PageTurnAnimation.cover` / `.curl`。
+    /// 删掉 case 之后，「翻页设置不影响分页」已无法通过改值来验证（只剩一个取值），
+    /// 因此这条断言改为锁住「只保留唯一取值」这个事实：谁把 case 加回来，测试立刻红。
+    func test翻页方式与翻页动画只保留唯一样式() {
+        XCTAssertEqual(PageTurnMode.allCases, [.slide])
+        XCTAssertEqual(PageTurnAnimation.allCases, [.none])
+    }
+
+    /// ⑲ 新增的暗色自定义背景色：默认值沿用亮色默认值，且分页配置与落盘设置同源。
+    func test暗色自定义背景色默认值与两处同源() {
+        XCTAssertEqual(config().customBackgroundColorDark, ReadingColor.defaultCustomBackground)
+        XCTAssertEqual(ReadingSettings().customBackgroundColorDark, ReadingColor.defaultCustomBackground)
     }
 }

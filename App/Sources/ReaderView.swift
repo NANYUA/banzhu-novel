@@ -223,9 +223,7 @@ private extension ReaderView {
         .contentShape(Rectangle())
         // 平移翻页本身就是转场，不再叠一层换页动画（叠了就是两个动画互相打架）。
         .animation(
-            usesPan || configuration.pageTurnMode == .scroll
-                ? nil
-                : pageAnimation(for: configuration.pageTurnAnimation),
+            usesPan ? nil : pageAnimation(),
             value: viewStore.currentPageIndex
         )
 
@@ -239,17 +237,13 @@ private extension ReaderView {
         )
     }
 
-    /// 单页渲染：点击 / 滚动方式用，平移不可用（Reduce Motion、未分页）时也用它兜底。
+    /// 单页渲染：唯一翻页方式（左右滑动）用，平移不可用（Reduce Motion、未分页）时也用它兜底。
     private func singlePage(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         configuration: PaginationConfiguration
     ) -> some View {
-        let displayText = configuration.pageTurnMode == .scroll
-            ? viewStore.text
-            : currentPageText(viewStore)
-
-        return PageTextView(
-            text: displayText,
+        PageTextView(
+            text: currentPageText(viewStore),
             offset: viewStore.currentOffset,
             configuration: configuration,
             onOffsetChange: { offset in
@@ -257,14 +251,11 @@ private extension ReaderView {
             }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(configuration.pageTurnMode == .scroll)
+        // 正文永远不接受命中测试：手势统一挂在外层（`slideGesture`），
+        // 否则 `UITextView` 会把拖拽吞掉（原先只有滚动方式才打开命中测试，滚动已删）。
+        .allowsHitTesting(false)
         .id(pageIdentity(viewStore))
-        .transition(
-            pageTransition(
-                for: configuration.pageTurnAnimation,
-                direction: viewStore.pageTurnDirection
-            )
-        )
+        .transition(pageTransition())
     }
 
     // MARK: - 控制栏
@@ -470,17 +461,19 @@ private extension ReaderView {
 
     // MARK: - 外观
 
+    /// 阅读页**正文底色**的唯一来源（上下栏仍走材质，与它无关）。
+    /// 返回 `Color(uiColor:)` 包出来的动态色，跟随当前明暗外观解析。
     private func backgroundColor(for configuration: PaginationConfiguration) -> Color {
         Color(uiColor: configuration.backgroundStyle.uiColor(
-            custom: configuration.customBackgroundColor
+            custom: configuration.customBackgroundColor,
+            customDark: configuration.customBackgroundColorDark
         ))
     }
 
     private func pageIdentity(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> String {
-        guard viewStore.config.pageTurnMode != .scroll else { return "scroll" }
-        return "page-\(viewStore.currentPageIndex)"
+        "page-\(viewStore.currentPageIndex)"
     }
 
     // MARK: - 分页定位

@@ -57,22 +57,19 @@ public enum ReadingAppearanceMode: String, CaseIterable, Hashable, Sendable, Cod
 }
 
 /// 翻页方式。
+///
+/// 只保留左右滑动：`tap`（点击左右区域翻页）与 `scroll`（上下连续滚动）已删除
+/// （owner 决定，阅读界面改版）。
 public enum PageTurnMode: String, CaseIterable, Hashable, Sendable, Codable {
     /// 左右滑动翻页
     case slide
-
-    /// 点击左右区域翻页
-    case tap
-
-    /// 上下连续滚动
-    case scroll
 }
 
 /// 翻页动画。
+///
+/// 只保留 `none`：`cover` 与 `curl` 已删除（owner 决定，阅读界面改版）。
 public enum PageTurnAnimation: String, CaseIterable, Hashable, Sendable, Codable {
     case none
-    case cover
-    case curl
 }
 
 /// 分页所需的内边距（零 UI 依赖，纯值类型）。
@@ -153,8 +150,11 @@ public struct PaginationConfiguration: Equatable, Sendable {
     /// 背景色预置项
     public var backgroundStyle: ReadingBackgroundStyle
 
-    /// 自定义背景色（`backgroundStyle == .custom` 时使用）
+    /// 自定义背景色（`backgroundStyle == .custom` 时使用，亮色外观）
     public var customBackgroundColor: ReadingColor
+
+    /// 自定义背景色的暗色版本（`backgroundStyle == .custom` 且暗色外观时使用）
+    public var customBackgroundColorDark: ReadingColor
 
     /// 文字颜色策略
     public var textColorMode: ReadingTextColorMode
@@ -190,6 +190,7 @@ public struct PaginationConfiguration: Equatable, Sendable {
         firstLineHeadIndent: CGFloat = 0,
         backgroundStyle: ReadingBackgroundStyle = .white,
         customBackgroundColor: ReadingColor = .defaultCustomBackground,
+        customBackgroundColorDark: ReadingColor = .defaultCustomBackground,
         textColorMode: ReadingTextColorMode = .automatic,
         customTextColor: ReadingColor = .defaultCustomText,
         followsSystemBrightness: Bool = true,
@@ -209,6 +210,7 @@ public struct PaginationConfiguration: Equatable, Sendable {
         self.firstLineHeadIndent = firstLineHeadIndent
         self.backgroundStyle = backgroundStyle
         self.customBackgroundColor = customBackgroundColor
+        self.customBackgroundColorDark = customBackgroundColorDark
         self.textColorMode = textColorMode
         self.customTextColor = customTextColor
         self.followsSystemBrightness = followsSystemBrightness

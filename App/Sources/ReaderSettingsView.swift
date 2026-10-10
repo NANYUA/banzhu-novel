@@ -9,6 +9,12 @@ private struct ReaderFontOption {
     let familyName: String
 }
 
+/// 自定义背景色的两个 hex 输入框（亮色 / 暗色），用于跟踪"当前聚焦的是哪一个"。
+private enum HexColorField: Hashable {
+    case light
+    case dark
+}
+
 /// 阅读设置面板。
 ///
 /// 面板只负责把用户选择整理成新的 `PaginationConfiguration`，
@@ -20,6 +26,16 @@ struct ReaderSettingsView: View {
     let onChange: (PaginationConfiguration) -> Void
 
     @Environment(\.dismiss) private var dismiss
+
+    /// hex 输入框的**草稿文本**：`nil` = 未编辑、跟随配置；非 nil = 用户敲进去的原始串。
+    /// 必须留草稿，否则每敲一键都回写 —— hex 打到一半（如 `#F2F`）必然非法，
+    /// 输入框会跟用户抢输入，一个色值也打不完。
+    @State private var lightHexDraft: String?
+    @State private var darkHexDraft: String?
+
+    /// 当前聚焦的 hex 输入框：**失焦时丢弃非法草稿**，让文字退回当前有效值
+    /// （apple-design-2 §11 就地校验：不让用户看着一个没生效的串以为生效了）。
+    @FocusState private var focusedHexField: HexColorField?
 
     /// 字体白名单：默认系统字体（SF Pro），另给几个适合中文正文阅读的字体族。
     /// 不用 `UIFont.familyNames`，避免把 Roboto / Inter 等第三方字体灌进 Picker。
@@ -128,6 +144,8 @@ struct ReaderSettingsView: View {
                     selection: customBackgroundColorBinding,
                     supportsOpacity: false
                 )
+
+                customBackgroundHexFields
             }
 
             Picker("文字颜色", selection: binding(\.textColorMode)) {
@@ -147,7 +165,7 @@ struct ReaderSettingsView: View {
 
             HStack {
                 Text("上下边距")
-                Slider(value: verticalInsetBinding, in: 0 ... 48, step: 4)
+                Slider(value: verticalInsetBinding, in: -60 ... 48, step: 4)
                 Text("\(Int(configuration.inset.top))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -171,20 +189,6 @@ struct ReaderSettingsView: View {
 
     private var readingSection: some View {
         Section("阅读") {
-            Picker("翻页方式", selection: binding(\.pageTurnMode)) {
-                ForEach(PageTurnMode.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Picker("翻页动画", selection: binding(\.pageTurnAnimation)) {
-                ForEach(PageTurnAnimation.allCases, id: \.self) { animation in
-                    Text(animation.displayName).tag(animation)
-                }
-            }
-            .pickerStyle(.segmented)
-
             Toggle("首行缩进", isOn: firstLineIndentBinding)
 
             Stepper(
@@ -213,7 +217,7 @@ struct ReaderSettingsView: View {
             onChange(next)
         } label: {
             Circle()
-                .fill(Color(uiColor: style.uiColor(custom: configuration.customBackgroundColor)))
+                .fill(Color(uiColor: backgroundUIColor(for: style)))
                 .frame(width: 28, height: 28)
                 .overlay(
                     Circle()
@@ -260,12 +264,21 @@ private extension ReaderSettingsView {
     ///
     /// 放 extension 里：`type_body_length` 不统计 extension，而主类型 body 本就贴着门槛。
     private func swatchHighlightColor(for style: ReadingBackgroundStyle) -> Color {
-        let background = style.uiColor(custom: configuration.customBackgroundColor)
+        let background = backgroundUIColor(for: style)
         return Color(
             uiColor: ReadingTextColorMode.automatic.uiColor(
                 on: background,
                 custom: configuration.customBackgroundColor
             )
+        )
+    }
+
+    /// 当前配置下某个背景预置的 UIKit 取值 —— 亮 / 暗两个自定义色都传进去
+    /// （`ReadingBackgroundStyle.uiColor(custom:customDark:)` 是唯一入口，旧的一参转发已删）。
+    private func backgroundUIColor(for style: ReadingBackgroundStyle) -> UIColor {
+        style.uiColor(
+            custom: configuration.customBackgroundColor,
+            customDark: configuration.customBackgroundColorDark
         )
     }
 
@@ -327,7 +340,9 @@ private extension ReaderSettingsView {
 
     /// 上下边距（U1-8）：与左右分开可调 —— 原先一个「页边距」滑杆同时改四边。
     ///
-    /// 下限给到 0：上下不需要 HIG 那套水平页边距的下限，且正文上下还各有安全区兜底。
+    /// 滑杆范围 `-60 ... 48`（owner 决定放开负值）：**负值让正文侵入上下安全区**，
+    /// 最多多出 60pt 正文高度；上限仍是 48pt。上下不需要 HIG 那套水平页边距的下限
+    /// （左右边距的下限仍守 8pt，见 `horizontalInsetBinding`）。
     var verticalInsetBinding: Binding<CGFloat> {
         Binding(
             get: { configuration.inset.top },
@@ -362,6 +377,118 @@ private extension ReaderSettingsView {
                 onChange(next)
             }
         )
+    }
+
+    /// 亮色自定义背景色的 hex 输入框绑定（与 `customBackgroundColorBinding` 写**同一份配置**）。
+    var customBackgroundColorHexBinding: Binding<String> {
+        hexTextBinding(
+            draft: $lightHexDraft,
+            current: configuration.customBackgroundColor
+        ) { color in
+            var next = configuration
+            next.customBackgroundColor = color
+            onChange(next)
+        }
+    }
+
+    /// 暗色自定义背景色的 hex 输入框绑定：与上面那个**对称**，只是写 `customBackgroundColorDark`。
+    var customBackgroundColorDarkHexBinding: Binding<String> {
+        hexTextBinding(
+            draft: $darkHexDraft,
+            current: configuration.customBackgroundColorDark
+        ) { color in
+            var next = configuration
+            next.customBackgroundColorDark = color
+            onChange(next)
+        }
+    }
+
+    /// 亮 / 暗两个 hex 输入框（与上面的 `ColorPicker` 并存：取色器负责「挑」，输入框负责「精确填」）。
+    var customBackgroundHexFields: some View {
+        Group {
+            hexColorField(
+                title: "亮色代码",
+                accessibilityLabel: "亮色自定义背景色，输入颜色代码",
+                field: .light,
+                text: customBackgroundColorHexBinding
+            )
+            hexColorField(
+                title: "暗色代码",
+                accessibilityLabel: "暗色自定义背景色，输入颜色代码",
+                field: .dark,
+                text: customBackgroundColorDarkHexBinding
+            )
+        }
+        // 焦点一旦离开某个输入框，就丢掉它的草稿 → 文字被 `get` 拉回当前有效值。
+        .onChange(of: focusedHexField) { previous, _ in
+            revertHexDraft(previous)
+        }
+        // 取色器改了颜色 ⇒ 同侧的草稿作废，输入框立刻显示新色值（否则会停在旧串上）。
+        .onChange(of: configuration.customBackgroundColor) { _, _ in
+            lightHexDraft = nil
+        }
+        .onChange(of: configuration.customBackgroundColorDark) { _, _ in
+            darkHexDraft = nil
+        }
+    }
+
+    /// 一行 hex 输入框：左边标签，右边等宽输入区。
+    ///
+    /// 触控目标：`Form` 的行本身已是 44pt 高（HIG §9 最小可点区域），输入框撑满行高。
+    private func hexColorField(
+        title: String,
+        accessibilityLabel: String,
+        field: HexColorField,
+        text: Binding<String>
+    ) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField("#F2F2F7", text: text)
+                .multilineTextAlignment(.trailing)
+                .monospaced()
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focusedHexField, equals: field)
+                // 回车不一定失焦：这里也要丢草稿，否则无效串会一直留在框里。
+                .onSubmit { revertHexDraft(field) }
+                .accessibilityLabel(accessibilityLabel)
+        }
+    }
+
+    /// hex 文本 ⇄ `ReadingColor` 的桥。
+    ///
+    /// `get`：有草稿就回吐草稿（**不与正在输入的用户抢光标**），否则回吐当前有效值的 `#RRGGBB`。
+    /// `set`：**能解析才写回配置**；解析失败只更新草稿 —— 配置保留上一个有效值，
+    /// 既不写坏配置也不会崩（`ReadingColor(hex:)` 解析失败返回 `nil`，不是陷阱）。
+    private func hexTextBinding(
+        draft: Binding<String?>,
+        current: ReadingColor,
+        apply: @escaping (ReadingColor) -> Void
+    ) -> Binding<String> {
+        Binding(
+            get: { draft.wrappedValue ?? current.hexString },
+            set: { text in
+                guard let color = ReadingColor(hex: text) else {
+                    draft.wrappedValue = text
+                    return
+                }
+                draft.wrappedValue = nil
+                apply(color)
+            }
+        )
+    }
+
+    /// 丢掉指定输入框的草稿；`nil`（焦点离开全部输入框）时无事可做。
+    private func revertHexDraft(_ field: HexColorField?) {
+        switch field {
+        case .light:
+            lightHexDraft = nil
+        case .dark:
+            darkHexDraft = nil
+        case nil:
+            break
+        }
     }
 
     var customTextColorBinding: Binding<Color> {

@@ -1,3 +1,4 @@
+import Foundation
 import NovelCore
 import SwiftUI
 import UIKit
@@ -28,6 +29,49 @@ extension ReadingColor {
             self = .defaultCustomBackground
         }
     }
+
+    /// `#RRGGBB` 形式的十六进制串（阅读设置面板的 hex 输入框回显用）。
+    ///
+    /// 透明度**不参与**：自定义背景色恒为不透明（`ColorPicker` 也关掉了 `supportsOpacity`）。
+    /// 通道值一律先 `rounded()` 再转 `Int`（**不用 `UInt8`**：越界值会直接触发运行时陷阱，
+    /// 而这个值可能来自手工改过的持久化 JSON）。
+    var hexString: String {
+        String(
+            format: "#%02X%02X%02X",
+            Int((red * 255).rounded()),
+            Int((green * 255).rounded()),
+            Int((blue * 255).rounded())
+        )
+    }
+
+    /// 解析 `#RRGGBB` / `RRGGBB`（6 位十六进制，大小写皆可）；不合法返回 `nil`。
+    ///
+    /// 只认 6 位：3 位缩写（`#FFF`）与 8 位带透明度（`#RRGGBBAA`）都判非法 ——
+    /// 自定义背景色恒不透明，接受透明度会制造"输入了却不生效"的歧义。
+    /// 非法的输入由调用方（`ReaderSettingsView` 的 hex 输入框）**丢弃**，配置保留上一个有效值。
+    init?(hex: String) {
+        let trimmed = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
+        guard digits.count == 6, digits.allSatisfy(\.isHexDigit), let value = UInt32(digits, radix: 16) else {
+            return nil
+        }
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+}
+
+/// 阅读页「跟随」预置的浅 / 深两个取值。
+///
+/// **只作用于阅读页**：App 全局底色仍是 `AppTheme.Surface.page`（`systemGroupedBackground`，
+/// 深色纯黑），owner 明确只改阅读页。
+private enum ReaderFollowBackground {
+    /// 浅色：`systemGroupedBackground` 的浅色取值 #F2F2F7（与改动前逐值一致）。
+    static let light = UIColor(red: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF7 / 255, alpha: 1)
+    /// 深色：**#161616**（owner 指定）。
+    static let dark = UIColor(red: 0x16 / 255, green: 0x16 / 255, blue: 0x16 / 255, alpha: 1)
 }
 
 extension ReadingBackgroundStyle {
@@ -50,14 +94,24 @@ extension ReadingBackgroundStyle {
     ///
     /// ⚠️ `case .white` 的**原始值刻意没改名**（仍叫 `white`）：它是 `Codable` 的持久化
     /// 原始值，改名会让已落盘的阅读设置解码失败、退回默认值。改的只是它**渲染成什么颜色**。
-    func uiColor(custom: ReadingColor) -> UIColor {
+    ///
+    /// `custom` 是亮色外观下的自定义背景色，`customDark` 是深色外观下的（阅读界面改版：
+    /// 自定义背景色**亮暗分开**）。
+    func uiColor(custom: ReadingColor, customDark: ReadingColor) -> UIColor {
         switch self {
         case .white:
             // 「跟随」= App 总背景（U9-4：阅读外观背景色跟随软件总背景）。
-            // 语义色与 `AppTheme.Surface.page`（`Color(.systemGroupedBackground)`）**同源**：
-            // 浅色 #F2F2F7、深色纯黑。这里直接用 UIKit 语义色而不是 `UIColor(AppTheme.Surface.page)`：
+            // 浅色仍是 `systemGroupedBackground` 的浅色值 #F2F2F7（与 `AppTheme.Surface.page`
+            // 同源）；深色**刻意改成 #161616**（owner 指定，只动阅读页 ——
+            // `AppTheme.Surface.page` 仍是纯黑，App 全局不受影响）。
+            //
+            // 取色方式仍是**动态色**：不能写 `UIColor(AppTheme.Surface.page)` ——
             // `UIColor(Color)` 桥接会把动态色解析成调用当时的静态值，切明暗外观就不会跟着变了。
-            .systemGroupedBackground
+            UIColor { traits in
+                traits.userInterfaceStyle == .dark
+                    ? ReaderFollowBackground.dark
+                    : ReaderFollowBackground.light
+            }
         case .sepia:
             UIColor(red: 0.96, green: 0.93, blue: 0.84, alpha: 1)
         case .eyeCare:
@@ -65,7 +119,12 @@ extension ReadingBackgroundStyle {
         case .black:
             .black
         case .custom:
-            custom.uiColor
+            // 自定义背景色亮暗分开：浅色外观用 `custom`、深色外观用 `customDark`。
+            // 两个取值本身都是静态色，包进 dynamicProvider 里按 traits 二选一即可
+            // （用户没改过时二者同为 `defaultCustomBackground`，行为不突变）。
+            UIColor { traits in
+                traits.userInterfaceStyle == .dark ? customDark.uiColor : custom.uiColor
+            }
         }
     }
 }
@@ -123,32 +182,6 @@ extension ReadingAppearanceMode {
             .light
         case .dark:
             .dark
-        }
-    }
-}
-
-extension PageTurnMode {
-    var displayName: String {
-        switch self {
-        case .slide:
-            "左右滑动"
-        case .tap:
-            "点击翻页"
-        case .scroll:
-            "上下滚动"
-        }
-    }
-}
-
-extension PageTurnAnimation {
-    var displayName: String {
-        switch self {
-        case .none:
-            "无"
-        case .cover:
-            "覆盖"
-        case .curl:
-            "仿真"
         }
     }
 }
