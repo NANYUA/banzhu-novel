@@ -4,8 +4,11 @@ import SwiftUI
 
 /// App 入口界面。
 ///
-/// 当前提供书架、书城、搜索、下载与设置五个入口，
+/// 当前提供书架、书城、搜索与设置四个入口，
 /// 搜索 / 书城加书成功后即时同步书架状态。
+///
+/// U5-4：底栏的「下载」入口摘掉，下载队列改为书架里的固定「本地」分组
+/// （`BookshelfView` → `State.showsLocalGroup` → 复用 `DownloadQueueView`）。
 struct RootView: View {
     @State private var bookshelfStore = Store(initialState: BookshelfFeature.State()) {
         BookshelfFeature()
@@ -71,11 +74,9 @@ struct RootView: View {
                     Label("搜索", systemImage: "magnifyingglass")
                 }
 
-                DownloadQueueView(store: downloadStore)
-                    .tabItem {
-                        Label("下载", systemImage: "arrow.down.circle")
-                    }
-
+                // U5-4：「下载」不再是底栏的一项 —— 入口搬进了书架的固定「本地」分组
+                // （`BookshelfView` 在 `showsLocalGroup` 时复用整页 `DownloadQueueView`）。
+                // ⚠️ `downloadStore` 仍然要传给书架 / 书城 / 搜索，只是不再单独占一个 tab。
                 SiteSettingsView(store: siteStore)
                     .tabItem {
                         Label("设置", systemImage: "gearshape")

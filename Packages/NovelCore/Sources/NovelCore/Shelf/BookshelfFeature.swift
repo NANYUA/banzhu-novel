@@ -47,6 +47,12 @@ public struct BookshelfFeature: Reducer {
         case groupsLoaded([ShelfGroupSnapshot])
         /// 选择分组；`nil` 表示「全部」
         case groupSelected(UUID?)
+        /// 选中固定的「本地」分组（U5-4：内容区 = 下载队列）。
+        ///
+        /// 与 `groupSelected` 分成两个 case，而不是给 `groupSelected` 加一个哨兵值：
+        /// 「本地」不是 SwiftData 里的记录（`BookGroup` 只有 `id/name/sortIndex/createdAt`，
+        /// 没有「系统固定」标记），它装的是下载队列这种非书内容，语义上与「选中一个书组」并列。
+        case localGroupSelected
         /// 进入 / 退出编辑态
         case editModeChanged(Bool)
         /// 切换某本书的编辑选中状态
@@ -139,8 +145,21 @@ public struct BookshelfFeature: Reducer {
                 return .none
 
             case let .groupSelected(groupID):
-                guard groupID != state.selectedGroupID else { return .none }
+                // 判据里带上 `showsLocalGroup`：从「本地」切回「全部」时 `groupID` 与
+                // `selectedGroupID` 都是 `nil`，只看后者会把这一下当成重复点击吞掉。
+                guard groupID != state.selectedGroupID || state.showsLocalGroup else { return .none }
                 state.selectedGroupID = groupID
+                state.showsLocalGroup = false
+                return .none
+
+            case .localGroupSelected:
+                // 幂等：已经在本地分组上（书组选中也已清空）时不再改动状态。
+                if state.showsLocalGroup, state.selectedGroupID == nil {
+                    return .none
+                }
+                // 🔴 不变量：本地分组与「选中的书组」互斥（判据与理由见 `State.showsLocalGroup`）。
+                state.showsLocalGroup = true
+                state.selectedGroupID = nil
                 return .none
 
             case let .editModeChanged(isEditing):
@@ -186,6 +205,8 @@ public struct BookshelfFeature: Reducer {
                 }
                 state.groups.sort { $0.sortIndex < $1.sortIndex }
                 state.selectedGroupID = group.id
+                // 新建后自动选中新分组 ⇒ 与「选中书组」同一条不变量：本地标记必须清掉。
+                state.showsLocalGroup = false
                 return .none
 
             case let .renameGroup(groupID, name):
@@ -282,6 +303,7 @@ public extension BookshelfFeature {
             rows: [ShelfRow] = [],
             groups: [ShelfGroupSnapshot] = [],
             selectedGroupID: UUID? = nil,
+            showsLocalGroup: Bool = false,
             isLoading: Bool = false,
             errorMessage: String? = nil,
             addingCount: Int = 0,
@@ -294,6 +316,7 @@ public extension BookshelfFeature {
             self.rows = rows
             self.groups = groups
             self.selectedGroupID = selectedGroupID
+            self.showsLocalGroup = showsLocalGroup
             self.isLoading = isLoading
             self.errorMessage = errorMessage
             self.addingCount = addingCount
@@ -312,6 +335,23 @@ public extension BookshelfFeature {
 
         /// 当前选中的分组；`nil` 表示「全部」。
         public var selectedGroupID: UUID?
+
+        /// 是否正停在**固定**的「本地」分组上（内容区 = 下载队列，U5-4）。
+        ///
+        /// ## 为什么不复用 `selectedGroupID`
+        /// 「本地」装的是下载队列，不是书。它**不进 SwiftData**：`BookGroup` 只有
+        /// `id/name/sortIndex/createdAt`，没有「系统固定」标记；伪造一条记录会污染用户数据
+        /// （能被重命名 / 删除 / 参与迁移），照搬「全部」那种隐含视图也不行 —— 那个是「不过滤」，
+        /// 而这是个「另一类内容」的并列选中状态。
+        ///
+        /// ## 🔴 不变量（**由 reducer 保证，界面不得自行维护**）
+        /// - 选中本地（`.localGroupSelected`）⇒ `selectedGroupID` 被清空；
+        /// - 选中任何书组 / 「全部」（`.groupSelected`）或新建分组（`.groupCreated`）⇒ 本地标记被清掉；
+        /// - 故 `showsLocalGroup == true` 时 `selectedGroupID` 必为 `nil`。
+        ///
+        /// 界面只负责「读」：胶囊高亮读 `showsLocalGroup` / `isAllSelected`，
+        /// 内容区读 `showsLocalGroup`；`visibleRows` 不为它加任何分支。
+        public var showsLocalGroup = false
 
         /// 编辑态批量操作开关（长按或工具栏「选择」进入）。
         public var isEditing = false
@@ -341,6 +381,15 @@ public extension BookshelfFeature {
         /// 🔴 与 `errorMessage` 分开：那个是「整页加载失败」，这个是「某次操作失败」，
         /// 两者在界面上的呈现完全不同。
         public var addNotice: String?
+
+        /// 「全部」胶囊是否选中。
+        ///
+        /// 🔴 不能只判 `selectedGroupID == nil`：选中「本地」时它同样被清成 `nil`，
+        /// 只看它会让「全部」与「本地」两个胶囊同时高亮。判据放这里（而不是界面里）——
+        /// 界面不重复推导这条不变量。
+        public var isAllSelected: Bool {
+            selectedGroupID == nil && !showsLocalGroup
+        }
 
         /// 当前分组下的行（「全部」= 不过滤）。
         public var visibleRows: [ShelfRow] {

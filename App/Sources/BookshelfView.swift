@@ -27,10 +27,12 @@ struct BookshelfView: View {
     let store: StoreOf<BookshelfFeature>
     let downloadStore: StoreOf<DownloadFeature>
 
-    @State private var isShowingNewGroupAlert = false
+    // ⚠️ 下面三个刻意**不是** `private`：分组栏已拆到 `BookshelfView+GroupBar.swift`，
+    // 而跨文件的 extension 读不到 file-private 状态（`newGroupName` 只在本文件用，保持 `private`）。
+    @State var isShowingNewGroupAlert = false
     @State private var newGroupName = ""
-    @State private var renamingGroup: ShelfGroupSnapshot?
-    @State private var renameGroupName = ""
+    @State var renamingGroup: ShelfGroupSnapshot?
+    @State var renameGroupName = ""
     @State private var isConfirmingDelete = false
     /// 详情页目标。用显式 push 而不是 `NavigationLink`：见 `rowContent` 的注释。
     @State private var detailRow: ShelfRow?
@@ -45,7 +47,12 @@ struct BookshelfView: View {
                     groupBar(viewStore)
 
                     ZStack {
-                        if viewStore.isLoading, viewStore.rows.isEmpty {
+                        if viewStore.showsLocalGroup {
+                            // 「本地」固定分组的内容 = 下载队列。整页复用 `DownloadQueueView`，
+                            // 不复制它的实现；分组栏仍在它上方，用户随时能切走。
+                            // 它不读 `visibleRows`：本地分组不参与书目过滤。
+                            DownloadQueueView(store: downloadStore)
+                        } else if viewStore.isLoading, viewStore.rows.isEmpty {
                             // 首次加载中，还没数据也不确定是否失败
                             ProgressView("加载中…")
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -161,99 +168,9 @@ struct BookshelfView: View {
     }
 }
 
-// MARK: - 分组栏
+// MARK: - 工具栏
 
 private extension BookshelfView {
-    func groupBar(
-        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
-    ) -> some View {
-        VStack(spacing: 0) {
-            groupChips(viewStore)
-
-            if let notice = viewStore.groupNotice {
-                groupNotice(notice, viewStore: viewStore)
-            }
-
-            // 分组栏与列表之间的一条发丝分隔线（系统 `Divider()`，不自算 1px）。
-            // 滚动列表时它固定不动，把「筛选」和「内容」两个区块分开。
-            Divider()
-        }
-        .background(AppTheme.Surface.page)
-    }
-
-    private func groupChips(
-        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
-    ) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DesignTokens.Spacing.xs) {
-                GroupChip(
-                    title: "全部",
-                    isSelected: viewStore.selectedGroupID == nil
-                ) {
-                    viewStore.send(.groupSelected(nil))
-                }
-
-                ForEach(viewStore.groups) { group in
-                    GroupChip(
-                        title: group.name,
-                        isSelected: viewStore.selectedGroupID == group.id
-                    ) {
-                        viewStore.send(.groupSelected(group.id))
-                    }
-                    .contextMenu {
-                        Button("重命名") {
-                            renamingGroup = group
-                            renameGroupName = group.name
-                        }
-                        Button("删除", role: .destructive) {
-                            viewStore.send(.deleteGroup(group.id))
-                        }
-                    }
-                }
-
-                Button {
-                    isShowingNewGroupAlert = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.tint)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("新建分组")
-            }
-            .padding(.horizontal, DesignTokens.Spacing.md)
-            .padding(.vertical, DesignTokens.Spacing.xs)
-        }
-    }
-
-    private func groupNotice(
-        _ notice: String,
-        viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
-    ) -> some View {
-        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.orange)
-            Text(notice)
-                .font(.subheadline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                viewStore.send(.groupNoticeDismissed)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            // §9 按下反馈：`.plain` 按下零反馈；强调层按 12pt 内缩贴图标自身的圆，
-            // 不铺成 44pt 大圆盘（命中区仍由 label 的 44×44 + `.contentShape` 提供）。
-            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Circle().inset(by: DesignTokens.Spacing.sm))))
-            .accessibilityLabel("关闭提示")
-        }
-        .padding(.horizontal, DesignTokens.Spacing.md)
-        .padding(.bottom, DesignTokens.Spacing.xs)
-    }
-
     @ToolbarContentBuilder
     func toolbarContent(
         _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
@@ -415,36 +332,6 @@ private extension BookshelfView {
     private var isLongPressSuppressed: Bool {
         guard let lastLongPressAt else { return false }
         return Date().timeIntervalSince(lastLongPressAt) < 0.4
-    }
-}
-
-// MARK: - 分组胶囊
-
-private struct GroupChip: View {
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .lineLimit(1)
-                .padding(.horizontal, DesignTokens.Spacing.md)
-                .padding(.vertical, DesignTokens.Spacing.xs)
-                // §9 触控目标：胶囊本身做到 44pt —— 强调层贴的就是它，所以不会出现「按下变胖」。
-                .frame(minHeight: 44)
-                // 未选中 = 白卡面 + 主色文字（U1-1 的「卡面 = 白」同样适用于分组栏里的贴片）；
-                // 选中 = 品牌强调色填充。
-                .background(
-                    Capsule().fill(
-                        isSelected ? AppTheme.accent : AppTheme.Surface.card
-                    )
-                )
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
-        }
-        // 强调层贴胶囊轮廓，避免按下瞬间两端露出方角（U0-4）。
-        .buttonStyle(PressableCardButtonStyle(pressedScale: 0.96, shape: AnyShape(Capsule())))
     }
 }
 
