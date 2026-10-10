@@ -45,6 +45,27 @@ public struct ChapterItem: Equatable, Sendable, Identifiable {
     public let isDownloaded: Bool
 }
 
+extension ChapterItem {
+    /// `ChapterRecord` → 目录行投影。**唯一**的「本地记录 → 界面状态」翻译处。
+    ///
+    /// 🔴 「已下载」只认 `ChapterRecord.source == .downloaded`：
+    /// 既不用 `hasLocalText`、也不看本地文件名反推 —— 阅读时的自动缓存同样会让
+    /// `hasLocalText` 为 true，但那是**可被 LRU 淘汰**的缓存，不是用户下载的内容。
+    /// 判错的方向要么是「下载章被当缓存删掉」，要么是「缓存章被当下载永不淘汰」，两条都不可接受。
+    ///
+    /// 单独抽成一个 init 是为了能被 `NovelCoreTests` 直接覆盖（原来它埋在
+    /// `ChapterListLoaderLive.load` 的闭包里，全仓无测试）。
+    init(record: ChapterRecord) {
+        self.init(
+            number: record.number,
+            name: record.name,
+            path: record.path,
+            hasLocalText: record.hasLocalText,
+            isDownloaded: record.source == .downloaded
+        )
+    }
+}
+
 extension DependencyValues {
     /// 章节列表加载器。测试里用 `withDependencies { $0.chapterListLoader.load = { … } }` 替换。
     var chapterListLoader: ChapterListLoader {
@@ -76,14 +97,6 @@ enum ChapterListLoaderLive {
 
         return chapters
             .sorted { $0.number < $1.number }
-            .map {
-                ChapterItem(
-                    number: $0.number,
-                    name: $0.name,
-                    path: $0.path,
-                    hasLocalText: $0.hasLocalText,
-                    isDownloaded: $0.source == .downloaded
-                )
-            }
+            .map { ChapterItem(record: $0) }
     }
 }

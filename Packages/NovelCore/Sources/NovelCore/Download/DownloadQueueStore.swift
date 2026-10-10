@@ -116,7 +116,11 @@ enum DownloadQueueStoreLive {
             if let existing = tasksByID[id] {
                 // 已完成的章节不重复入队；失败/暂停的章节重新入队，
                 // 这样「断点续传」不需要用户重新点一遍。
-                if existing.state != .done {
+                //
+                // ⚠️ **正在下载**的也不要碰：`requeue()` 会把它退回 `queued`，
+                // 而在飞请求的结果回来时 `DownloadFeature` 只认 `state == .downloading`，
+                // 于是这次结果被丢弃 —— 白下一次，进度还会倒退。
+                if existing.state != .done, existing.state != .downloading {
                     existing.requeue()
                 }
             } else {

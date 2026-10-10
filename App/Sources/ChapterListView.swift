@@ -11,7 +11,7 @@ import SwiftUI
 ///
 /// ## 下载（U1-7）
 /// - 每行右侧是**单章**下载按钮（已下载则置灰）；
-/// - 区块头部给一句「已下载 N 章」，并给「下载章节…」入口；
+/// - 区块头部给一句「共 N 章 · 已下载 M 章」，并给「下载章节…」入口；
 /// - 入口点开的是多选面板 `ChapterDownloadPicker`（全选 / 多选，已下载的不可勾选）。
 struct ChapterListView: View {
     let data: ChapterDirectoryData
@@ -25,14 +25,26 @@ struct ChapterListView: View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
             header
 
-            if data.isLoading, data.visibleChapters.isEmpty {
-                ProgressView("目录加载中…")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, DesignTokens.Spacing.lg)
-            } else if let message = data.errorMessage, data.visibleChapters.isEmpty {
-                errorState(message)
-            } else if data.visibleChapters.isEmpty {
-                emptyState
+            // 加载失败**无条件**在区块顶部插一条错误条：已经有旧目录时重试失败也必须说话，
+            // 否则用户点了重试却看不出任何变化（旧数据照旧显示，不替换列表）。
+            if let message = data.errorMessage {
+                InlineErrorBanner(
+                    title: "目录加载失败",
+                    message: message,
+                    onRetry: onRetry
+                )
+            }
+
+            if data.visibleChapters.isEmpty {
+                // 没数据可显示时才轮到「加载中 / 空态」占位；失败原因已由上面的错误条给出，
+                // 不再叠一张空态卡说第二遍。
+                if data.isLoading {
+                    ProgressView("目录加载中…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, DesignTokens.Spacing.lg)
+                } else if data.errorMessage == nil {
+                    emptyState
+                }
             } else {
                 chapterRows
                 showAllButton
@@ -53,23 +65,28 @@ private extension ChapterListView {
 
                 Spacer(minLength: DesignTokens.Spacing.xs)
 
-                Button {
-                    onDownloadRequested()
-                } label: {
-                    Label("下载章节…", systemImage: "arrow.down.circle")
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
+                // 0 章时不摆一个恒不可用的下载入口（下面紧接着就是空态卡片）。
+                if data.totalCount > 0 {
+                    Button {
+                        onDownloadRequested()
+                    } label: {
+                        Label("下载章节…", systemImage: "arrow.down.circle")
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .font(.subheadline)
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("下载章节，选择要下载的章节")
                 }
-                .font(.subheadline)
-                .buttonStyle(.bordered)
-                .disabled(data.totalCount == 0)
-                .accessibilityLabel("下载章节，选择要下载的章节")
             }
 
             // U1-7：入口就给「已下载 N 章」，点进去之前就知道这本下过多少。
-            Text("共 \(data.totalCount) 章 · 已下载 \(data.downloadedCount) 章")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // 措辞与选择面板 header 保持一致（同一口径、同一句式）。
+            if data.totalCount > 0 {
+                Text("共 \(data.totalCount) 章 · 已下载 \(data.downloadedCount) 章")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -126,6 +143,11 @@ private extension ChapterListView {
         .contentShape(Rectangle())
     }
 
+    /// 单章下载按钮。
+    ///
+    /// 与左侧整行同一套按下反馈（可见强调层）：原来用 `.borderless` 只有系统级 dim，
+    /// 同一行里两种反馈量级不一致，点右边几乎看不出按下了。
+    /// 圆形强调层贴合图标本身的轮廓。
     func downloadButton(_ chapter: ChapterItem) -> some View {
         Button {
             onDownloadChapter(chapter)
@@ -133,10 +155,11 @@ private extension ChapterListView {
             Image(systemName: chapter.isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
                 .font(.title3)
                 .foregroundStyle(chapter.isDownloaded ? Color.green : AppTheme.accent)
-                .frame(width: 44, height: 44)
+                // 用 min 而不是固定值：`.font(.title3)` 会随 Dynamic Type 放大，写死会裁掉图标。
+                .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(PressableCardButtonStyle(pressedScale: 0.94, shape: AnyShape(Circle())))
         .disabled(chapter.isDownloaded)
         .accessibilityLabel(chapter.isDownloaded ? "已下载" : "下载本章")
     }
@@ -192,29 +215,6 @@ private extension ChapterListView {
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
         )
     }
-
-    func errorState(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            Label("目录加载失败", systemImage: "exclamationmark.triangle")
-                .font(.subheadline.weight(.semibold))
-
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Button("重试") {
-                onRetry()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(DesignTokens.Spacing.md)
-        .background(
-            AppTheme.Surface.card,
-            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-        )
-    }
 }
 
 /// 内嵌目录区块的只读数据（由 `BookDetailFeature.State` 派生，视图只读值、不碰 reducer）。
@@ -240,14 +240,23 @@ struct ChapterDirectoryData {
 /// - 多选 + 全选（全选只勾**未下载**的章节）；
 /// - 已下载的章节明确标「已下载」且置灰不可选 —— 判定走 `ChapterItem.isDownloaded`，
 ///   也就是 `ChapterRecord.source == .downloaded`，不绕过 source 标记自己猜；
-/// - 顶部给一句「已下载 N 章」，底部常驻「下载选中的 K 章」。
+/// - 顶部给一句「共 N 章 · 已下载 M 章」，底部常驻「下载选中的 K 章」。
+///
+/// 勾选逻辑（谁可被勾、全选选谁）全部在 `ChapterDownloadSelection` 这个值类型里，
+/// 本视图只渲染它、并把结果回传给 `onConfirm`。
+/// 「已下载 / 可下载」两个计数由 `BookDetailFeature.State` 派生后**作为入参**传进来，
+/// 面板不再自己 `filter().count` —— 同一口径只有一处。
 ///
 /// 这里用 `List` 是安全的：它长在 sheet 自己的滚动上下文里，没有嵌进详情页的 `ScrollView`。
 struct ChapterDownloadPicker: View {
     let chapters: [ChapterItem]
+    /// 已下载章节数（目录 header 同源）。
+    let downloadedCount: Int
+    /// 可勾选（未下载）章节数，决定「全选」是否可用。
+    let downloadableCount: Int
     let onConfirm: ([ChapterItem]) -> Void
 
-    @State private var selectedPaths: Set<String> = []
+    @State private var selection = ChapterDownloadSelection()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -258,7 +267,7 @@ struct ChapterDownloadPicker: View {
                         row(chapter)
                     }
                 } header: {
-                    Text("已下载 \(downloadedCount) 章，共 \(chapters.count) 章")
+                    Text("共 \(chapters.count) 章 · 已下载 \(downloadedCount) 章")
                 } footer: {
                     Text("已下载的章节永久保留，不会被缓存淘汰；勾选的章节会按章号顺序逐章下载。")
                 }
@@ -278,10 +287,10 @@ struct ChapterDownloadPicker: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isAllDownloadableSelected ? "取消全选" : "全选") {
-                        toggleSelectAll()
+                    Button(selection.isAllSelected(in: chapters) ? "取消全选" : "全选") {
+                        selection.toggleSelectAll(in: chapters)
                     }
-                    .disabled(downloadableChapters.isEmpty)
+                    .disabled(downloadableCount == 0)
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -292,22 +301,8 @@ struct ChapterDownloadPicker: View {
 }
 
 private extension ChapterDownloadPicker {
-    var downloadedCount: Int {
-        chapters.filter(\.isDownloaded).count
-    }
-
-    /// 可勾选的章节：已下载的**不参与**（它们既不用再下、也不该被取消）。
-    var downloadableChapters: [ChapterItem] {
-        chapters.filter { !$0.isDownloaded }
-    }
-
     var selectedChapters: [ChapterItem] {
-        chapters.filter { selectedPaths.contains($0.path) }
-    }
-
-    var isAllDownloadableSelected: Bool {
-        !downloadableChapters.isEmpty
-            && downloadableChapters.allSatisfy { selectedPaths.contains($0.path) }
+        selection.selectedChapters(in: chapters)
     }
 
     var confirmBar: some View {
@@ -333,7 +328,7 @@ private extension ChapterDownloadPicker {
 
     func row(_ chapter: ChapterItem) -> some View {
         Button {
-            toggle(chapter)
+            selection.toggle(chapter)
         } label: {
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Image(systemName: selectionIcon(chapter))
@@ -372,32 +367,51 @@ private extension ChapterDownloadPicker {
         if chapter.isDownloaded {
             return "checkmark.circle.fill"
         }
-        return selectedPaths.contains(chapter.path) ? "checkmark.circle.fill" : "circle"
+        return selection.isSelected(chapter) ? "checkmark.circle.fill" : "circle"
     }
 
     func rowAccessibilityLabel(for chapter: ChapterItem) -> String {
         if chapter.isDownloaded {
             return "\(chapter.name)，已下载，不可重复选择"
         }
-        return "\(chapter.name)，\(selectedPaths.contains(chapter.path) ? "已选中" : "未选中")"
+        return "\(chapter.name)，\(selection.isSelected(chapter) ? "已选中" : "未选中")"
     }
+}
 
-    func toggle(_ chapter: ChapterItem) {
-        // 已下载的章节不可勾选（UI 已置灰禁用，这里再挡一道，行为不依赖 UI 层）。
-        guard !chapter.isDownloaded else { return }
-        if selectedPaths.contains(chapter.path) {
-            selectedPaths.remove(chapter.path)
-        } else {
-            selectedPaths.insert(chapter.path)
-        }
-    }
+/// 页内 inline 错误条：详情读库失败与目录加载失败**共用同一套**视觉与「重试」入口。
+///
+/// 它插在区块顶部、**不替换**已有内容：已经有旧数据时重试失败，用户同样要能看到原因，
+/// 否则「点了重试没反应」和「没点」看起来一样。
+struct InlineErrorBanner: View {
+    let title: String
+    let message: String
+    let onRetry: () -> Void
 
-    func toggleSelectAll() {
-        if isAllDownloadableSelected {
-            selectedPaths.removeAll()
-        } else {
-            selectedPaths = Set(downloadableChapters.map(\.path))
+    var body: some View {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
+                Label(title, systemImage: "exclamationmark.triangle")
+                    .font(.subheadline.weight(.semibold))
+
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // `.controlSize(.large)` 保证「重试」是 44pt 触控目标。
+            Button("重试") {
+                onRetry()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DesignTokens.Spacing.md)
+        .background(
+            AppTheme.Surface.card,
+            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+        )
     }
 }
 
@@ -450,6 +464,8 @@ extension DownloadChapterRequest {
             ChapterItem(number: 2, name: "第二章 风云起", path: "/1/1/2.html", hasLocalText: true, isDownloaded: true),
             ChapterItem(number: 3, name: "第三章 长街", path: "/1/1/3.html", hasLocalText: false, isDownloaded: false),
         ],
+        downloadedCount: 1,
+        downloadableCount: 2,
         onConfirm: { _ in }
     )
 }

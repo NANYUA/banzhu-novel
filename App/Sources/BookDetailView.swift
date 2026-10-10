@@ -26,8 +26,10 @@ struct BookDetailView: View {
 
     @State private var isIntroExpanded = false
     /// 简介「不被截断时的高度」与「4 行截断后的高度」，用来判断是否真的被截断（U1-5）。
-    @State private var introFullHeight: CGFloat = 0
-    @State private var introClampedHeight: CGFloat = 0
+    ///
+    /// 初值 -1 = 「还没量到」；两个高度都量到之后才判决（见 `isIntroTruncated`）。
+    @State private var introFullHeight: CGFloat = -1
+    @State private var introClampedHeight: CGFloat = -1
     /// 要打开的那一章 + 显式 push 开关。
     ///
     /// 用 `Button` + 显式 push 而不是 `NavigationLink`：普通容器里的 `NavigationLink`
@@ -76,6 +78,7 @@ struct BookDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
                     header(viewStore.detail)
+                    detailStatus(viewStore)
                     shelfSection(viewStore)
                     introSection(viewStore.detail.intro)
                     infoSection(viewStore.detail)
@@ -98,6 +101,10 @@ struct BookDetailView: View {
             .sheet(isPresented: $isShowingChapterPicker) {
                 ChapterDownloadPicker(
                     chapters: viewStore.chapters,
+                    // 计数从 reducer 的派生值单向下传：面板不再自己 filter().count，
+                    // 目录 header 与面板 header 永远同一口径。
+                    downloadedCount: viewStore.downloadedChapterCount,
+                    downloadableCount: viewStore.downloadableChapterCount,
                     onConfirm: { selected in
                         isShowingChapterPicker = false
                         enqueue(
@@ -174,13 +181,44 @@ private extension BookDetailView {
             DetailInfoRow(title: "字数", value: detail.wordCount)
             DetailInfoRow(title: "最新章节", value: detail.lastChapter)
             DetailInfoRow(title: "更新时间", value: detail.lastUpdated)
-            DetailInfoRow(title: "标签", value: detail.tags.joined(separator: " · "))
+            DetailInfoRow(title: "标签", value: detail.tags.joined(separator: " · "), isLast: true)
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
         .background(
             AppTheme.Surface.card,
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
         )
+    }
+}
+
+// MARK: - 详情级状态（加载中 / 读取失败）
+
+private extension BookDetailView {
+    /// 本地记录（详情 + 是否在书架）的读取状态。
+    ///
+    /// 读库失败时页面只能继续显示搜索带来的回退字段，而 `isOnShelf` 会停在 false ——
+    /// 已在书架的书看起来就像「没加入过」。所以失败必须说出来，并给一条重试。
+    /// 这里的错误条与目录区块用的是同一个 `InlineErrorBanner`。
+    @ViewBuilder
+    func detailStatus(
+        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
+    ) -> some View {
+        if viewStore.isLoading {
+            HStack(spacing: DesignTokens.Spacing.xs) {
+                ProgressView()
+
+                Text("正在读取本地记录…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let message = viewStore.errorMessage {
+            InlineErrorBanner(
+                title: "本地记录读取失败",
+                message: message,
+                onRetry: { viewStore.send(.reloadDetail) }
+            )
+        }
     }
 }
 
@@ -257,8 +295,12 @@ private extension BookDetailView {
     /// 量文字行数没有公开 API，硬猜字数又不可靠，所以改为量高度：
     /// 一个隐藏的「不限行数」文本量出完整高度，和实际渲染的截断文本比 ——
     /// 完整高度更高才是被截断。只有那时才显示「展开」。
+    ///
+    /// ⚠️ 两个高度都量到（`> 0`）之前不下结论：两个 `GeometryReader` 的到达顺序不保证，
+    /// 若只量到「完整高度」就先判，`0 < 完整高度` 会被当成截断，短简介会闪一下「展开」。
     var isIntroTruncated: Bool {
-        introFullHeight > introClampedHeight + 0.5
+        introFullHeight > 0 && introClampedHeight > 0
+            && introFullHeight > introClampedHeight + 0.5
     }
 
     func introSection(_ intro: String) -> some View {
@@ -275,12 +317,15 @@ private extension BookDetailView {
                     .lineLimit(isIntroExpanded ? nil : 4)
                     .background(heightReader($introClampedHeight))
                     .background(alignment: .top) {
-                        // 只用于量高度：不参与显示、不接受点击。
+                        // 只用于量高度：不参与显示、不接受点击，**也必须移出无障碍树** ——
+                        // `.hidden()` 只让元素不可见，VoiceOver 仍会把整段简介再读一遍
+                        // （第二遍还不在屏幕上，用户无从对应）。
                         Text(intro)
                             .font(.body)
                             .fixedSize(horizontal: false, vertical: true)
                             .hidden()
                             .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                             .background(heightReader($introFullHeight))
                     }
 
@@ -288,8 +333,9 @@ private extension BookDetailView {
                     Button {
                         toggleIntro()
                     } label: {
+                        // §9：两轴都要 44pt —— 只给高度时「展开」只有约 24pt 宽。
                         Text(isIntroExpanded ? "收起" : "展开")
-                            .frame(minHeight: 44)
+                            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                             .contentShape(Rectangle())
                     }
                     .font(.caption)
@@ -341,8 +387,9 @@ private extension BookDetailView {
 private extension BookDetailView {
     /// 主行动入口：有上次阅读记录就是「继续阅读」（+「从第一章开始」），否则是「开始阅读」。
     ///
-    /// 目录还没加载出来时不摆一个点了没反应的按钮 —— 只显示加载中；失败 / 为空
-    /// 由下面的目录区块给出原因和重试。
+    /// 目录还没加载出来时**什么都不摆** —— 点了没反应的死按钮比没有按钮更糟，
+    /// 而「加载中 / 失败 / 为空」由下面的目录区块统一表达（只在那里出一个 ProgressView，
+    /// 首屏不会出现两条「目录加载中…」）。
     @ViewBuilder
     func primaryActions(
         _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
@@ -366,10 +413,6 @@ private extension BookDetailView {
             }
         } else if let first = viewStore.chapters.first {
             readButton("开始阅读", systemImage: "book.pages", chapter: first, isProminent: true)
-        } else if viewStore.isLoadingChapters {
-            ProgressView("目录加载中…")
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, DesignTokens.Spacing.sm)
         }
     }
 
@@ -407,6 +450,8 @@ private extension BookDetailView {
     }
 
     func openReader(_ chapter: ChapterItem) {
+        // 防重入：连点两下时第一次已经 push 了阅读页，第二次不该再压一层。
+        guard !isShowingReader else { return }
         readerChapter = chapter
         isShowingReader = true
     }
@@ -439,8 +484,15 @@ private extension BookDetailView {
                     bookTitle: viewStore.detail.title
                 )
             },
-            onDownloadRequested: { isShowingChapterPicker = true }
+            onDownloadRequested: presentChapterPicker
         )
+    }
+
+    /// 打开章节选择面板。防重入：面板已经在展示时不再重复置位
+    /// （面板内容取自 `viewStore.chapters` 的当前值，不会拿到旧快照）。
+    func presentChapterPicker() {
+        guard !isShowingChapterPicker else { return }
+        isShowingChapterPicker = true
     }
 
     /// 章节 → 下载队列。整本下载就是展开成 N 条按章请求（下载器一次只下一章）。
@@ -497,6 +549,8 @@ private extension BookDetailView {
 private struct DetailInfoRow: View {
     let title: String
     let value: String
+    /// 末行不画分隔线：否则卡片底边上会多出一条像描边的线。
+    var isLast = false
 
     var body: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
@@ -511,7 +565,9 @@ private struct DetailInfoRow: View {
         }
         .padding(.vertical, DesignTokens.Spacing.sm)
         .overlay(alignment: .bottom) {
-            Divider()
+            if !isLast {
+                Divider()
+            }
         }
     }
 }

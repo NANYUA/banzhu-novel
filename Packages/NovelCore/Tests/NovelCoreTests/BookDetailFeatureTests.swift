@@ -1,6 +1,7 @@
 import ComposableArchitecture
 @testable import NovelCore
 import NovelEngine
+import SwiftData
 import XCTest
 
 /// 详情页 reducer 测试。
@@ -116,6 +117,30 @@ final class BookDetailFeatureTests: XCTestCase {
         }
         XCTAssertEqual(store.state.detail, Self.fallback)
         XCTAssertFalse(store.state.isOnShelf)
+        await store.finish()
+    }
+
+    /// 详情读库失败后点「重试」：只重发详情请求（目录有自己的 `reloadChapters`），
+    /// 成功后要能把 `isOnShelf` 修正回来 —— 失败期间它只能停在 false。
+    func test详情读取失败后重试只重发详情请求() async {
+        let local = BookDetail(bookPath: Self.bookPath, title: "本地书名")
+        var initial = BookDetailFeature.State(fallback: Self.fallback)
+        initial.errorMessage = "加载失败"
+        let store = TestStore(initialState: initial) {
+            BookDetailFeature()
+        } withDependencies: {
+            $0.bookDetailLoader.load = { _ in local }
+        }
+
+        await store.send(.reloadDetail) {
+            $0.isLoading = true
+            $0.errorMessage = nil
+        }
+        await store.receive(.loaded(local)) {
+            $0.detail = local
+            $0.isLoading = false
+            $0.isOnShelf = true
+        }
         await store.finish()
     }
 }
@@ -303,7 +328,9 @@ final class BookDetailFeatureTests: XCTestCase {
         await store.finish()
     }
 
-    func test已下载章节计数按source标记统计() {
+    /// 派生计数的**算术**：只对传入的 `isDownloaded` 标记做统计，不碰 `ChapterRecord.source`
+    /// （真正的映射另见 `test目录行的已下载判定只认source标记`）。
+    func test目录派生计数对已下载标记做算术统计() {
         var state = BookDetailFeature.State(fallback: Self.fallback)
         state.chapters = [
             Self.makeChapter(number: 1, isDownloaded: true),
@@ -471,5 +498,91 @@ final class BookDetailFeatureTests: XCTestCase {
         }
         XCTAssertTrue(store.state.isOnShelf)
         await store.finish()
+    }
+}
+
+// MARK: - 目录行映射（source）与下载勾选
+
+// 守同一条链：`ChapterRecord.source` →（`ChapterItem(record:)`）→ `isDownloaded`
+// →（`ChapterDownloadSelection`）→ 谁会被入队下载。判错就是用户可感知损失。
+
+@MainActor extension BookDetailFeatureTests {
+    /// 三分支映射：只有 `.downloaded` 才算「已下载」。
+    func test目录行的已下载判定只认source标记() throws {
+        let context = try ModelContext(NovelStore.makeContainer(inMemory: true))
+        let cases: [(source: ChapterSource, isDownloaded: Bool)] = [
+            (.downloaded, true),
+            // 缓存章同样有本地正文，但它可被淘汰 —— 不能当成用户下载。
+            (.cached, false),
+            (.notDownloaded, false),
+        ]
+
+        for (offset, testCase) in cases.enumerated() {
+            let number = offset + 1
+            let record = ChapterRecord(
+                bookPath: Self.bookPath, number: number, name: "第 \(number) 章",
+                path: "/1/\(number).html", source: testCase.source,
+                localFileName: testCase.source == .notDownloaded ? nil : "\(number).txt"
+            )
+            context.insert(record)
+
+            let row = ChapterItem(record: record)
+            XCTAssertEqual(row.isDownloaded, testCase.isDownloaded, "\(testCase.source)")
+            XCTAssertEqual(row.hasLocalText, testCase.source != .notDownloaded)
+        }
+    }
+
+    /// 全选只勾未下载的；已下载的连单章「手滑」也不接受。
+    func test全选只勾未下载的章节() {
+        let chapters = [
+            Self.makeChapter(number: 1, isDownloaded: true),
+            Self.makeChapter(number: 2),
+            Self.makeChapter(number: 3, isDownloaded: true),
+            Self.makeChapter(number: 4),
+        ]
+        var selection = ChapterDownloadSelection()
+
+        selection.toggleSelectAll(in: chapters)
+
+        XCTAssertEqual(selection.selectedPaths, ["/1/2.html", "/1/4.html"])
+        XCTAssertEqual(selection.selectedChapters(in: chapters).map(\.path), ["/1/2.html", "/1/4.html"])
+        XCTAssertTrue(selection.isAllSelected(in: chapters))
+
+        selection.toggle(chapters[0])
+        XCTAssertFalse(selection.isSelected(chapters[0]))
+    }
+
+    /// 再点一次全选 == 取消全选；空目录一个也勾不上，也不进「已全选」态。
+    func test取消全选与空目录边界() {
+        let chapters = [Self.makeChapter(number: 1), Self.makeChapter(number: 2)]
+        var selection = ChapterDownloadSelection()
+
+        selection.toggleSelectAll(in: chapters)
+        XCTAssertTrue(selection.isAllSelected(in: chapters))
+        selection.toggleSelectAll(in: chapters)
+        XCTAssertTrue(selection.selectedPaths.isEmpty)
+        XCTAssertFalse(selection.isAllSelected(in: chapters))
+
+        selection.toggleSelectAll(in: [])
+        XCTAssertTrue(selection.selectedPaths.isEmpty)
+        XCTAssertFalse(selection.isAllSelected(in: []))
+        XCTAssertTrue(selection.selectedChapters(in: []).isEmpty)
+    }
+
+    /// 全是已下载：可下载计数为 0，逻辑上勾不到任何东西。
+    func test全是已下载时可勾选章节为零() {
+        var state = BookDetailFeature.State(fallback: Self.fallback)
+        state.chapters = [
+            Self.makeChapter(number: 1, isDownloaded: true),
+            Self.makeChapter(number: 2, isDownloaded: true),
+        ]
+        var selection = ChapterDownloadSelection()
+
+        selection.toggleSelectAll(in: state.chapters)
+
+        XCTAssertEqual(state.downloadableChapterCount, 0)
+        XCTAssertTrue(selection.selectedPaths.isEmpty)
+        XCTAssertFalse(selection.isAllSelected(in: state.chapters))
+        XCTAssertTrue(selection.selectedChapters(in: state.chapters).isEmpty)
     }
 }

@@ -107,6 +107,8 @@ public extension BookDetail {
 /// - **下载口径（U1-7）**：已下载章节数 / 可下载章节数由 `chapters` 派生，
 ///   判定一律走 `ChapterItem.isDownloaded`（= `ChapterRecord.source == .downloaded`），
 ///   不绕过 `source` 标记自己猜「下没下过」。
+///   这两个派生值是**唯一口径**，作为入参交给 `ChapterDownloadPicker` ——
+///   面板内部不再自己 `filter().count`（否则改一处漏一处就会出现「头部说 3 章、面板说 2 章」）。
 public struct BookDetailFeature: Reducer {
     public init() {}
 
@@ -117,6 +119,8 @@ public struct BookDetailFeature: Reducer {
         /// 详情加载完成。`nil` 表示本地没有这本书的记录 —— 也就是**不在书架**。
         case loaded(BookDetail?)
         case loadFailed(String)
+        /// 详情读库失败后点「重试」：只重发详情请求（目录有自己的 `reloadChapters`）。
+        case reloadDetail
 
         /// 目录加载完成。
         case chaptersLoaded([ChapterItem])
@@ -222,6 +226,21 @@ public struct BookDetailFeature: Reducer {
                     }
                 }
 
+            case .reloadDetail:
+                guard !state.isLoading else { return .none }
+                state.isLoading = true
+                state.errorMessage = nil
+                let bookPath = state.detail.bookPath
+                let loader = loader
+                return .run { send in
+                    do {
+                        let detail = try await loader.load(bookPath)
+                        await send(.loaded(detail))
+                    } catch {
+                        await send(.loadFailed(error.localizedDescription))
+                    }
+                }
+
             case .toggleAllChapters:
                 state.isShowingAllChapters.toggle()
                 return .none
@@ -316,7 +335,11 @@ public extension BookDetailFeature {
 
         public var fallback: BookDetail
         public var detail: BookDetail
+        /// 详情（本地记录）读取中。View 用它显示一行「正在读取本地记录…」，
+        /// reducer 同时用它挡住重复的 `onAppear` / `reloadDetail`。
         public var isLoading = false
+        /// 详情读库失败原因。View 在书架按钮上方给一条带「重试」的 inline 错误条 ——
+        /// 失败时 `isOnShelf` 只能停在 false，不说出来这本书会显示成「加入书架」。
         public var errorMessage: String?
 
         /// 这本书当前是否已在书架。界面据此在「加入书架 / 移出书架」之间切换。
@@ -341,6 +364,9 @@ public extension BookDetailFeature {
         /// 用户当前配置的站点 host（`SiteSettings.currentHostValue`）。
         ///
         /// 空串 = 还没配置站点 → 「转到原网站」入口整体隐藏（不给点了没反应的按钮）。
+        ///
+        /// ⚠️ 它是**进入本页时的快照**：只在 `onAppear` 里读一次，不订阅站点配置的变化。
+        /// 用户在设置页改了 host 之后要重新走一次 `onAppear`（重进详情页）才会更新。
         public var host = ""
 
         /// 目录快照（本地，按章号升序）。U1-6 起直接内嵌在详情页里，不再单独 push 目录页。
@@ -379,7 +405,8 @@ public extension BookDetailFeature.State {
         chapters.filter(\.isDownloaded).count
     }
 
-    /// 尚未下载、可被勾选下载的章节数。
+    /// 尚未下载、可被勾选下载的章节数。详情页把它传进 `ChapterDownloadPicker`，
+    /// 面板据此决定「全选」是否可用 —— 面板不再自己算一遍。
     var downloadableChapterCount: Int {
         chapters.filter { !$0.isDownloaded }.count
     }
@@ -405,6 +432,71 @@ public extension BookDetailFeature.State {
         let bookPath = detail.bookPath
         let path = bookPath.hasPrefix("/") ? bookPath : "/" + bookPath
         return SiteConfig(host: normalizedHost).url(path)
+    }
+}
+
+// MARK: - 章节下载勾选（纯逻辑，U1-7）
+
+/// 章节下载面板的勾选状态。
+///
+/// ## 为什么单独抽出来
+/// 「全选只作用于未下载的章节」「已下载的不可勾选」直接决定**谁会被入队下载**，
+/// 压在 CLAUDE.md 那条契约（用户下载的章节永不被错判、也不被淘汰）的入口上。
+/// 这段逻辑原来活在 `ChapterDownloadPicker` 的 `@State` 里，全仓零测试 —— 改坏了 CI 不会红。
+/// 现在它只是一个值类型：View 只负责渲染与把结果回传。
+///
+/// ⚠️ 这里**只管「勾不勾」**。已下载 / 可下载章节数由 `BookDetailFeature.State` 派生后
+/// 作为入参交给面板 —— 同一口径只算一次，目录 header 与面板 header 不会各说各话。
+public struct ChapterDownloadSelection {
+    /// 已勾选的章节路径。
+    private(set) var selectedPaths: Set<String> = []
+
+    public init() {}
+
+    /// 可勾选的章节：**未下载**的才参与。
+    ///
+    /// 判定只走 `ChapterItem.isDownloaded`（= `ChapterRecord.source == .downloaded`），
+    /// 不用 `hasLocalText` 反推 —— 阅读时自动缓存的正文同样有本地正文，但它可被淘汰，
+    /// 不该被误当成「已经下过了」而挡在下载之外。
+    static func selectable(in chapters: [ChapterItem]) -> [ChapterItem] {
+        chapters.filter { !$0.isDownloaded }
+    }
+
+    /// 这一章此刻是否被勾选。
+    public func isSelected(_ chapter: ChapterItem) -> Bool {
+        selectedPaths.contains(chapter.path)
+    }
+
+    /// 是否所有**可下载**章节都已勾选。没有可下载章节时为 `false`（全选按钮此时不可用）。
+    public func isAllSelected(in chapters: [ChapterItem]) -> Bool {
+        let selectable = Self.selectable(in: chapters)
+        return !selectable.isEmpty && selectable.allSatisfy { selectedPaths.contains($0.path) }
+    }
+
+    /// 勾选 / 取消勾选单章。已下载的章节不接受勾选（行为不依赖 UI 层的 `disabled`）。
+    public mutating func toggle(_ chapter: ChapterItem) {
+        guard !chapter.isDownloaded else { return }
+        if selectedPaths.contains(chapter.path) {
+            selectedPaths.remove(chapter.path)
+        } else {
+            selectedPaths.insert(chapter.path)
+        }
+    }
+
+    /// 全选 ⇄ 取消全选。已下载的章节永远不会被写进选择集合。
+    public mutating func toggleSelectAll(in chapters: [ChapterItem]) {
+        if isAllSelected(in: chapters) {
+            selectedPaths.removeAll()
+        } else {
+            selectedPaths = Set(Self.selectable(in: chapters).map(\.path))
+        }
+    }
+
+    /// 真正要入队的章节：按目录原顺序，且**剔除此刻已下载的**。
+    ///
+    /// 面板打开期间某章下载完成时，它不能因为「刚才被勾过」再入队一次。
+    public func selectedChapters(in chapters: [ChapterItem]) -> [ChapterItem] {
+        chapters.filter { !$0.isDownloaded && selectedPaths.contains($0.path) }
     }
 }
 
