@@ -78,7 +78,7 @@ public actor NovelEngine {
     /// 不缓存、不自动探索。
     public func resolveCandidates(fromNav navURL: String) async throws -> [String] {
         let normalizedNav = SiteRoutingConfiguration.normalizedHost(navURL)
-        guard let url = URL(string: normalizedNav) else { throw NetworkError.badResponse }
+        guard let url = URL(string: normalizedNav) else { throw NetworkError.invalidURL(normalizedNav) }
         let html = try await performWithGuard(url: url, body: nil)
         let matched = Self.candidateHosts(in: html)
         if !matched.isEmpty { return matched }
@@ -155,7 +155,7 @@ public actor NovelEngine {
 
     public func chapters(bookPath: String) async throws -> [Chapter] {
         let html = try await fetch(path: bookPath, body: nil)
-        guard let url = config.url(bookPath) else { throw NetworkError.badResponse }
+        guard let url = config.url(bookPath) else { throw NetworkError.invalidURL(bookPath) }
         return HTMLParser.parseChapters(html, baseURL: url)
     }
 
@@ -175,7 +175,7 @@ public actor NovelEngine {
     // MARK: - 路由
 
     private func fetch(path: String, body: String?) async throws -> String {
-        guard let url = config.url(path) else { throw NetworkError.badResponse }
+        guard let url = config.url(path) else { throw NetworkError.invalidURL(path) }
         return try await performWithGuard(url: url, body: body)
     }
 

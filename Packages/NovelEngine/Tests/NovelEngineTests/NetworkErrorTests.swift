@@ -59,7 +59,7 @@ final class NetworkErrorTests: XCTestCase {
         XCTAssertFalse(NetworkError.httpStatus(403).shouldRetry)
         XCTAssertFalse(NetworkError.noCandidates(296).shouldRetry)
 
-        XCTAssertTrue(NetworkError.badResponse.shouldRetry)
+        XCTAssertTrue(NetworkError.nonHTTPResponse("https://example.com").shouldRetry)
         XCTAssertTrue(NetworkError.decodeFailed.shouldRetry)
     }
 
@@ -86,7 +86,7 @@ final class NetworkErrorTests: XCTestCase {
         XCTAssertFalse(NetworkClient.wrap(NetworkError.httpStatus(403)).shouldRetry)
         XCTAssertFalse(NetworkClient.wrap(NetworkError.noCandidates(296)).shouldRetry)
 
-        XCTAssertTrue(NetworkClient.wrap(NetworkError.badResponse).shouldRetry)
+        XCTAssertTrue(NetworkClient.wrap(NetworkError.nonHTTPResponse("https://example.com")).shouldRetry)
         XCTAssertTrue(NetworkClient.wrap(NetworkError.decodeFailed).shouldRetry)
 
         guard case .guarded = NetworkClient.wrap(NetworkError.guarded) else {
@@ -103,5 +103,56 @@ final class NetworkErrorTests: XCTestCase {
             return XCTFail("URLError 应被收枘成 .transport")
         }
         XCTAssertEqual((inner as? URLError)?.code, .cannotFindHost)
+    }
+
+    // MARK: - B0-7 方案 A：把曾被折叠的错误语义拆开
+
+    /// 「非 HTTP 响应」的文案要带上请求地址 —— 排查时得能看出是哪一次请求没拿到响应。
+    func test非HTTP响应文案带请求地址() {
+        let url = "https://demo.example/1.html"
+        let description = NetworkError.nonHTTPResponse(url).errorDescription
+
+        XCTAssertTrue(description?.contains(url) ?? false, "文案应含请求地址，实际 \(description ?? "nil")")
+    }
+
+    /// 「地址格式无法识别」的文案要带上原始字符串 —— 这是唯一能反推用户填了什么的信息。
+    func test非法地址文案带原始字符串() {
+        let raw = "ht tp://demo.example"
+        let description = NetworkError.invalidURL(raw).errorDescription
+
+        XCTAssertTrue(description?.contains(raw) ?? false, "文案应含原始地址串，实际 \(description ?? "nil")")
+    }
+
+    func test两个新错误的重试与host可用性分类() {
+        // 非 HTTP 响应：保持原先「可重试 + 可换 host」的分类，属最小改动。
+        XCTAssertTrue(NetworkError.nonHTTPResponse("https://demo.example").shouldRetry)
+        XCTAssertTrue(NetworkError.nonHTTPResponse("https://demo.example").isHostUnavailable)
+
+        // 地址非法：重试与换 host 都没有意义，同一个字符串重试多少次还是解析不出来。
+        XCTAssertFalse(NetworkError.invalidURL("ht tp://demo.example").shouldRetry)
+        XCTAssertFalse(NetworkError.invalidURL("ht tp://demo.example").isHostUnavailable)
+    }
+
+    /// 回归意图（B0-7 的根因）：同一个失败原因只对应一个 case。
+    ///
+    /// 原先「非 HTTP 响应」与「URL 构造失败」都抛同一个兜底错误、都显示「服务器响应异常。」，
+    /// 只看文案**无法**反推真实原因，排查因此绕了一大圈。
+    func test非法地址与未收到HTTP响应不再共用一个case() {
+        let raw = "ht tp://demo.example"
+        let invalid = NetworkError.invalidURL(raw)
+        let nonHTTP = NetworkError.nonHTTPResponse("https://demo.example")
+
+        guard case let .invalidURL(invalidRaw) = invalid else {
+            return XCTFail("地址解析失败应为 .invalidURL，实际 \(invalid)")
+        }
+        XCTAssertEqual(invalidRaw, raw)
+
+        guard case let .nonHTTPResponse(requestedURL) = nonHTTP else {
+            return XCTFail("非 HTTP 响应应为 .nonHTTPResponse，实际 \(nonHTTP)")
+        }
+        XCTAssertEqual(requestedURL, "https://demo.example")
+
+        // 两者不得再共用同一句文案。
+        XCTAssertNotEqual(invalid.errorDescription, nonHTTP.errorDescription)
     }
 }

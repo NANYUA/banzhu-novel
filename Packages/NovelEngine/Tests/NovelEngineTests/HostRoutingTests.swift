@@ -26,7 +26,7 @@ final class HostRoutingTests: XCTestCase {
                 }
                 throw NetworkError.guarded
             }
-            throw NetworkError.badResponse
+            throw NetworkError.nonHTTPResponse(url.absoluteString)
         }
         let engine = NovelEngine(network: transport)
         await engine.configureRouting(
@@ -82,7 +82,7 @@ final class HostRoutingTests: XCTestCase {
                 <a href="https://mirror002.com">B</a>
                 """
             }
-            throw NetworkError.badResponse
+            throw NetworkError.nonHTTPResponse(url.absoluteString)
         }
         let engine = NovelEngine(network: transport)
 
@@ -96,7 +96,7 @@ final class HostRoutingTests: XCTestCase {
             if url.absoluteString == "https://example.com" {
                 return "<a href=\"https://mirror001.com\">A</a>"
             }
-            throw NetworkError.badResponse
+            throw NetworkError.nonHTTPResponse(url.absoluteString)
         }
         let engine = NovelEngine(network: transport)
 
@@ -231,5 +231,29 @@ final class HostRoutingTests: XCTestCase {
             }
             XCTAssertEqual(bytes, renderedHTML.utf8.count)
         }
+    }
+
+    // MARK: - B0-7 方案 A：地址构造失败独立成 .invalidURL
+
+    /// 导航地址为空（构造不出 URL）时，抛的必须是「地址格式无法识别」，
+    /// 而不是含糊的「服务器响应异常」—— 后者正是 B0-7 误判的来源。
+    func test导航地址为空时报地址格式无法识别且不发请求() async throws {
+        // 前提：空串构造不出 URL —— 这正是「清空导航地址后点拉取」的现场（B0-6 / B0-7）。
+        XCTAssertNil(URL(string: ""), "前提：空串应构造不出 URL")
+
+        let transport = FakeTransport { _ in "不该被请求" }
+        let engine = NovelEngine(network: transport)
+
+        do {
+            _ = try await engine.resolveCandidates(fromNav: "")
+            XCTFail("空地址应抛错")
+        } catch let error as NetworkError {
+            guard case let .invalidURL(raw) = error else {
+                return XCTFail("应为 NetworkError.invalidURL，实际 \(error)")
+            }
+            XCTAssertEqual(raw, "")
+        }
+        let requested = await transport.requestedHosts()
+        XCTAssertTrue(requested.isEmpty, "地址不合法时不应发出请求，实际 \(requested)")
     }
 }

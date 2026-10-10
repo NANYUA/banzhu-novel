@@ -4,12 +4,24 @@ import Foundation
 public enum NetworkError: LocalizedError {
     case guarded          // 被人机验证盾拦截
     case httpStatus(Int)  // 明确的 HTTP 错误状态（如 403）
-    case badResponse
+
+    /// 压根没拿到 HTTP 响应（带请求地址）。
+    ///
+    /// 与 `.invalidURL` 分开，是因为这两类原因的排查方向完全不同：
+    /// 这个说明「地址没问题、请求发得出去，但没收到 HTTP 回应」，
+    /// 才可能是网络策略拦截；地址本身就解析不出来的是 `.invalidURL`。
+    case nonHTTPResponse(String)
+
+    /// 地址格式无法识别（带无法解析的原始字符串）。
+    ///
+    /// 单独成 case 而不是复用「响应异常」，是因为重试它毫无意义 ——
+    /// 同一个字符串再怎么重试也构造不出 URL。
+    case invalidURL(String)
 
     /// 导航页拿到了，但一条候选 host 都没匹配到（带响应字节数）。
     ///
-    /// 与 `.badResponse` 分开，是因为这两类原因的排查方向完全不同：
-    /// `.badResponse` 是响应本身不合法，而这个是「页面合法但没有可用地址」
+    /// 与 `.nonHTTPResponse` 分开，是因为这两类原因的排查方向完全不同：
+    /// `.nonHTTPResponse` 是压根没收到 HTTP 响应，而这个是「响应合法但没有可用地址」
     /// （例如页面只是个 JS 加载器壳，真正清单要执行脚本后才出现）。
     case noCandidates(Int)
 
@@ -21,7 +33,10 @@ public enum NetworkError: LocalizedError {
         switch self {
         case .guarded:            return "需要人机验证，请完成验证后重试。"
         case .httpStatus(let code): return "服务器返回错误（HTTP \(code)）。"
-        case .badResponse:        return "服务器响应异常。"
+        case .nonHTTPResponse(let url):
+            return "未收到 HTTP 响应（\(url)），可能被网络策略拦截。"
+        case .invalidURL(let raw):
+            return "地址格式无法识别：\(raw)"
         case .noCandidates(let bytes):
             return "已取回页面（\(bytes) 字节），但没匹配到任何候选地址。"
         case .decodeFailed:       return "内容解码失败。"
@@ -33,12 +48,13 @@ public enum NetworkError: LocalizedError {
     ///
     /// 盾与明确的 HTTP 状态错误都不重试：前者需要用户去处理验证，
     /// 后者是服务器已经给出决定（如 403），继续重试只会加剧风险。
+    /// 地址本身解析不出来（`.invalidURL`）也不重试：同一个字符串重试多少次都还是解析不出来。
     /// 解码失败属瞬时问题，交由上层重试。
     public var shouldRetry: Bool {
         switch self {
-        case .guarded, .httpStatus, .noCandidates:
+        case .guarded, .httpStatus, .noCandidates, .invalidURL:
             return false
-        case .badResponse, .decodeFailed:
+        case .nonHTTPResponse, .decodeFailed:
             return true
         case let .transport(error):
             return Self.isTransientTransportError(error)
@@ -81,9 +97,9 @@ public enum NetworkError: LocalizedError {
     /// 是否属于当前 host 不可用，可尝试切换到下一个 host。
     public var isHostUnavailable: Bool {
         switch self {
-        case .guarded, .decodeFailed, .noCandidates:
+        case .guarded, .decodeFailed, .noCandidates, .invalidURL:
             return false
-        case .httpStatus, .badResponse, .transport:
+        case .httpStatus, .nonHTTPResponse, .transport:
             return true
         }
     }
@@ -125,7 +141,8 @@ actor NetworkClient {
     }
 
     private func request(url: URL, body: String?, retries: Int = 3) async throws -> String {
-        var lastError: Error = NetworkError.badResponse
+        // 不预设「默认错误」：循环体每个 catch 都会覆写它，所以这里只需要「有没有失败过」。
+        var lastError: Error?
         for attempt in 0...retries {
             do {
                 var req = URLRequest(url: url)
@@ -147,7 +164,7 @@ actor NetworkClient {
                 let (data, response) = try await session.data(for: req)
                 guard let http = response as? HTTPURLResponse else {
                     EngineLog.log(.error, tag, "非 HTTP 响应 \(url.absoluteString)")
-                    throw NetworkError.badResponse
+                    throw NetworkError.nonHTTPResponse(url.absoluteString)
                 }
                 guard (200..<400).contains(http.statusCode) else {
                     EngineLog.log(.error, tag, "HTTP \(http.statusCode) \(url.absoluteString)")
@@ -178,8 +195,10 @@ actor NetworkClient {
                 try? await Task.sleep(nanoseconds: UInt64(1_500_000_000 * (attempt + 1)))
             }
         }
-        EngineLog.log(.error, "fail", "放弃：\((lastError as? LocalizedError)?.errorDescription ?? lastError.localizedDescription) \(url.absoluteString)")
-        throw lastError
+        // 走到这里必然失败过（成功即 return，不重试即 throw）；`??` 只是给类型收口。
+        let failure: any Error = lastError ?? NetworkError.nonHTTPResponse(url.absoluteString)
+        EngineLog.log(.error, "fail", "放弃：\((failure as? LocalizedError)?.errorDescription ?? failure.localizedDescription) \(url.absoluteString)")
+        throw failure
     }
 
     /// 把任意抛出的错误收枘成 `NetworkError` —— 重试循环与单测**共用**的唯一入口（H4 收尾）。
