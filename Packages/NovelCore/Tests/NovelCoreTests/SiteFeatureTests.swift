@@ -27,7 +27,6 @@ final class SiteFeatureTests: XCTestCase {
                 SiteEntry(id: keptID, value: "https://mirror001.com", isFromNavigation: true),
             ]
             $0.discoveredHosts = [entry]
-            $0.isHostListExpanded = true
         }
         await store.finish()
 
@@ -171,5 +170,45 @@ final class SiteFeatureTests: XCTestCase {
         }
         await store.finish()
         XCTAssertFalse(store.state.isFetchingNavigation)
+    }
+
+    // MARK: - 域名区默认收起（收起态只展示当前选中的 host，展开入口仍在）
+
+    func test默认收起且切换可往返() async {
+        let store = TestStore(initialState: SiteFeature.State()) {
+            SiteFeature()
+        }
+
+        XCTAssertFalse(store.state.isHostListExpanded, "域名区默认收起")
+
+        await store.send(.toggleHostList) {
+            $0.isHostListExpanded = true
+        }
+        await store.send(.toggleHostList) {
+            $0.isHostListExpanded = false
+        }
+        await store.finish()
+    }
+
+    func test拉取成功后不自动展开() async {
+        let existing = SiteEntry(value: "https://example.com")
+        let store = TestStore(
+            initialState: SiteFeature.State(settings: SiteSettings(hosts: [existing]))
+        ) {
+            SiteFeature()
+        }
+
+        let entry = SiteEntry(value: "https://example.com/", isFromNavigation: true)
+        await store.send(.navigationSucceeded([entry])) {
+            // 规范化后与已有条目相同 → 保留原 id，只更新「导航发现」标记。
+            $0.settings.hosts = [
+                SiteEntry(id: existing.id, value: "https://example.com", isFromNavigation: true),
+            ]
+            $0.discoveredHosts = [entry]
+        }
+        await store.finish()
+
+        XCTAssertFalse(store.state.isHostListExpanded, "拉取成功后不应把域名区强制展开")
+        XCTAssertEqual(store.state.settings.currentHost?.value, "https://example.com")
     }
 }

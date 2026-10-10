@@ -85,31 +85,7 @@ struct SiteSettingsView: View {
                 Text("暂无域名。点上方「拉取域名」或手动添加。")
                     .foregroundStyle(.secondary)
             } else {
-                DisclosureGroup(
-                    isExpanded: Binding(
-                        get: { viewStore.isHostListExpanded },
-                        set: { _ in viewStore.send(.toggleHostList) }
-                    )
-                ) {
-                    ForEach(viewStore.settings.hosts) { entry in
-                        Button {
-                            viewStore.send(.selectHost(entry.id))
-                        } label: {
-                            hostRow(
-                                entry,
-                                isSelected: entry.id == viewStore.settings.currentHostID
-                            )
-                        }
-                        .buttonStyle(PressableCardButtonStyle())
-                        .swipeActions {
-                            Button("删除", role: .destructive) {
-                                viewStore.send(.deleteHost(entry.id))
-                            }
-                        }
-                    }
-                } label: {
-                    Text("域名列表（\(viewStore.settings.hosts.count)）")
-                }
+                hostListSection(viewStore)
             }
 
             HStack {
@@ -130,6 +106,39 @@ struct SiteSettingsView: View {
             Text("域名")
         } footer: {
             Text("相同域名只保留一条；始终使用选中的域名，不会自动切换。")
+        }
+    }
+
+    /// 域名列表本体：默认收起，收起态只展示「当前选中的那条 host」；
+    /// 展开后才显示完整列表（可切换 / 删除）。
+    private func hostListSection(
+        _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
+    ) -> some View {
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { viewStore.isHostListExpanded },
+                set: { _ in viewStore.send(.toggleHostList) }
+            )
+        ) {
+            ForEach(viewStore.settings.hosts) { entry in
+                Button {
+                    viewStore.send(.selectHost(entry.id))
+                } label: {
+                    hostRow(
+                        entry,
+                        isSelected: entry.id == viewStore.settings.currentHostID
+                    )
+                }
+                .buttonStyle(PressableCardButtonStyle())
+                .swipeActions {
+                    Button("删除", role: .destructive) {
+                        viewStore.send(.deleteHost(entry.id))
+                    }
+                }
+            }
+        } label: {
+            Text(viewStore.settings.currentHost?.value ?? "未选择域名")
+                .lineLimit(1)
         }
     }
 

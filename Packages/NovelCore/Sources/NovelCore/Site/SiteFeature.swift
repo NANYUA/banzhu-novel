@@ -16,7 +16,7 @@ public struct SiteFeature: Reducer {
             isLoading: Bool = false,
             isFetchingNavigation: Bool = false,
             discoveredHosts: [SiteEntry] = [],
-            isHostListExpanded: Bool = true,
+            isHostListExpanded: Bool = false,
             notice: String? = nil
         ) {
             self.settings = settings
@@ -32,7 +32,8 @@ public struct SiteFeature: Reducer {
         public var isFetchingNavigation = false
         /// 最近一次按钮拉取的结果（用于「本次发现」高亮与空结果提示）。
         public var discoveredHosts: [SiteEntry]
-        public var isHostListExpanded = true
+        /// 域名区默认收起：收起态由 App 层只展示当前选中的 host，展开状态只由 `.toggleHostList` 控制。
+        public var isHostListExpanded = false
         public var notice: String?
     }
 
@@ -119,7 +120,7 @@ public struct SiteFeature: Reducer {
                     state.settings.upsertHost(entry.value, isFromNavigation: true)
                 }
                 state.discoveredHosts = entries
-                state.isHostListExpanded = true
+                // 不再强制展开：默认收起，是否展开只由 `.toggleHostList` 决定。
                 return saveAndConfigure(state.settings, store: siteStore, router: siteRouter)
 
             case let .navigationFailed(message):
