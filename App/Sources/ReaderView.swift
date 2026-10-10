@@ -30,6 +30,10 @@ struct ReaderView: View {
     @State private var isChromeVisible = false
     @State private var slideOffset: CGFloat = 0
     @State private var slideIsHorizontal: Bool?
+    /// 本次手势的抓取基线（第一次 `onChanged` 采一次，抬手即复位）。
+    @State private var slideBaseline: CGFloat?
+    /// 页面**此刻真实显示**的偏移（由探针每帧回报的呈现值，方案 A 的基线来源）。
+    @State private var slidePresentation = SlidePresentation()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -268,21 +272,36 @@ private extension ReaderView {
     }
 
     /// 滑动翻页：≥10pt 迟滞锁横向（§12）→ 1:1 跟手 + 边界橡皮筋（§6 / §9）→ 动量投射 + 速度交接（§12）。
+    ///
+    /// 跟手基数是**抓取瞬间页面真实显示的位置**（方案 A）：吸附回位动画没跑完就再抓时
+    /// 从当前显示位置继续，而不是从 0 重开。呈现值怎么来的见
+    /// `ReaderView+SlideTracking.swift`，纯数学见 `SlideTracking`。
     private func slideGesture(_ content: some View, viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>, availableWidth: CGFloat, onCenterTap: @escaping () -> Void) -> some View {
         content
+            // 探针只回报呈现值、不参与渲染；页面仍由下一行那句原来的 `.offset` 平移。
+            .background(SlidePresentationProbe(offset: slideOffset, presentation: slidePresentation))
             .offset(x: slideOffset)
             .gesture(
                 DragGesture(minimumDistance: 10)
                     .onChanged { value in
                         slideIsHorizontal = slideIsHorizontal ?? (abs(value.translation.width) > abs(value.translation.height))
                         guard slideIsHorizontal == true, !reduceMotion else { return }
-                        let raw = value.translation.width, index = viewStore.currentPageIndex
-                        let edge = raw > 0 ? index <= 0 : index + 1 >= viewStore.pages.count
-                        slideOffset = edge ? raw * availableWidth * 0.55 / (availableWidth + 0.55 * abs(raw)) : raw
+                        // 基线只在本次手势的第一次 onChanged 采一次：之后 translation 是
+                        // 相对同一个起点累积的，逐帧重采就会把已跟手走的位移当成新基线而滚雪球。
+                        let baseline = slideBaseline ?? slidePresentation.offset
+                        slideBaseline = baseline
+                        slideOffset = SlideTracking.offset(
+                            fromDisplayedOffset: baseline,
+                            translation: value.translation.width,
+                            availableWidth: availableWidth,
+                            pageIndex: viewStore.currentPageIndex,
+                            pageCount: viewStore.pages.count
+                        )
                     }
                     .onEnded { value in
                         let wasHorizontal = slideIsHorizontal == true
                         slideIsHorizontal = nil
+                        slideBaseline = nil
                         guard wasHorizontal else { return }
                         let projected = value.predictedEndTranslation.width
                         let target = viewStore.currentPageIndex + (projected < 0 ? 1 : -1)
