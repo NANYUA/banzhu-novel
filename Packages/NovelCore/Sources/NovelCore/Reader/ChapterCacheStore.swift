@@ -109,7 +109,10 @@ enum ChapterCacheStoreLive {
             }
         }
 
-        try? NovelStore.evictCachedChapters(in: context)
+        // 淘汰照旧执行、失败不中断；返回值只供测试断言。
+        // 这里必须显式 `_ =` 丢弃：`try?` 会把结果包成 Optional，且**不继承**被调方已有的
+        // `@discardableResult`（`NovelStore.evictCachedChapters`）⇒ 不丢就报「result of 'try?' is unused」。
+        _ = try? NovelStore.evictCachedChapters(in: context)
     }
 
     /// 落盘一章正文。

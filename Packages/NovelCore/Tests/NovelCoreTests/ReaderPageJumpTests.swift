@@ -168,7 +168,7 @@ final class ReaderPageJumpTests: XCTestCase {
         XCTAssertEqual(emptyStore.state.currentOffset, 0)
 
         // ② 单页章：只有第 0 页，且已经在页首 ⇒ 跳第 0 页与跳第 1 页都不动状态。
-        let singleStore = pageJumpMakeStore { _, _, _ in }
+        let singleStore = pageJumpMakeStore(text: pageJumpSinglePageText) { _, _, _ in }
         let singlePages = await pageJumpLoad(singleStore, text: pageJumpSinglePageText)
         XCTAssertEqual(singlePages.count, 1, "前置条件：该样本要正好排成 1 页")
 
@@ -207,12 +207,13 @@ private func pageJumpExpectedPages(chapterName: String, text: String) -> [PageRa
 /// 所以「期望值」与「被测系统的输出」同源但**独立计算**。
 @MainActor
 private func pageJumpMakeStore(
+    text: String = pageJumpSampleText,
     progress: @escaping @Sendable (String, Int, Date) async throws -> Void
 ) -> TestStore<ReaderFeature.State, ReaderFeature.Action> {
     TestStore(initialState: ReaderFeature.State(chapterPath: pageJumpPath)) {
         ReaderFeature()
     } withDependencies: {
-        $0.readerLoader.load = { _ in pageJumpSampleText }
+        $0.readerLoader.load = { _ in text }
         $0.readingProgressStore.markRead = progress
         // 本文件只数进度落盘的次数与口径：缓存换成空桩。
         $0.chapterCacheStore.cacheCurrentAndFollowing = { _, _, _ in }
