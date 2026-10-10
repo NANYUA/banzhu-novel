@@ -327,7 +327,7 @@ private struct SearchResultRow: View {
         if isAdded {
             Label("已加入", systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(.green)
+                .foregroundStyle(AppTheme.statusAdded)
                 .frame(minHeight: 44)
                 .accessibilityLabel("已在书架")
         } else {

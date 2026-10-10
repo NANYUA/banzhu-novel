@@ -267,7 +267,7 @@ private extension BookDetailView {
             if let notice = viewStore.shelfNotice {
                 Text(notice)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AppTheme.statusDanger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

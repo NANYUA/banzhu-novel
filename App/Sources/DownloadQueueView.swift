@@ -190,7 +190,7 @@ private struct DownloadNoticeRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTheme.statusAttention)
 
             Text(notice)
                 .font(.subheadline)
@@ -393,11 +393,11 @@ private struct DownloadTaskRow: View {
         case .downloading:
             AppTheme.accent
         case .done:
-            .green
+            AppTheme.statusAdded
         case .paused:
-            task.blockedByGuard ? .orange : .secondary
+            task.blockedByGuard ? AppTheme.statusAttention : .secondary
         case .failed:
-            .red
+            AppTheme.statusDanger
         }
     }
 }

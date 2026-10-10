@@ -154,7 +154,7 @@ private extension ChapterListView {
         } label: {
             Image(systemName: chapter.isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
                 .font(.title3)
-                .foregroundStyle(chapter.isDownloaded ? Color.green : AppTheme.accent)
+                .foregroundStyle(chapter.isDownloaded ? AppTheme.statusAdded : AppTheme.accent)
                 // 用 min 而不是固定值：`.font(.title3)` 会随 Dynamic Type 放大，写死会裁掉图标。
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
@@ -171,12 +171,12 @@ private extension ChapterListView {
             // 状态色统一：已下载与已缓存正文都属「已完成」→ 系统绿。
             Image(systemName: "arrow.down.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.green)
+                .foregroundStyle(AppTheme.statusAdded)
                 .accessibilityLabel("已下载")
         } else if chapter.hasLocalText {
             Image(systemName: "checkmark.circle")
                 .font(.caption)
-                .foregroundStyle(.green)
+                .foregroundStyle(AppTheme.statusAdded)
                 .accessibilityLabel("已缓存正文")
         }
     }
@@ -351,7 +351,7 @@ private extension ChapterDownloadPicker {
                     // 明确标注「已下载」，而不是只靠一个图标让用户猜。
                     Text("已下载")
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(AppTheme.statusAdded)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -99,7 +99,7 @@ extension BookshelfView {
     ) -> some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTheme.statusAttention)
             Text(notice)
                 .font(.subheadline)
                 .frame(maxWidth: .infinity, alignment: .leading)

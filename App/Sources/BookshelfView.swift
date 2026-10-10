@@ -457,7 +457,7 @@ private struct BookRow: View {
                     .font(.caption.bold())
                     .foregroundStyle(.white)
                     .frame(minWidth: 24, minHeight: 24)
-                    .background(.red, in: Circle())
+                    .background(AppTheme.statusDanger, in: Circle())
             }
         }
         .padding(DesignTokens.Spacing.sm)
