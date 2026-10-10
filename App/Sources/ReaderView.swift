@@ -9,6 +9,8 @@ import UIKit
 /// ## 渲染方案（docs/04 路线 C 的「单 UITextView」变体）
 /// 分页模式用单个 `UITextView` 显示当前页；滚动模式用同一个
 /// `UITextView` 显示整章并监听滚动位置。
+/// 平移翻页（`pageTurnMode == .slide`，U9-4）改为铺「当前页 + 相邻页」一起平移，
+/// 手势与全景图都在 `ReaderView+PageGesture.swift`。
 ///
 /// ## 数据流
 /// `currentOffset`（字符偏移，不是页码）→ reducer 反查所在页 → View 取
@@ -28,12 +30,15 @@ struct ReaderView: View {
     @State private var isShowingDirectory = false
     @State private var isShowingSearch = false
     @State private var isChromeVisible = false
-    @State private var slideOffset: CGFloat = 0
-    @State private var slideIsHorizontal: Bool?
+    // 下面四个是滑动 / 平移的跟手状态。**刻意不加 `private`**：Swift 的 `private` 是本文件级的，
+    // 而手势已搬到 `ReaderView+PageGesture.swift`，加 `private` 那边就取不到
+    // （与 `ReaderView+PageTurn.swift` 放开 `reduceMotion` 同一处理）。
+    @State var slideOffset: CGFloat = 0
+    @State var slideIsHorizontal: Bool?
     /// 本次手势的抓取基线（第一次 `onChanged` 采一次，抬手即复位）。
-    @State private var slideBaseline: CGFloat?
+    @State var slideBaseline: CGFloat?
     /// 页面**此刻真实显示**的偏移（由探针每帧回报的呈现值，方案 A 的基线来源）。
-    @State private var slidePresentation = SlidePresentation()
+    @State var slidePresentation = SlidePresentation()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -112,6 +117,7 @@ struct ReaderView: View {
                 // 而通话或录屏状态栏、外接键盘导致的 Home Indicator 变化**只改 `safeAreaInsets`**
                 // —— 后者原先漏监听，安全区变了却不重新分页（H2）。
                 // 两者都会改变 `contentSize`，所以统一派生值触发即可，不必挂两个 onChange。
+                // 藏掉状态栏（U9-3b）同样会改 `contentSize`，也走这条路径重新分页。
                 .onChange(of: contentSize) { _, newSize in
                     viewStore.send(.containerSizeChanged(newSize))
                 }
@@ -119,6 +125,12 @@ struct ReaderView: View {
             .navigationTitle("")
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
+            // 正文全屏（U9-3b）：连状态栏一起藏掉 —— 正文的上边界因此就是灵动岛 / 刘海下沿。
+            // 底栏（tabBar）**刻意不在这里声明**：它的可见性全仓只有三个 tab 根视图一个所有者，
+            // 由 `isShowingDetail` 驱动（U3-5）。阅读页只能从详情页进入，那一刻它已经是隐藏的；
+            // 在这里再写一次 `.toolbar(.hidden, for: .tabBar)` 就会多出第二个所有者，
+            // 正是 U3-5 修掉的「pop 回根视图后底栏不恢复」那种泄漏。
+            .statusBar(hidden: true)
             .sheet(isPresented: $isShowingSettings) {
                 ReaderSettingsView(
                     configuration: viewStore.config,
@@ -154,6 +166,10 @@ private extension ReaderView {
     // MARK: - 内容
 
     /// 阅读正文可用的安全区尺寸（全屏减去状态栏 / 灵动岛 / Home Indicator）。
+    ///
+    /// 这就是 U9-3b 说的「正文显示区域 = 贴安全区」：上边到灵动岛 / 刘海下沿、
+    /// 下边到 Home Indicator 上沿；左右两侧另由 `PageInset` 的左右边距设置负责。
+    /// **上下不再额外加留白** —— `PageInset` 的上下默认值已改为 0（U9-3b）。
     private func readerContentSize(
         size: CGSize,
         safeAreaInsets: EdgeInsets
@@ -194,32 +210,20 @@ private extension ReaderView {
         availableWidth: CGFloat
     ) -> some View {
         let configuration = viewStore.config
-        let displayText = configuration.pageTurnMode == .scroll
-            ? viewStore.text
-            : currentPageText(viewStore)
-
+        // 平移翻页（U9-4）：全景图铺「当前页 + 相邻页」一起平移。
+        // 「什么时候算平移翻页」的判据只有一处 —— `usesPanTurning`。
+        let usesPan = usesPanTurning(viewStore)
         let page = ZStack {
-            PageTextView(
-                text: displayText,
-                offset: viewStore.currentOffset,
-                configuration: configuration,
-                onOffsetChange: { offset in
-                    viewStore.send(.jumpToOffset(offset))
-                }
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .allowsHitTesting(configuration.pageTurnMode == .scroll)
-            .id(pageIdentity(viewStore))
-            .transition(
-                pageTransition(
-                    for: configuration.pageTurnAnimation,
-                    direction: viewStore.pageTurnDirection
-                )
-            )
+            if usesPan {
+                panPages(viewStore, availableWidth: availableWidth)
+            } else {
+                singlePage(viewStore, configuration: configuration)
+            }
         }
         .contentShape(Rectangle())
+        // 平移翻页本身就是转场，不再叠一层换页动画（叠了就是两个动画互相打架）。
         .animation(
-            configuration.pageTurnMode == .scroll
+            usesPan || configuration.pageTurnMode == .scroll
                 ? nil
                 : pageAnimation(for: configuration.pageTurnAnimation),
             value: viewStore.currentPageIndex
@@ -235,145 +239,35 @@ private extension ReaderView {
         )
     }
 
-    // MARK: - 手势
-
-    @ViewBuilder
-    private func readerGesture(
-        _ content: some View,
-        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        availableWidth: CGFloat,
-        onCenterTap: @escaping () -> Void
+    /// 单页渲染：点击 / 滚动方式用，平移不可用（Reduce Motion、未分页）时也用它兜底。
+    private func singlePage(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
+        configuration: PaginationConfiguration
     ) -> some View {
-        switch viewStore.config.pageTurnMode {
-        case .slide:
-            slideGesture(
-                content,
-                viewStore: viewStore,
-                availableWidth: availableWidth,
-                onCenterTap: onCenterTap
-            )
+        let displayText = configuration.pageTurnMode == .scroll
+            ? viewStore.text
+            : currentPageText(viewStore)
 
-        case .tap:
-            tapGesture(
-                content,
-                viewStore: viewStore,
-                availableWidth: availableWidth,
-                onCenterTap: onCenterTap
+        return PageTextView(
+            text: displayText,
+            offset: viewStore.currentOffset,
+            configuration: configuration,
+            onOffsetChange: { offset in
+                viewStore.send(.jumpToOffset(offset))
+            }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(configuration.pageTurnMode == .scroll)
+        .id(pageIdentity(viewStore))
+        .transition(
+            pageTransition(
+                for: configuration.pageTurnAnimation,
+                direction: viewStore.pageTurnDirection
             )
-
-        case .scroll:
-            scrollGesture(
-                content,
-                availableWidth: availableWidth,
-                onCenterTap: onCenterTap
-            )
-        }
-    }
-
-    /// 滑动翻页：≥10pt 迟滞锁横向（§12）→ 1:1 跟手 + 边界橡皮筋（§6 / §9）→ 动量投射 + 速度交接（§12）。
-    ///
-    /// 跟手基数是**抓取瞬间页面真实显示的位置**（方案 A）：吸附回位动画没跑完就再抓时
-    /// 从当前显示位置继续，而不是从 0 重开。呈现值怎么来的见
-    /// `ReaderView+SlideTracking.swift`，纯数学见 `SlideTracking`。
-    private func slideGesture(_ content: some View, viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>, availableWidth: CGFloat, onCenterTap: @escaping () -> Void) -> some View {
-        content
-            // 探针只回报呈现值、不参与渲染；页面仍由下一行那句原来的 `.offset` 平移。
-            .background(SlidePresentationProbe(offset: slideOffset, presentation: slidePresentation))
-            .offset(x: slideOffset)
-            .gesture(
-                DragGesture(minimumDistance: 10)
-                    .onChanged { value in
-                        slideIsHorizontal = slideIsHorizontal ?? (abs(value.translation.width) > abs(value.translation.height))
-                        guard slideIsHorizontal == true, !reduceMotion else { return }
-                        // 基线只在本次手势的第一次 onChanged 采一次：之后 translation 是
-                        // 相对同一个起点累积的，逐帧重采就会把已跟手走的位移当成新基线而滚雪球。
-                        let baseline = slideBaseline ?? slidePresentation.offset
-                        slideBaseline = baseline
-                        slideOffset = SlideTracking.offset(
-                            fromDisplayedOffset: baseline,
-                            translation: value.translation.width,
-                            availableWidth: availableWidth,
-                            pageIndex: viewStore.currentPageIndex,
-                            pageCount: viewStore.pages.count
-                        )
-                    }
-                    .onEnded { value in
-                        let wasHorizontal = slideIsHorizontal == true
-                        slideIsHorizontal = nil
-                        slideBaseline = nil
-                        guard wasHorizontal else { return }
-                        let projected = value.predictedEndTranslation.width
-                        let target = viewStore.currentPageIndex + (projected < 0 ? 1 : -1)
-                        if abs(projected) > availableWidth / 2, viewStore.pages.indices.contains(target) {
-                            viewStore.send(projected < 0 ? .nextPage : .prevPage)
-                        }
-                        withAnimation(slideSettleAnimation()) {
-                            slideOffset = 0
-                        }
-                    }
-            )
-            .simultaneousGesture(
-                SpatialTapGesture()
-                    .onEnded { value in
-                        if isCenterTap(value.location.x, width: availableWidth) {
-                            onCenterTap()
-                        }
-                    }
-            )
-    }
-
-    /// 吸附回位动画：**普通缓动，不用弹簧**（U1-9，owner 要求删掉翻页的弹簧效果）。
-    ///
-    /// 原先这里是 `.interpolatingSpring(stiffness: 300, damping: 28…35, initialVelocity:)`
-    /// —— 阻尼比 ζ≈0.8，会过冲回弹。现在换成一条「起始快、末端缓停」的 timing curve：
-    /// 观感仍是「一滑就到位」，但不再有过冲。
-    ///
-    /// 注意：跟手（1:1 位移 + 边界橡皮筋）与抬手后的**动量判向**都保留，
-    /// 被去掉的只是回位动画的弹簧曲线本身。副作用是失去了释放速度的交接
-    /// （普通缓动没有初速度概念），换来的就是「不弹」。
-    private func slideSettleAnimation() -> Animation {
-        .timingCurve(0.22, 1, 0.36, 1, duration: 0.22)
-    }
-
-    private func tapGesture(
-        _ content: some View,
-        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        availableWidth: CGFloat,
-        onCenterTap: @escaping () -> Void
-    ) -> some View {
-        content.gesture(
-            SpatialTapGesture()
-                .onEnded { value in
-                    let locationX = value.location.x
-                    if isCenterTap(locationX, width: availableWidth) {
-                        onCenterTap()
-                    } else if locationX < availableWidth / 2 {
-                        viewStore.send(.prevPage)
-                    } else {
-                        viewStore.send(.nextPage)
-                    }
-                }
         )
     }
 
-    private func scrollGesture(
-        _ content: some View,
-        availableWidth: CGFloat,
-        onCenterTap: @escaping () -> Void
-    ) -> some View {
-        content.simultaneousGesture(
-            SpatialTapGesture()
-                .onEnded { value in
-                    if isCenterTap(value.location.x, width: availableWidth) {
-                        onCenterTap()
-                    }
-                }
-        )
-    }
-
-    private func isCenterTap(_ locationX: CGFloat, width: CGFloat) -> Bool {
-        locationX >= width / 3 && locationX <= width * 2 / 3
-    }
+    // MARK: - 控制栏
 
     private func readerChrome(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
@@ -387,6 +281,13 @@ private extension ReaderView {
         }
     }
 
+    /// 上栏。
+    ///
+    /// 位置（U9-5）：整条 `readerChrome` 已经在「安全区可用盒」里（body 的四条
+    /// `.padding(…safeAreaInsets…)`），所以**不再额外加顶部内边距**，上栏的上边缘
+    /// 正好落在正文区域的上边界 —— 也就是屏幕左上 / 右上圆角弧度开始处，
+    /// 而不是贴在状态栏上（状态栏已由 `.statusBar(hidden: true)` 藏掉）。
+    /// 圆角半径本身**不猜**：不同机型一律由安全区自适应。
     private func readerTopBar(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> some View {
@@ -409,14 +310,7 @@ private extension ReaderView {
 
             Spacer()
 
-            Button {
-                setChromeVisible(false)
-            } label: {
-                Image(systemName: "eye.slash")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .accessibilityLabel("隐藏控制栏")
+            readerMoreMenu()
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.vertical, DesignTokens.Spacing.sm)
@@ -427,9 +321,36 @@ private extension ReaderView {
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
         .padding(.horizontal, DesignTokens.Spacing.md)
-        .padding(.top, DesignTokens.Spacing.xs)
     }
 
+    /// 右上角「更多」菜单（U9-6）。
+    ///
+    /// 只把原来的 `eye.slash`（隐藏控制栏）换成 `ellipsis.circle` —— 控制栏显隐能力本身
+    /// **没有丢**：中央点击那条路径仍在（`pageContent` 的 `onCenterTap`），
+    /// 下载完成后自动隐藏也仍在，两条都还走 `setChromeVisible` 这一个写入口（U1-2）。
+    /// 被去掉的只有 `eye.slash` 这一个**入口**，那是 owner 明确要求的替换。
+    ///
+    /// ⚠️ **更多选项待添加**：先放一条不可点的占位项，而不是留一个空 `Menu`
+    /// —— 空菜单点开是一片空白，用户会以为控件坏了（§11 反馈：别给一个点了没反应的入口）。
+    private func readerMoreMenu() -> some View {
+        Menu {
+            Button("更多选项待添加") {}
+                .disabled(true)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                // HIG §9：视觉图标可小于 44pt，命中区必须补足。
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .accessibilityLabel("更多")
+    }
+
+    /// 下栏。
+    ///
+    /// 位置（U9-5）与上栏同理：**不再额外加底部内边距**，下栏的下边缘正好落在正文区域的
+    /// 下边界 —— 也就是屏幕左下 / 右下圆角弧度开始处，而不是贴在 Home Indicator 上。
     private func readerBottomBar(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> some View {
@@ -456,7 +377,6 @@ private extension ReaderView {
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
         .padding(.horizontal, DesignTokens.Spacing.md)
-        .padding(.bottom, DesignTokens.Spacing.sm)
     }
 
     private func chromeButton(
@@ -539,8 +459,8 @@ private extension ReaderView {
     /// 上栏（`readerTopBar`）与下栏（`readerBottomBar`）都包在 `readerChrome` 里，
     /// 由 body 里同一个 `if isChromeVisible` 与同一个 `.transition(.opacity)` 控制：
     /// 两者在物理上无法分别隐藏，所以显隐的**时机与动画也必须只有一处决定**。
-    /// 中央点击 / 顶栏 `eye.slash` / 下载后自动隐藏全部走这里，杜绝再次分叉
-    /// （此前 `eye.slash` 与下载后是裸赋值，会瞬切而不与中央点击同步过渡）。
+    /// 中央点击 / 下载后自动隐藏全部走这里（U9-6 之后 `eye.slash` 那条入口已按 owner
+    /// 要求换成「更多」菜单，见 `readerMoreMenu`），杜绝再次分叉。
     private func setChromeVisible(_ visible: Bool) {
         guard isChromeVisible != visible else { return }
         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {

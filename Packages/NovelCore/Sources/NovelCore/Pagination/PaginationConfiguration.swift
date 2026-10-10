@@ -89,12 +89,15 @@ public struct PageInset: Equatable, Sendable, Codable {
     public var bottom: CGFloat
     public var trailing: CGFloat
 
-    /// 默认：左右 **24pt**、上下 **8pt**（U1-8，owner 指定）。
+    /// 默认：左右 **24pt**、上下 **0pt**。
     ///
-    /// - 左右 24 比 HIG 的 16pt 底线更宽松：中文正文一行排得下的字数更舒服，也避开屏幕圆角。
-    /// - 上下收到 8：原先四边都是 16（B0-4 落的），上下显得太宽 —— 正文上下还各有安全区兜底，
-    ///   不必再叠一层同样厚度的留白。
-    public init(top: CGFloat = 8, leading: CGFloat = 24, bottom: CGFloat = 8, trailing: CGFloat = 24) {
+    /// - 左右 24（U1-8，owner 指定）比 HIG 的 16pt 底线更宽松：中文正文一行排得下的字数更舒服，
+    ///   也避开屏幕圆角。
+    /// - 上下 **0**（U9-3b，owner 指定「上下边距 0 起点」）：正文显示区域就是**安全区**矩形
+    ///   （上边到灵动岛 / 刘海下沿、下边到 Home Indicator 上沿），正文从该区域顶端开始，
+    ///   **不再额外加顶部留白**。此前是 8（U1-8 落的），在安全区之上又叠了一层同样厚度的留白。
+    ///   滑杆下限本就是 0，用户仍可自己加回上下边距 —— 改的只是**起点值**。
+    public init(top: CGFloat = 0, leading: CGFloat = 24, bottom: CGFloat = 0, trailing: CGFloat = 24) {
         self.top = top
         self.leading = leading
         self.bottom = bottom

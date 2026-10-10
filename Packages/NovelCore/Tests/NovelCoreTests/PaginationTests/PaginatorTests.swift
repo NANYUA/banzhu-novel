@@ -152,18 +152,20 @@ final class PaginatorTests: XCTestCase {
         XCTAssertEqual(pages[0].length, 1)
     }
 
-    // MARK: - 默认页边距（U1-8）
+    // MARK: - 默认页边距（U1-8 → U9-3b）
 
-    /// ⑯ 默认页边距：左右 24、上下 8。
+    /// ⑯ 默认页边距：左右 24、上下 **0**。
     ///
     /// 这个默认值此前**没有任何测试锁着**（B0-4 把它从 0 改成 16 时也没锁），
-    /// 改歪了没人会发现。这里补一个锚点。
-    func test默认页边距左右二十四上下八() {
+    /// 改歪了没人会发现。U1-8 补了锚点（当时上下是 8）；
+    /// U9-3b owner 要求「正文贴安全区、上下边距 0 起点」，锚点同步到 0 ——
+    /// **这条用例的价值就在于：上下默认值每被改一次，都必须在这里显式改一次。**
+    func test默认页边距左右二十四上下零() {
         let inset = PageInset()
         XCTAssertEqual(inset.leading, 24)
         XCTAssertEqual(inset.trailing, 24)
-        XCTAssertEqual(inset.top, 8)
-        XCTAssertEqual(inset.bottom, 8)
+        XCTAssertEqual(inset.top, 0)
+        XCTAssertEqual(inset.bottom, 0)
     }
 
     /// ⑰ 分页配置与落盘设置必须**同源**取默认值：
