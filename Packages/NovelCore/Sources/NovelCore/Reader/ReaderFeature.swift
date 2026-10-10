@@ -104,6 +104,13 @@ public struct ReaderFeature: Reducer {
         /// 下一章的分页结果，与 `config` **同源**（换章后 config 不变，分页才对得上渲染盒）。
         /// 空数组 = 不可用（没预加载 / 加载失败 / 分页为空）⇒ 到章尾回弹。
         public var nextPages: [PageRange] = []
+
+        /// 上一章正文（预加载结果）；空串表示还没就绪。
+        public var previousText: String = ""
+
+        /// 上一章的分页结果，与 `config` **同源**（退章后 config 不变，分页才对得上渲染盒）。
+        /// 空数组 = 不可用（没预加载 / 加载失败 / 分页为空）⇒ 到章首回弹。
+        public var previousPages: [PageRange] = []
     }
 
     /// 显式 Equatable：TestStore.receive 需要
@@ -125,6 +132,11 @@ public struct ReaderFeature: Reducer {
         case advanceChapter
         /// 下一章正文预加载完成（章节路径 + 正文）；分页由 reducer 按**当前** config 现算。
         case nextChapterLoaded(String, String)
+        /// 到章首再往后：切到上一章**最后一页**。
+        /// 上一章最后一页此刻就摆在全景图的 `-1` 格上，所以这里只做状态迁移、不重新加载。
+        case retreatChapter
+        /// 上一章正文预加载完成（章节路径 + 正文）；分页由 reducer 按**当前** config 现算。
+        case previousChapterLoaded(String, String)
         /// 分页配置变化（触发重算分页 + 按 offset 重新定位）
         case configChanged(PaginationConfiguration)
         /// 自动预缓存后续章节数变化
@@ -154,9 +166,10 @@ public struct ReaderFeature: Reducer {
                 state.text = ""
                 state.pages = []
                 state.currentOffset = 0
-                // 换章（含从目录手动跳章）⇒ 旧的预加载结果作废，不能把上一章的
-                // 「下一章」错配给这一章。新的下一章在本章 `contentLoaded` 后预加载。
+                // 换章（含从目录手动跳章）⇒ 旧的预加载结果作废，不能把别的章的
+                // 「下一章」/「上一章」错配给这一章。相邻两章都在本章 `contentLoaded` 后预加载。
                 invalidateNextChapter(&state)
+                invalidatePreviousChapter(&state)
                 let loader = readerLoader
                 return .run { send in
                     do {
@@ -176,6 +189,7 @@ public struct ReaderFeature: Reducer {
                 state.pages = []
                 state.currentOffset = 0
                 invalidateNextChapter(&state)
+                invalidatePreviousChapter(&state)
                 let loader = readerLoader
                 return .run { send in
                     do {
@@ -195,17 +209,26 @@ public struct ReaderFeature: Reducer {
                 let restoredOffset = state.consumeInitialOffset()
                 state.currentOffset = restoredOffset
                 let chapterPath = state.chapterPath
+                // 🔴 落盘的是**本次恢复后的偏移**，不是 0：恒写 0 会把刚恢复的位置当场抹掉，
+                // 下次进来只能回到章首（owner 真机反馈「换一本书以后只会回到看的章节首页」）。
+                // ⚠️ 必须在 `consumeInitialOffset()` **之后**取：`progressOffset` 是
+                // `currentOffset` 的派生值，而恢复位置正是由它写进 `currentOffset` 的。
+                // ⚠️ 口径用 `progressOffset`（相对**原始正文**，已扣掉章名前缀），
+                // 与 `ReadingProgressStore` 落盘口径一致 —— 直接写 `currentOffset` 会多算
+                // 一个章名前缀长度（换章 / 带章名时正好差一整页）。
+                let progressOffset = state.progressOffset
                 let progressStore = readingProgressStore
                 let cacheStore = chapterCacheStore
                 let precacheCount = state.precacheCount
                 return .merge(
                     .run { _ in
                         // 进度写入失败不应阻断阅读；书架排序与 LRU 会在下次成功时刷新。
-                        try? await progressStore.markRead(chapterPath, 0, Date())
+                        try? await progressStore.markRead(chapterPath, progressOffset, Date())
                         await cacheStore.cacheCurrentAndFollowing(chapterPath, text, precacheCount)
                     },
-                    // 本章就绪后才预加载下一章：到章尾那一格才有内容可翻。
-                    preloadNextChapter(state, loader: readerLoader)
+                    // 本章就绪后才预加载相邻两章：到章尾 / 章首那一格才有内容可翻。
+                    // 顺序固定为「先下一章、后上一章」（见 `preloadAdjacentChapters`）。
+                    preloadAdjacentChapters(state, loader: readerLoader)
                 )
 
             case let .loadFailed(message):
@@ -249,6 +272,22 @@ public struct ReaderFeature: Reducer {
 
             case let .nextChapterLoaded(path, text):
                 return applyNextChapterLoaded(
+                    path: path,
+                    text: text,
+                    to: &state,
+                    using: paginationService
+                )
+
+            case .retreatChapter:
+                return retreatToPreviousChapter(
+                    &state,
+                    loader: readerLoader,
+                    progressStore: readingProgressStore,
+                    cacheStore: chapterCacheStore
+                )
+
+            case let .previousChapterLoaded(path, text):
+                return applyPreviousChapterLoaded(
                     path: path,
                     text: text,
                     to: &state,
@@ -316,7 +355,11 @@ public struct ReaderFeature: Reducer {
     }
 }
 
-private func saveProgress(
+/// 写一条阅读进度。
+///
+/// ⚠️ 不是 `private`：`ReaderFeature+ChapterTransition.swift` 里的换章迁移
+/// （`advanceToNextChapter` / `retreatToPreviousChapter`）也走这条口径。
+func saveProgress(
     chapterPath: String,
     offset: Int,
     store: ReadingProgressStore
@@ -420,6 +463,15 @@ public extension ReaderFeature.State {
         return Self.displayText(chapterName: next.name, text: nextText)
     }
 
+    /// 上一章的渲染文本（与 `displayText` 同一合成规则）。
+    ///
+    /// 与 `nextDisplayText` 同源同写法：全景图 `-1` 格切页要用它，退章时
+    /// `previousPages` 直接当新章的分页用 —— 规则一分叉就与渲染错位。
+    var previousDisplayText: String {
+        guard let previous = previousChapter else { return "" }
+        return Self.displayText(chapterName: previous.name, text: previousText)
+    }
+
     /// 当前 offset 落在第几页。`-1` 表示还没分页（空文本）
     var currentPageIndex: Int {
         guard !pages.isEmpty else { return -1 }
@@ -445,116 +497,23 @@ private func applyContainerSize(
     repaginate(&state, using: paginationService)
 }
 
-/// 作废「下一章」的预加载结果。
-///
-/// 换章时必须调用（含从目录手动跳章、重新加载当前章）：否则上一章预加载的
-/// `nextPages` 会被当成新章的「下一章」，翻过去就是错的正文。
-private func invalidateNextChapter(_ state: inout ReaderFeature.State) {
-    state.nextText = ""
-    state.nextPages = []
-}
+// 相邻章的预加载、作废与换章迁移（两个方向逐条镜像）都在
+// `ReaderFeature+ChapterTransition.swift`：本文件已贴着 `file_length` 600 的线。
 
-/// 到章尾再往前：切到下一章。
+/// 按当前 config 重排当前章**与相邻两章**。
 ///
-/// **只做状态迁移，不重新加载** —— 下一章第 1 页此刻就摆在全景图的 `+1` 格上，
-/// 换章后它正好变成当前页；正文与分页都是预加载好的，平移因此是连续的。
-///
-/// 边界（owner 选择）：最后一章、或下一章第 1 页还没就绪 ⇒ `.none`，
-/// 手势原地回弹，**不提示**。
-private func advanceToNextChapter(
-    _ state: inout ReaderFeature.State,
-    loader: ReaderLoader,
-    progressStore: ReadingProgressStore,
-    cacheStore: ChapterCacheStore
-) -> Effect<ReaderFeature.Action> {
-    guard state.currentPageIndex >= 0,
-          state.currentPageIndex == state.pages.count - 1,
-          !state.nextPages.isEmpty,
-          let next = state.nextChapter
-    else { return .none }
-    let nextText = state.nextText
-    let nextPath = next.path
-    // 口径与 `contentLoaded` 完全一致（同一个依赖、同样的参数含义），
-    // 换章后的缓存行为才与「正常开章」等价。
-    let precacheCount = state.precacheCount
-    state.chapterPath = next.path
-    state.chapterName = next.name
-    state.text = nextText
-    state.pages = state.nextPages
-    // 🔴 数据契约：位置存字符偏移 —— 新章从头开始，不是「把页码归零」。
-    state.currentOffset = 0
-    state.pageTurnDirection = .forward
-    // 先清空再重算（链式）：新的下一章预加载回来之前，旧的 nextPages
-    // 绝不能被当成新章的下一章。
-    invalidateNextChapter(&state)
-    return .merge(
-        // 沿用既有口径：对新章写一条 offset 0 的阅读进度。
-        saveProgress(chapterPath: state.chapterPath, offset: 0, store: progressStore),
-        // 换章也要补一次自动缓存：否则「读过就缓存」这条闭环在换章路径上断掉，
-        // 离线可读范围不再随阅读推进而扩大。对已缓存的本章是无操作
-        // （`saveCachedText` 内容相同即不写盘、不刷新 `savedAt`）。
-        .run { _ in
-            await cacheStore.cacheCurrentAndFollowing(
-                nextPath,
-                nextText,
-                precacheCount
-            )
-        },
-        // 链式：到新章后再预加载它的下一章。
-        preloadNextChapter(state, loader: loader)
-    )
-}
-
-/// 收下预加载的下一章正文，并按**当前** config 现算分页。
-///
-/// 分页刻意不放在预加载 effect 里：用户可能在预加载途中改字号，
-/// 用旧 config 分出来的页会与渲染盒错位（B0-2 几何契约）。
-/// 分页为空 ⇒ 安静留空：不报错、不提示（owner 明确不要提示）。
-private func applyNextChapterLoaded(
-    path: String,
-    text: String,
-    to state: inout ReaderFeature.State,
-    using paginationService: PaginationService
-) -> Effect<ReaderFeature.Action> {
-    // 竞态守卫：这次结果必须仍是**当前**的下一章 —— 换过章 / 从目录跳过章，
-    // 路径就对不上了，结果作废（否则 A 章的下一页会被错配给 B 章）。
-    guard let next = state.nextChapter, next.path == path else { return .none }
-    let pages = paginationService.paginate(
-        ReaderFeature.State.displayText(chapterName: next.name, text: text),
-        state.config
-    )
-    guard !pages.isEmpty else { return .none }
-    state.nextText = text
-    state.nextPages = pages
-    return .none
-}
-
-/// 预加载「下一章」：读正文；**分页留给 reducer 收到结果时按当时的 config 现算**
-/// （提前分页会在用户改字号后与渲染盒错位）。
-///
-/// - 没有下一章（最后一章 / 列表里找不到当前章）⇒ `.none`，到章尾保持回弹；
-/// - 读失败、或拿到空正文 ⇒ 什么都不发：安静失败，不报错、不提示。
-private func preloadNextChapter(
-    _ state: ReaderFeature.State,
-    loader: ReaderLoader
-) -> Effect<ReaderFeature.Action> {
-    guard let next = state.nextChapter else { return .none }
-    return .run { send in
-        guard let text = try? await loader.load(next.path), !text.isEmpty else { return }
-        await send(.nextChapterLoaded(next.path, text))
-    }
-}
-
-/// 按当前 config 重排当前章**与下一章**。
-///
-/// 下一章必须与当前章同一份 config（B0-2 几何契约）：换章后 `config` 不变，
-/// 预加载的分页才对得上渲染盒。改了设置却只重排当前章，会让全景图 `+1` 格上
-/// 那一页（以及换章后的第一页）按旧排版切 —— 与屏幕上的盒子错位。
+/// 相邻章必须与当前章同一份 config（B0-2 几何契约）：换章后 `config` 不变，
+/// 预加载的分页才对得上渲染盒。改了设置却只重排当前章，会让全景图 `±1` 格上
+/// 那一页（以及换章后的第一页 / 最后一页）按旧排版切 —— 与屏幕上的盒子错位。
 private func repaginate(
     _ state: inout ReaderFeature.State,
     using paginationService: PaginationService
 ) {
     state.pages = paginationService.paginate(state.displayText, state.config)
-    guard !state.nextText.isEmpty else { return }
-    state.nextPages = paginationService.paginate(state.nextDisplayText, state.config)
+    if !state.nextText.isEmpty {
+        state.nextPages = paginationService.paginate(state.nextDisplayText, state.config)
+    }
+    if !state.previousText.isEmpty {
+        state.previousPages = paginationService.paginate(state.previousDisplayText, state.config)
+    }
 }

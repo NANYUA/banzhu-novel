@@ -10,8 +10,9 @@ import SwiftUI
 // 是一块自成整体的新代码。拆法与 `BookshelfView+GroupBar.swift` 同一先例。
 //
 // ⚠️ 状态仍住在 `BookshelfView` 主类型里（跨文件 extension 不能加存储属性）：
-// `readerTarget` / `isShowingReader` / `preparingBookPath` / `prepareErrorMessage`
-// 与 `@Dependency(\.readingTargetLoader)` 都刻意**不是 `private`**，本文件才读得到。
+// `readerTarget` / `readerBookTitle` / `isShowingReader` / `preparingBookPath` /
+// `prepareErrorMessage` 与 `@Dependency(\.readingTargetLoader)` 都刻意**不是 `private`**，
+// 本文件才读得到。
 
 // MARK: - 打开阅读页
 
@@ -31,12 +32,17 @@ extension BookshelfView {
 
     /// 单点书卡 → 直接进阅读页。
     ///
+    /// `bookTitle` 由**入口那层**传进来（书架行 / 下载卡各自的模型字段），落进 `readerBookTitle`
+    /// 供阅读页的角落标签用 —— 刻意**不**在这里按 `bookPath` 反查书库：下载页可能有不带书架行的
+    /// 书，反查会静默拿到空标题。
+    ///
     /// 取目录是**异步**的（`readingTargetLoader`），所以先置 `preparingBookPath` 进加载态
     /// （全页覆盖层，别让「点了没反应」），拿到落点再 push 阅读页；失败弹 alert（不静默）。
-    func prepareReader(bookPath: String, progressHint: ReadingProgress? = nil) {
+    func prepareReader(bookPath: String, bookTitle: String, progressHint: ReadingProgress? = nil) {
         // 防重入：正在准备时再点（同一本或另一本）一律忽略，避免两层覆盖 / 两次 push。
         guard preparingBookPath == nil else { return }
         preparingBookPath = bookPath
+        readerBookTitle = bookTitle
         Task {
             await openReader(bookPath: bookPath, progressHint: progressHint)
         }
@@ -69,6 +75,7 @@ extension BookshelfView {
                 chapterPath: target.chapterPath,
                 chapterName: target.chapterName,
                 bookPath: target.bookPath,
+                bookTitle: readerBookTitle,
                 chapters: target.chapters,
                 downloadStore: downloadStore,
                 initialOffset: target.initialOffset

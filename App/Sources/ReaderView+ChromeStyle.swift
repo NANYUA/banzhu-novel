@@ -13,8 +13,10 @@ import UIKit
 // - 明暗判定用项目**唯一**的亮度真相源 `UIColor.isLightBackground` / `relativeLuminance`
 //   （`ReaderAppearance.swift`，阈值 **0.6**）。参考实现是自算 BT.601 亮度、阈值 **0.40**，
 //   已统一到 0.6 —— 具体影响见 `ReaderChromeDerivation.tint(for:)`；
-// - 前景色（图标 / 标题）走 `ReadingTextColorMode.automatic.uiColor(on:custom:)` ——
-//   全仓只有这一条「背景上的文字 / 图标用什么颜色」的规则；
+// - 前景色（图标 / 标题 / 下栏文字）仍走 `ReadingTextColorMode.automatic.uiColor(on:custom:)`
+//   —— 全仓只有这一条「背景上的文字 / 图标用什么颜色」的规则，**没有**第二套判据、
+//   也没有第二个阈值；只是喂给它的「背景」从**正文底色**换成了图标实际坐着的
+//   **染色后玻璃**（`ReaderChromeDerivation.glass(for:)`，理由见 `foreground(for:traits:)`）；
 // - 参考实现的 `RGBColor` + 自算 `luminance` 换成项目既有的 `ReadingColor`（NovelCore），
 //   只补「插值 / 缩放 / 从已解析 `UIColor` 取分量」三个私有方法，不新造颜色类型。
 
@@ -71,7 +73,25 @@ private enum ReaderChromeDerivation {
     /// 故统一取 10pt。
     static let shadowRadius: CGFloat = 10
 
-    /// 染色色 = 去饱和后的底色，按**正文底色**的深浅压暗 / 提亮，并把染色强度烘焙进 alpha。
+    /// 染色后玻璃的**底色**（还没把染色强度烘进 alpha）：去饱和 → 浅色压暗 / 深色向深灰提亮。
+    ///
+    /// 它同时是两件事的唯一来源，所以必须单独抽出来：
+    /// - 「玻璃长什么样」—— `tint(for:)` 在它上面烘进按深浅分档的 alpha；
+    /// - 「玻璃是深是浅」—— 前景色（图标 / 章节标题 / 下栏文字）按**它**的亮度判定，
+    ///   见 `foreground(for:traits:)`。
+    static func glass(for page: UIColor) -> UIColor {
+        let luminance = page.relativeLuminance
+        // `ReadingColor` 的分量是 `Double`（纯逻辑层不依赖 CoreGraphics），这里显式转换。
+        let grayLevel = Double(luminance)
+        let gray = ReadingColor(red: grayLevel, green: grayLevel, blue: grayLevel)
+        let desaturated = ReadingColor(resolved: page).mixed(with: gray, desaturation)
+        if page.isLightBackground {
+            return desaturated.scaled(lightDimFactor).uiColor
+        }
+        return desaturated.mixed(with: darkTintTarget, darkTintMix).uiColor
+    }
+
+    /// 染色色 = 玻璃底色（`glass(for:)`）+ 按深浅分档的染色强度（烘焙进 alpha）。
     ///
     /// ⚠️ 深浅判据统一到项目既有的 `UIColor.isLightBackground`（阈值 **0.6**）。
     /// 参考实现原来自算 BT.601 亮度、阈值 **0.40**，两者只在「亮度落在 (0.40, 0.60] 区间」
@@ -82,17 +102,44 @@ private enum ReaderChromeDerivation {
     ///   ⇒ 玻璃从「压暗的灰调」变成「深灰玻璃」。这正是要统一阈值的原因：同一块底色，
     ///   正文文字选黑 / 白与玻璃选深 / 浅必须是同一个判据。
     static func tint(for page: UIColor) -> UIColor {
-        let luminance = page.relativeLuminance
-        // `ReadingColor` 的分量是 `Double`（纯逻辑层不依赖 CoreGraphics），这里显式转换。
-        let grayLevel = Double(luminance)
-        let gray = ReadingColor(red: grayLevel, green: grayLevel, blue: grayLevel)
-        let desaturated = ReadingColor(resolved: page).mixed(with: gray, desaturation)
-        if page.isLightBackground {
-            let opacity = luminance > nearWhiteLuminance ? nearWhiteTintOpacity : lightTintOpacity
-            return desaturated.scaled(lightDimFactor).uiColor.withAlphaComponent(opacity)
+        guard page.isLightBackground else {
+            return glass(for: page).withAlphaComponent(darkTintOpacity)
         }
-        let glass = desaturated.mixed(with: darkTintTarget, darkTintMix)
-        return glass.uiColor.withAlphaComponent(darkTintOpacity)
+        let opacity = page.relativeLuminance > nearWhiteLuminance ? nearWhiteTintOpacity : lightTintOpacity
+        return glass(for: page).withAlphaComponent(opacity)
+    }
+
+    /// 前景色（图标 / 章节标题 / 下栏文字）：按**染色后玻璃**的亮度选黑 / 白。
+    ///
+    /// ## 判据本身没有新增
+    /// 仍走全仓唯一那条「背景上的文字 / 图标用什么颜色」的规则
+    /// `ReadingTextColorMode.automatic.uiColor(on:custom:)` ⇒ 同一个 `UIColor.isLightBackground`、
+    /// 同一个 **0.6** 阈值（`ReaderAppearance.swift`）。改的只有喂进去的那个「背景」：
+    /// 从正文底色换成图标**实际坐着的那层玻璃**（`glass(for:)`）。
+    ///
+    /// ## 为什么必须换（否则会出现「深色玻璃 + 黑色图标」）
+    /// 图标压在**染色后的玻璃**上，不是压在正文底色上。浅色底走的是「去饱和 → 压暗 ×0.90」，
+    /// 而去饱和是向**同亮度**的灰插值（不改变 0.299 / 0.587 / 0.114 的加权和）⇒
+    /// 玻璃亮度**恰好** = 正文底色亮度 × 0.90。于是正文底色亮度落在 **(0.60, 0.667]** 这一段时：
+    /// `page.isLightBackground == true`（> 0.6），而
+    /// `glass.isLightBackground == false`（`0.667 × 0.90 = 0.60`，恰好压到阈值以下）。
+    /// 按正文底色选色就会在这段里选出**黑色**前景，压在**已被判为深色**的玻璃上 ——
+    /// 对比度约 3.4:1，低于 `apple-design-2` §6 要求的 4.5:1。按玻璃判定即可消除这段错配。
+    ///
+    /// ## 对预置背景的影响：无
+    /// 五个预置底色的亮度要么 > 0.92（跟随浅色 ≈ 0.95 / 米黄 ≈ 0.93）、要么离 0.6 很远
+    /// （护眼绿 ≈ 0.86、跟随深色 ≈ 0.09、纯黑 0），**都不在** (0.60, 0.667] 这段里
+    /// ⇒ 预置主题的前景色逐值不变；只有**自定义背景色**恰好落在这段时才会由黑翻白。
+    ///
+    /// ## 为什么还要 `traits`
+    /// 调用点（`ReaderChromeStyle.make(page:)`）已经把 `page` 按 traits 解析过，
+    /// 但 `uiColor(on:custom:)` 返回的仍是**动态色**（它按 traits 重新判定一次）。
+    /// 这里用**同一套** traits 显式解析，得到的才是可直接交给 SwiftUI 的静态黑 / 白
+    /// —— 不依赖 `UITraitCollection.current`（那个值在派生上下文里并不可靠，
+    /// 理由同 `ReadingTextColorMode.automatic` 的注释）。
+    static func foreground(for page: UIColor, traits: UITraitCollection) -> UIColor {
+        ReadingTextColorMode.automatic.uiColor(on: glass(for: page), custom: .defaultCustomText)
+            .resolvedColor(with: traits)
     }
 
     /// 边缘线颜色：**朝正文那一侧**的那根 0.5pt 细线。
@@ -138,6 +185,11 @@ struct ReaderChromeStyle {
     var edgeColor: Color
     var shadowColor: Color
     var shadowRadius: CGFloat
+    /// 图标 / 章节标题 / 下栏文字的**前景色**。
+    ///
+    /// 按**染色后玻璃**（`ReaderChromeDerivation.glass(for:)`）的亮度选黑 / 白，
+    /// 而不是按正文底色 —— 理由（含 (0.60, 0.667] 那段错配）见
+    /// `ReaderChromeDerivation.foreground(for:traits:)`。
     var foreground: Color
 
     /// 从**正文底色**派生整套控制栏样式。
@@ -145,6 +197,8 @@ struct ReaderChromeStyle {
     /// - 前景色刻意用 `.automatic`（而不是用户在阅读设置里选的 `textColorMode`）：
     ///   控制栏的图标 / 标题压在**玻璃**上，必须跟随背景明暗；用户自定义正文色是给正文用的，
     ///   压在这层玻璃上可能直接不可读。
+    /// - 前景色的「背景」是**染色后的玻璃**（不是 `page` 本身）：图标坐在玻璃上，
+    ///   而玻璃在浅色底上被压暗 ×0.90 ⇒ 两者会在 0.6 阈值两侧给出相反结论。
     static func make(page: UIColor) -> ReaderChromeStyle {
         ReaderChromeStyle(
             material: ReaderChromeDerivation.material,
@@ -158,10 +212,12 @@ struct ReaderChromeStyle {
                 ReaderChromeDerivation.shadow(for: page.resolvedColor(with: traits))
             }),
             shadowRadius: ReaderChromeDerivation.shadowRadius,
-            foreground: Color(uiColor: ReadingTextColorMode.automatic.uiColor(
-                on: page,
-                custom: .defaultCustomText
-            ))
+            foreground: Color(uiColor: UIColor { traits in
+                ReaderChromeDerivation.foreground(
+                    for: page.resolvedColor(with: traits),
+                    traits: traits
+                )
+            })
         )
     }
 }

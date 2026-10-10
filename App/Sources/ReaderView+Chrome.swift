@@ -2,7 +2,7 @@ import NovelCore
 import SwiftUI
 import UIKit
 
-// 阅读页控制栏（上栏 / 下栏）的玻璃背景、栏体、叠加层与转场。
+// 阅读页控制栏（上栏 / 下栏 / 章节跳转条）的玻璃背景、面板体、叠加层与转场。
 //
 // 从 `ReaderView.swift` 拆出来的：那个文件已贴近 SwiftLint `file_length` 600 的硬门
 // （拆前 586 行），而控制栏是其中最大、最独立的一块。与 `ReaderView+PageTurn.swift`
@@ -11,14 +11,20 @@ import UIKit
 // 颜色从哪来（染色 / 边缘 / 阴影 / 前景的派生规则、亮度阈值为什么是 0.6）在
 // `ReaderView+ChromeStyle.swift`；本文件只管布局、玻璃叠法与转场。
 //
-// ## 视觉沿用 owner 的设计稿
-// 玻璃 = 系统 `Material` + 主题染色（用 `mask` 做渐变羽化，贴近正文一侧略减淡）
-// + 0.5pt 细边缘线（朝正文那一侧）+ 只向正文方向偏移的柔影；上栏 44pt「返回 / 居中标题 / 更多」、
-// 下栏 49pt「图标 + 文字标签」（两个高度都是 `minHeight`：字号随 Dynamic Type 长大时栏与玻璃
-// 一起变高）；玻璃向屏幕外延伸，内容留在安全区内。
+// ## 结构：圆角浮动面板（不是通栏玻璃条）
+// 上栏 / 下栏 / 跳章条都是**浮在正文之上的圆角面板**：左右各留 `Spacing.md`(16) 边距、
+// 不贴屏幕上下边，形状是 `RoundedRectangle(cornerRadius: Radius.lg)`。
+// 竖向位置由 `ReaderChromeOverlay` 的三段 `padding` 决定（上栏吃
+// `ReaderView.topBarPadding(safeAreaInsets:)`，下栏与跳章条各吃 `Spacing.xs`），
+// 控制栏这一层**只吃横向安全区** —— 与「上一版」逐值一致（U9-7：两栏要能贴到屏幕上下边）。
 //
-// 条目**以项目既有能力为准**（owner：设计稿只是视觉参考）：
-// 上栏 = 返回 + 居中标题 + 更多菜单；下栏 = 目录 / 下载 / 搜索 / 设置。
+// ## 玻璃语言（借参考实现的配色，不借它的布局）
+// 玻璃 = 系统 `Material` + 主题染色（用 `mask` 做渐变羽化，贴近正文一侧略减淡）
+// + 0.5pt 细边缘线（朝正文那一侧，随面板圆角裁切）+ 只向正文方向偏移的柔影。
+//
+// ## 条目**以项目既有能力为准**（owner：参考代码只是视觉参考）
+// 上栏 = 返回 + 居中标题 + 更多菜单；下栏 = 目录 / 下载 / 搜索 / 设置（图标 + 文字标签）；
+// 跳章条 = 上一章 / 下一章。
 //
 // ## 复用而不是另造
 // 按下反馈用 `PressableCardButtonStyle`（§2.9 优先复用，不另造第二个按下样式）；
@@ -26,28 +32,23 @@ import UIKit
 
 // MARK: - 边
 
-/// 控制栏贴屏幕的哪一条边：上下两栏共用同一套玻璃 / 转场逻辑，只有方向不同。
+/// 面板贴近正文的哪一侧：三条面板共用同一套玻璃 / 转场逻辑，只有方向不同。
 private enum ReaderChromeEdge {
     case top
     case bottom
 
-    /// 贴近正文的一侧（上栏朝下、下栏朝上）—— 边缘线、羽化渐变、投影都朝这一侧。
+    /// 贴近正文的一侧（上栏朝下、下栏与跳章条朝上）—— 边缘线、羽化渐变、投影都朝这一侧。
     var contentAnchor: Alignment {
         self == .top ? .bottom : .top
     }
 
-    /// 玻璃向屏幕外延伸的那条边：上栏铺到状态栏 / 灵动岛之下，下栏铺到 Home Indicator 之下。
-    /// 铺出去的**只有玻璃**；栏内内容仍留在安全区内（见 `ReaderChromeOverlay`）。
-    var bleedingEdge: Edge.Set {
-        self == .top ? .top : .bottom
-    }
-
-    /// 投影**只**向正文方向偏移（上栏向下、下栏向上）；贴屏幕的另三边被屏幕裁掉 ⇒ 单侧柔影。
+    /// 投影**只**向正文方向偏移（上栏向下、下栏与跳章条向上），横向不偏移。
+    /// 面板不贴屏幕边 ⇒ 另三边**不再**被屏幕裁掉，靠 `x: 0` 保持左右两侧是对称柔影。
     var shadowOffsetY: CGFloat {
         self == .top ? ReaderChromeMetrics.shadowOffsetY : -ReaderChromeMetrics.shadowOffsetY
     }
 
-    /// 呼出 / 隐藏时从哪一侧轻微滑入（上栏自上 8pt、下栏自下 8pt）。
+    /// 呼出 / 隐藏时从哪一侧轻微滑入（上栏自上 8pt、下栏与跳章条自下 8pt）。
     var enterOffsetY: CGFloat {
         self == .top ? -ReaderChromeMetrics.enterOffsetY : ReaderChromeMetrics.enterOffsetY
     }
@@ -60,22 +61,12 @@ private enum ReaderChromeEdge {
 /// 通用间距 / 圆角一律取 `DesignTokens`；这里只放「控制栏专有」的那些值 ——
 /// 它们要么来自 HIG 的栏高，要么从命中区几何推导出来。
 private enum ReaderChromeMetrics {
-    /// 44 —— 导航栏标准高度（HIG）。上栏只有一行「图标 + 居中标题」，
-    /// 与系统导航栏等高 ⇒ 进出阅读页 / 换页时不会与导航栏的观感打架。
-    ///
-    /// ⚠️ 它是 `minHeight` 而不是固定高度（见 `ReaderTopBar.body`）：栏内字号随 Dynamic Type
-    /// 长大时，栏跟着内容一起变高（默认内容尺寸下正好 44），不会把图标 / 标题裁在栏外。
-    static let topBarHeight: CGFloat = 44
-
-    /// 49 —— 标签栏标准高度（HIG）。下栏条目比上栏多一行文字标签，故比上栏高 5pt（44 + 5 = 49），
-    /// 与系统标签栏等高。
-    ///
-    /// ⚠️ 同样只作 `minHeight`：AX 大字号下条目（图标 + 文字）撑高，栏与玻璃背景一起变高
-    /// （默认内容尺寸下正好 49）。
-    static let bottomBarHeight: CGFloat = 49
-
     /// 44 —— 触控目标下限（HIG §9）。图标本身远小于此，命中区必须补足，
     /// 否则「看得见点不着」。
+    ///
+    /// 三条面板的**内容行**都以它作 `minHeight`（`chromeIconLabel` / 下栏的 `item`），
+    /// 面板高度 = 内容行 + 上下各 12pt 内边距 ⇒ 默认内容尺寸下 44 + 24 = **68pt**，
+    /// 字号随 Dynamic Type 长大时内容行变高、面板与玻璃一起变高（不会把图标裁在面板外）。
     static let minTouchTarget: CGFloat = 44
 
     /// 0.35 —— 到边界时（首章没有上一章 / 末章没有下一章）跳章按钮的**置灰**不透明度。
@@ -86,19 +77,32 @@ private enum ReaderChromeMetrics {
     /// 亮度整体下降（看得见）+ VoiceOver 播报「不可用」（听得见）。
     static let disabledOpacity: Double = 0.35
 
-    /// 8 —— 栏内左右内边距（`DesignTokens.Spacing.xs`）：按钮自身已带 44pt 命中区，
-    /// 这里只留「图标不贴屏幕边」的呼吸量。
-    static let horizontalPadding = DesignTokens.Spacing.xs
+    /// 12 —— 面板的**竖向内边距**（`Spacing.sm`）：12 + 44pt 内容行 + 12 = **68pt**，
+    /// 与「上一版」的圆角面板逐值相同。
+    ///
+    /// ⚠️ 用内边距而不是固定高度：字号随 Dynamic Type 长大时内容行变高，面板与玻璃一起长
+    /// ——「栏高用 `minHeight` 语义」在这里由**内容撑开**兑现，不需要再写一个固定值。
+    static let panelVerticalPadding = DesignTokens.Spacing.sm
 
-    /// 56 —— 居中标题**左右各**预留的宽度 = 按钮命中区 44 + 栏内边距 8 + 视觉间隙 4。
-    /// 不留这两段，长章节名会顶到两侧按钮上；留了之后标题只会**尾部截断**。
-    static let titleSideReserve: CGFloat = 56
+    /// 16 —— 面板到屏幕左右边的留边（`Spacing.md`）：面板**浮在正文之上、不贴屏幕边**。
+    static let panelOuterMargin = DesignTokens.Spacing.md
+
+    /// 16 —— 上栏面板的横向内边距（`Spacing.md`，与「上一版」的上栏一致）。
+    /// 上栏只有两个 44pt 命中区的图标按钮，留宽一点，标题两侧的呼吸量才够。
+    static let topBarInnerPadding = DesignTokens.Spacing.md
+
+    /// 12 —— 下栏与跳章条面板的横向内边距（`Spacing.sm`，与「上一版」的下栏一致）。
+    ///
+    /// 12 这个值还有一层几何关系：栏内按钮的强调层圆角取 `Radius.xs`(6)，
+    /// 而 `6 = Radius.lg`(18) `−` 12 ⇒ 按钮四周内缩 12pt 后，按下时的强调层
+    /// **完全**落在面板圆角之内（推导见 `DesignTokens.Radius.xs`）。
+    static let barInnerPadding = DesignTokens.Spacing.sm
 
     /// 0.5 —— 贴正文那一侧的边缘线高度：发丝级（@2x 恰好 1 物理像素）。
     /// 目的是「让轮廓自然显现」，不是描边。
     static let edgeLineHeight: CGFloat = 0.5
 
-    /// 5 —— 投影向正文方向的偏移量：只朝正文扩散、其余三边被屏幕裁掉，
+    /// 5 —— 投影向正文方向的偏移量：只朝正文扩散，另一侧留对称的浅影，
     /// 形成轻微悬浮感而不是一圈黑边。
     static let shadowOffsetY: CGFloat = 5
 
@@ -109,14 +113,14 @@ private enum ReaderChromeMetrics {
     /// 转场是「淡入 + 8pt 位移」，用缓出比弹簧更贴合（位移是单向的，没有可回弹的惯性）。
     static let toggleDuration: Double = 0.22
 
-    /// 羽化遮罩的两个停点：从栏内满染，到贴近正文一侧淡到 0.78 —— 软化「玻璃 / 正文」的硬切。
+    /// 羽化遮罩的两个停点：从面板内满染，到贴近正文一侧淡到 0.78 —— 软化「玻璃 / 正文」的硬切。
     static let featherFullLocation: CGFloat = 0.72
     static let featherEndOpacity = 0.78
 
     /// 栏内图标字体：`.body`（默认内容尺寸下 17pt）随 Dynamic Type 缩放。
     ///
     /// 设计稿给的是 `font(.system(size: 18))` 固定字号 —— 项目**全仓不用固定字号**
-    /// （固定字号在大字号无障碍设置下会被固定栏高裁掉），故用最接近的文本样式承接；
+    /// （固定字号在大字号无障碍设置下会被裁掉），故用最接近的文本样式承接；
     /// 17 与 18 的差别在图标上不可辨。
     static let iconFont: Font = .body.weight(.medium)
 
@@ -156,11 +160,12 @@ private enum ReaderChromeMetrics {
 
     /// 按下反馈：复用项目既有的 `PressableCardButtonStyle`。
     /// - `pressedScale: 0.97`：栏内按钮命中区 44pt，比卡片小，缩放幅度比卡片的 0.98 略大一档才可感知；
-    /// - `shape`：强调层贴按钮自身的 `Radius.sm`(12) 圆角。栏是**通栏玻璃**（不再是一个大圆角面板），
-    ///   按钮不再被父容器圆角裁切，故用卡片默认的 `sm` 而不是 `Radius.xs`。
+    /// - `shape`：强调层贴按钮自身的 `Radius.xs`(6) 圆角 —— 面板是圆角 `Radius.lg`(18) 的容器，
+    ///   栏内按钮四周内缩 12pt，故 `6 = 18 − 12`，强调层完全落在面板圆角之内
+    ///   （取 `sm`(12) 会在对角方向露出约 2.5pt 方角，见 `DesignTokens.Radius.xs`）。
     static let buttonStyle = PressableCardButtonStyle(
         pressedScale: 0.97,
-        shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+        shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.xs))
     )
 }
 
@@ -192,16 +197,24 @@ private func chromeIconLabel(
 
 // MARK: - 玻璃背景
 
-/// 通栏玻璃背景：系统材质 + 主题染色（带羽化）+ 0.5pt 细边缘线 + 只朝正文方向的柔影。
+/// 圆角面板的玻璃背景：系统材质 + 主题染色（带羽化）+ 0.5pt 细边缘线 + 只朝正文方向的柔影。
+///
+/// 形状与「上一版」的圆角面板同源（`RoundedRectangle(cornerRadius: Radius.lg)`）；
+/// 玻璃语言（材质 / 染色 / 边缘 / 投影）来自 `ReaderChromeStyle` 的派生 ——
+/// 三条面板共用这一个视图 ⇒ 材质 / 染色 / 边缘 / 投影 / 圆角在结构上无法分叉。
 private struct ReaderChromeGlass: View {
     let style: ReaderChromeStyle
     let edge: ReaderChromeEdge
 
+    /// 面板形状：`Radius.lg`(18)，与「上一版」的圆角面板逐值相同。
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
+    }
+
     var body: some View {
         ZStack {
-            Rectangle().fill(style.material)
-            Rectangle()
-                .fill(style.tint)
+            shape.fill(style.material)
+            shape.fill(style.tint)
                 .mask(featherMask)
         }
         .overlay(alignment: edge.contentAnchor) {
@@ -209,12 +222,16 @@ private struct ReaderChromeGlass: View {
                 .fill(style.edgeColor)
                 .frame(height: ReaderChromeMetrics.edgeLineHeight)
         }
+        // 边缘线是一条**直**线，会在面板圆角外露出两个方角 ⇒ 先按面板形状裁一次。
+        // 必须在 `compositingGroup` 之前：裁切属于「这一层长什么样」，
+        // 裁完再合成、再投影，投影才会沿着圆角走。
+        .clipShape(shape)
         // 先合成成一层再投影：否则投影会分别落在材质 / 染色 / 边缘线上，接缝处出现重影。
         .compositingGroup()
         .shadow(color: style.shadowColor, radius: style.shadowRadius, x: 0, y: edge.shadowOffsetY)
     }
 
-    /// 内侧羽化遮罩：从栏内满染淡到贴近正文处 0.78。
+    /// 内侧羽化遮罩：从面板内满染淡到贴近正文处 0.78。
     /// （遮罩只看 alpha，`.white` 在这里只是「全不透明」的写法，不参与配色。）
     private var featherMask: LinearGradient {
         LinearGradient(
@@ -233,6 +250,10 @@ private struct ReaderChromeGlass: View {
 
 /// 上栏：返回 · 章节名（居中、单行、尾部截断）· 更多菜单。
 ///
+/// 结构取「上一版」：`HStack { 返回 · Spacer · 章节名 · Spacer · 更多 }`
+/// + `Spacing.md` 横向 / `Spacing.sm` 竖向内边距 + 圆角面板背景 + `Spacing.md` 外留边。
+/// 两侧按钮的命中区同为 44pt、两个 `Spacer` 等宽 ⇒ 标题**天然居中**，不需要手工预留宽度。
+///
 /// 「更多」是项目既有的入口（U9-6 把原来的 `eye.slash` 换成了 `ellipsis.circle`）。
 /// 菜单里现在是**真入口**「书籍详情」（owner 需求：详情页入口收进阅读页右上角「更多」）。
 /// `onShowDetail` 为 `nil` 时（测试 / 预览那条没有 `bookPath` 的构造路径）保留原来的置灰占位项
@@ -245,38 +266,33 @@ private struct ReaderTopBar: View {
     var onBack: () -> Void
 
     var body: some View {
-        ZStack {
+        HStack(spacing: DesignTokens.Spacing.xs) {
+            iconButton(
+                "返回",
+                systemImage: "chevron.left",
+                opticalScale: ReaderChromeMetrics.chevronOpticalScale,
+                action: onBack
+            )
+
+            Spacer(minLength: 0)
+
             Text(title)
                 .font(.headline)
-                .foregroundStyle(style.foreground)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, ReaderChromeMetrics.titleSideReserve)
 
-            HStack(spacing: 0) {
-                iconButton(
-                    "返回",
-                    systemImage: "chevron.left",
-                    opticalScale: ReaderChromeMetrics.chevronOpticalScale,
-                    action: onBack
-                )
-                Spacer(minLength: 0)
-                moreMenu
-            }
-            .foregroundStyle(style.foreground)
+            Spacer(minLength: 0)
+
+            moreMenu
         }
         .buttonStyle(ReaderChromeMetrics.buttonStyle)
-        // `minHeight`（不是固定高度）：字号随 Dynamic Type 长大时栏跟着长，
-        // 玻璃背景挂在栏上，因此也一起变高；默认内容尺寸下仍是 HIG 的 44pt。
-        .frame(minHeight: ReaderChromeMetrics.topBarHeight)
-        .padding(.horizontal, ReaderChromeMetrics.horizontalPadding)
-        .frame(maxWidth: .infinity)
+        .foregroundStyle(style.foreground)
+        .padding(.horizontal, ReaderChromeMetrics.topBarInnerPadding)
+        .padding(.vertical, ReaderChromeMetrics.panelVerticalPadding)
         .background {
-            // 玻璃铺到状态栏 / 灵动岛之下；按钮与标题仍留在安全区内（见 `ReaderChromeOverlay`）。
             ReaderChromeGlass(style: style, edge: .top)
-                .ignoresSafeArea(edges: ReaderChromeEdge.top.bleedingEdge)
         }
+        .padding(.horizontal, ReaderChromeMetrics.panelOuterMargin)
     }
 
     /// 图标按钮：视觉图标可小于 44pt，命中区按 HIG 补足。
@@ -312,7 +328,7 @@ private struct ReaderTopBar: View {
         } label: {
             chromeIconLabel("ellipsis.circle", a11yLabel: "更多")
         }
-        // 显式再挂一次按下反馈。外层 `ZStack` 已经把**同一个** `buttonStyle` 注入环境，
+        // 显式再挂一次按下反馈。外层 `HStack` 已经把**同一个** `buttonStyle` 注入环境，
         // 所以「`Menu` 读环境里的 `ButtonStyle`」时这一句是等价重复（无副作用）；
         // 而万一 `Menu` 的 label 走自己的 `MenuStyle` 样式链、不读环境里的 `ButtonStyle`，
         // 这里就是唯一可能生效的挂点 —— 故显式写上，不依赖外层那一次。
@@ -330,17 +346,15 @@ private struct ReaderTopBar: View {
 ///
 /// ## 几何
 /// - **宽度**：与上栏 / 下栏同宽 —— 三者都在 `ReaderChromeOverlay` 的同一个 `VStack` 里，
-///   共用同一份左右安全区内缩与 `ReaderChromeMetrics.horizontalPadding`。
-/// - **高度**：`minTouchTarget`(44)，与上栏等高。**是 `minHeight` 不是固定高度**：
-///   Dynamic Type 长大时条与玻璃一起变高（与上下栏同一处理）。
+///   共用同一份左右安全区内缩与 `ReaderChromeMetrics.panelOuterMargin`。
+/// - **高度**：与上下栏同高（内容行 44 + 上下各 12 内边距 = 68pt），因为它走的是**同一套**
+///   面板内边距；Dynamic Type 长大时三条一起长。
 /// - **位置**：紧贴下栏上方，中间留 `DesignTokens.Spacing.xs`(8pt) 的空隙 ——
-///   两条玻璃**各自独立**（各有自己的 0.5pt 边缘线与柔影），8pt 间隙让「这是另一条」一眼可辨；
-///   两条的玻璃语言逐值同源（都走 `ReaderChromeGlass`）。
+///   两条面板**各自独立**（各有自己的 0.5pt 边缘线与柔影），8pt 间隙让「这是另一条」一眼可辨。
 ///
 /// ## 为什么用 `edge: .bottom`
 /// 本条的内容（图标）在条**上方**，与下栏同侧 ⇒ 用同一条边语义：边缘线朝上、
-/// 柔影向上扩散、羽化朝上淡出。刻意**不**加 `.ignoresSafeArea`：这条玻璃不贴屏幕边，
-/// 只在安全区内浮着（铺到屏幕外的只有上栏与下栏）。
+/// 柔影向上扩散、羽化朝上淡出。
 ///
 /// ## 显隐
 /// 本视图**没有**自己的显隐开关：它装在 `ReaderChromeOverlay` 里，由 `ReaderView.body` 那一个
@@ -367,12 +381,12 @@ private struct ReaderChapterJumpBar: View {
         }
         .buttonStyle(ReaderChromeMetrics.buttonStyle)
         .foregroundStyle(style.foreground)
-        .frame(minHeight: ReaderChromeMetrics.minTouchTarget)
-        .padding(.horizontal, ReaderChromeMetrics.horizontalPadding)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, ReaderChromeMetrics.barInnerPadding)
+        .padding(.vertical, ReaderChromeMetrics.panelVerticalPadding)
         .background {
             ReaderChromeGlass(style: style, edge: .bottom)
         }
+        .padding(.horizontal, ReaderChromeMetrics.panelOuterMargin)
     }
 
     /// 单侧跳章按钮。`chapter == nil` ⇒ 到边界：`.disabled(true)` + 置灰（见 `disabledOpacity`）。
@@ -419,16 +433,12 @@ private struct ReaderBottomBar: View {
         }
         .buttonStyle(ReaderChromeMetrics.buttonStyle)
         .foregroundStyle(style.foreground)
-        // 与上栏同理：`minHeight` —— AX 大字号下条目撑高、栏与玻璃一起变高，
-        // 默认内容尺寸下仍是 HIG 的 49pt。
-        .frame(minHeight: ReaderChromeMetrics.bottomBarHeight)
-        .padding(.horizontal, ReaderChromeMetrics.horizontalPadding)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, ReaderChromeMetrics.barInnerPadding)
+        .padding(.vertical, ReaderChromeMetrics.panelVerticalPadding)
         .background {
-            // 玻璃铺到 Home Indicator 之下；条目仍留在安全区内。
             ReaderChromeGlass(style: style, edge: .bottom)
-                .ignoresSafeArea(edges: ReaderChromeEdge.bottom.bleedingEdge)
         }
+        .padding(.horizontal, ReaderChromeMetrics.panelOuterMargin)
     }
 
     private func item(
@@ -452,21 +462,26 @@ private struct ReaderBottomBar: View {
 
 // MARK: - 叠加层
 
-/// 控制栏叠加层：上栏贴顶、下栏贴底，**浮在正文之上、不参与正文布局**。
+/// 控制栏叠加层：三条圆角面板（上栏贴顶、跳章条 + 下栏贴底），
+/// **浮在正文之上、不参与正文布局**。
 ///
-/// ## 为什么必须是叠加层（设计稿明确要求）
+/// ## 为什么必须是叠加层
 /// 呼出 / 隐藏控制栏**不能**改变正文的分页与阅读位置。它作为 `ZStack` 里与正文并列的一层
-/// （见 `ReaderView.body`），自己不占正文的布局空间；玻璃再靠 `.ignoresSafeArea(edges:)`
-/// 铺出安全区 —— 正文层一行都不动（`readerContentPaddings` / `readerContentSize` 未改）。
+/// （见 `ReaderView.body`），自己不占正文的布局空间 ⇒ 正文层一行都不动
+/// （`readerContentPaddings` / `readerContentSize` 未改）。
 ///
-/// ## 内容留在安全区内
-/// 铺到屏幕外的**只有玻璃**：栏内内容按传入的安全区 `padding` 内缩，
-/// 所以标题 / 图标永远落在灵动岛、Home Indicator 之外。
+/// ## 竖向位置：不吃安全区（U9-7）
+/// 这一层**只吃横向安全区**（由 `ReaderView.body` 施加），竖向完全由三段 `padding` 决定：
+/// - 上栏 `.padding(.top, topPadding)` —— `topPadding` 是
+///   `ReaderView.topBarPadding(safeAreaInsets:)` 算好的「上栏上边缘距屏幕顶」，
+///   比安全区**更贴屏幕顶**（标题字形仍落在灵动岛下沿以下）；
+/// - 跳章条与下栏各 `.padding(.bottom, Spacing.xs)` —— 下栏下边缘距屏幕底 8pt，
+///   栏自身 12pt 内边距正好把 Home Indicator 那根细条让在空处。
 struct ReaderChromeOverlay: View {
     let style: ReaderChromeStyle
     let chapterTitle: String
-    /// 当前安全区（由 `ReaderView` 的 `GeometryReader` 提供）。
-    let safeAreaInsets: EdgeInsets
+    /// 上栏的上边缘距屏幕顶的距离（由 `ReaderView.topBarPadding(safeAreaInsets:)` 算好传入）。
+    let topPadding: CGFloat
     /// 相邻章节（`ReaderFeature.State` 的派生属性）：`nil` = 到边界，跳章条据此置灰。
     let previousChapter: ChapterItem?
     let nextChapter: ChapterItem?
@@ -491,7 +506,7 @@ struct ReaderChromeOverlay: View {
                 onShowDetail: onShowDetail,
                 onBack: onBack
             )
-            .padding(.top, safeAreaInsets.top)
+            .padding(.top, topPadding)
             .transition(.chromeBar(edge: .top, reduceMotion: reduceMotion))
 
             Spacer(minLength: 0)
@@ -514,12 +529,10 @@ struct ReaderChromeOverlay: View {
                 onSearch: onSearch,
                 onSettings: onSettings
             )
-            .padding(.bottom, safeAreaInsets.bottom)
+            .padding(.bottom, DesignTokens.Spacing.xs)
             .transition(.chromeBar(edge: .bottom, reduceMotion: reduceMotion))
         }
-        .padding(.leading, safeAreaInsets.leading)
-        .padding(.trailing, safeAreaInsets.trailing)
-        // 三条栏各自带方向相反的转场；容器自己不再叠一层淡入，否则淡入会叠成两层。
+        // 三条面板各自带方向相反的转场；容器自己不再叠一层淡入，否则淡入会叠成两层。
         .transition(.identity)
     }
 }
@@ -527,9 +540,10 @@ struct ReaderChromeOverlay: View {
 // MARK: - 转场
 
 private extension AnyTransition {
-    /// 控制栏呼出 / 隐藏的转场：淡入 + 轻微位移（上栏自上 8pt、下栏自下 8pt）。
+    /// 控制栏呼出 / 隐藏的转场：淡入 + 轻微位移（上栏自上 8pt、下栏与跳章条自下 8pt）。
     ///
-    /// Reduce Motion 时**只做淡入**：位移是前庭刺激，降级 ≠ 无反馈 —— 淡入仍在。
+    /// Reduce Motion 时**只做淡入**：位移是前庭刺激，降级 ≠ 无反馈 —— 淡入仍在，
+    /// 按下强调层（`PressableCardButtonStyle`）也不受 Reduce Motion 影响。
     static func chromeBar(edge: ReaderChromeEdge, reduceMotion: Bool) -> AnyTransition {
         reduceMotion
             ? .opacity
@@ -540,7 +554,7 @@ private extension AnyTransition {
 // MARK: - 与 ReaderView 的接线
 
 extension ReaderView {
-    /// 阅读页**正文底色**的唯一来源（正文层与上下栏的玻璃都用它）。
+    /// 阅读页**正文底色**的唯一来源（正文层与三条面板的玻璃都用它）。
     ///
     /// 返回 `UIColor` 而不是 `Color`：控制栏要拿它去**解析明暗**并派生玻璃，
     /// 而 `Color` 包一层就取不到分量（`UIColor(Color)` 还会把动态色解析成当时的静态值）。

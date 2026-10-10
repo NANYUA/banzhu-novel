@@ -21,6 +21,11 @@ import SwiftUI
 /// 非选择模式下**单点 = 直接进阅读页**（落点 = 上次看过的页面，从未看过 ⇒ 第一章第一页）；
 /// 选择模式下**单点 = 切换勾选**（与书架编辑态一致）。两种模式都保留长按：
 /// 非选择模式长按进选择模式、选择模式再长按退出。
+///
+/// ## 单点区域 = 整张卡（U11）
+/// 右上角「更多」菜单删除后，卡上不再有需要独立命中的兄弟控件 ⇒ 不必再把
+/// 「封面 + 文字」单独包一层 Button：整张卡就是一个按钮，命中区与按下强调层
+/// 因此**铺满整卡**（原先「右上角那块不是单点区」的例外随之消失）。
 struct DownloadBookCard: View {
     let summary: BookDownloadSummary
     let isSelecting: Bool
@@ -29,54 +34,51 @@ struct DownloadBookCard: View {
     /// 非选择模式下的单点动作：直接进阅读页。
     let onOpenBook: () -> Void
     let onLongPress: () -> Void
-    let onPause: () -> Void
-    let onDelete: () -> Void
 
-    /// 最近一次长按时间：挡掉长按抬手时 Button 多触发的那次点击（与书架 `BookshelfView` 同一手法）。
-    @State private var lastLongPressAt: Date?
+    /// 长按**已识别**标志：在长按被识别的那一刻（按下满 0.5s，**抬手之前**）置位，
+    /// 由抬手时 Button 的 action **消费**（见 `primaryAction`）。
+    ///
+    /// ⚠️ 为什么不用「最近一次长按时间 + 0.4s 窗口」（旧实现，owner 真机上没挡住）：
+    /// `LongPressGesture` 的 `onEnded` 与 `Button` 的 action **都在抬手那一刻执行**，
+    /// 谁先谁后没有任何保证 —— 实测 Button 先跑，时间戳还没写进去就被判成「不是长按」；
+    /// 即便顺序反过来，用户按住超过 0.4s 再抬手时那个窗口本身也已经过期。
+    /// 改成「识别即置位、抬手即消费」后，判据只依赖**本次触摸有没有被识别成长按**，
+    /// 与两个回调的先后顺序、与用户按住多久都无关。
+    @State private var didRecognizeLongPress = false
+
+    /// 长按**进行中**（识别到长按之后、抬手之前）。
+    ///
+    /// 与 `didRecognizeLongPress` 是**两个独立判据**，抬手时任一为真就丢弃这次单点 ——
+    /// 二者覆盖的时序不同，合起来才不依赖「`onChanged` / `onEnded` / Button action 谁先跑」：
+    /// - `@GestureState` 由 SwiftUI 在长按**识别时**置位、手势结束时**自动复位**
+    ///   （不靠我们清标志 ⇒ 不存在「标志残留、下一次短点被吞」的风险）；
+    /// - 它取的是手势自己的值 ⇒ 短点全程为 `false`，**不会误伤短点**。
+    @GestureState private var isLongPressing = false
 
     var body: some View {
-        if isSelecting {
-            // 选择模式：整张卡是一个按钮（点一下勾选 / 取消），与书架编辑态的行同一结构。
-            Button(action: toggleSelection) {
-                cardLabel
-            }
-            // 强调层贴书卡自己的 12pt 圆角（`Radius.sm`），避免按下瞬间在圆角外露出方角。
-            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
-            // 再长按一次退出选择模式：手势与 Button 并行识别（`simultaneousGesture`）。
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                    lastLongPressAt = Date()
-                    onLongPress()
-                }
-            )
-            // 装饰性勾选图的语义交给 Button 的 `.isSelected` trait，避免 VoiceOver 读两遍。
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
-        } else {
-            // 非选择模式：**单点进阅读页**（可点区域是卡面里的「封面 + 文字」，见 `tappableContent`），
-            // 长按进选择模式 —— 与选择模式同一套 `simultaneousGesture`，长按抬手由
-            // `openBook` 的时间戳挡掉，不会「长按的同时顺手进了阅读页」。
+        // 两种模式共用同一个 Button（选择模式切换勾选 / 否则进阅读页），长按与它并行识别。
+        Button(action: primaryAction) {
             cardLabel
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                        lastLongPressAt = Date()
-                        onLongPress()
-                    }
-                )
         }
+        // 强调层贴书卡自己的 12pt 圆角（`Radius.sm`），避免按下瞬间在圆角外露出方角。
+        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
+        // 非选择模式长按进选择模式、选择模式再长按退出：两个模式共用同一条手势。
+        .simultaneousGesture(longPressGesture)
+        // 装饰性勾选图的语义交给 Button 的 `.isSelected` trait，避免 VoiceOver 读两遍。
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
 private extension DownloadBookCard {
-    /// 卡面：勾选框（选择模式）+ 封面 + 书名 / 进度 / 状态 + 右上角「更多」。
+    /// 卡面：勾选框（选择模式）+ 封面 + 书名 / 进度 / 状态。
     ///
-    /// ## 可点区域与内边距（为什么不是「整张卡一个 Button」）
-    /// 非选择模式下「封面 + 文字」那一块自己是一个 `Button`（单点进阅读页、按下有强调层），
-    /// 勾选框与「更多」是它的**兄弟节点** —— 整张卡不能包成一个 Button：`Menu` 嵌在
-    /// `Button` 的 label 里收不到点击（见下面那两条注释）。
+    /// ## 可点区域与内边距
+    /// 整张卡由 `body` 那一个 Button 包住（U11：右上角「更多」菜单删除后，
+    /// 卡上不再有需要独立命中的兄弟控件）⇒ 卡面这里只负责「内容怎么排」，
+    /// 不再自己包 Button。
     ///
-    /// 卡片内边距因此由三块**各自持有**（而不是 HStack 统一 `.padding`），
-    /// 这样 Button 的命中区与强调层能一直铺到卡片边缘，不在四周留一圈点不动的死区；
+    /// 卡片内边距由各块**各自持有**（而不是 HStack 统一 `.padding`），
+    /// 这样命中区与强调层能一直铺到卡片边缘，不在四周留一圈点不动的死区；
     /// 各块之间的间隔与原实现逐值相同。
     var cardLabel: some View {
         HStack(spacing: 0) {
@@ -84,23 +86,13 @@ private extension DownloadBookCard {
                 selectionMark
             }
 
-            tappableContent
-
-            // 选择模式下不摆「更多」：整张卡已经是按钮（嵌套按钮收不到点击），
-            // 且批量操作栏接管了所有操作（与书架编辑态不摆逐行菜单同一取舍）。
-            if !isSelecting {
-                moreMenu
-                    .padding(.trailing, DesignTokens.Spacing.sm)
-                    .padding(.vertical, DesignTokens.Spacing.sm)
-            }
+            content
         }
         .contentShape(Rectangle())
         .background(
             AppTheme.Surface.card,
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
         )
-        // 按下强调层是**直角**（贴满内容区），圆角靠这一层裁出来 ——
-        // 否则按下瞬间会在卡片圆角外露出方角。
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
     }
 
@@ -112,21 +104,6 @@ private extension DownloadBookCard {
             .accessibilityHidden(true)
             .padding(.leading, DesignTokens.Spacing.sm)
             .padding(.vertical, DesignTokens.Spacing.sm)
-    }
-
-    /// 封面 + 文字。非选择模式下它是一整块可点区域（单点进阅读页 + 按下反馈）；
-    /// 选择模式下退化成普通内容（整张卡已经是外面那个 Button，嵌套按钮收不到点击）。
-    @ViewBuilder
-    var tappableContent: some View {
-        if isSelecting {
-            content
-        } else {
-            Button(action: openBook) {
-                content
-            }
-            // 强调层用直角，圆角由卡片自己的 `clipShape` 收 —— 命中区铺满整块内容区。
-            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Rectangle())))
-        }
     }
 
     /// 封面 + 书名 / 进度 / 状态（两种模式共用的内容本体）。
@@ -201,42 +178,45 @@ private extension DownloadBookCard {
             }
     }
 
-    /// 卡片右上角「更多」：**暂停下载 / 删除下载**两项。
-    var moreMenu: some View {
-        Menu {
-            Button(action: onPause) {
-                Label("暂停下载", systemImage: "pause")
+    /// 长按：**按下阶段**（长按被识别那一刻）置位标志，抬手时由 `primaryAction` 消费。
+    ///
+    /// 两种模式共用同一条手势：非选择模式长按进选择模式、选择模式再长按退出
+    /// （都由调用方在 `onLongPress` 里切换 `selectionModeChanged`）。
+    var longPressGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.5)
+            .updating($isLongPressing) { isRecognized, state, _ in
+                // `state = value`（而不是恒 `true`）：按下但还没到 0.5s 时必须是 `false`，
+                // 否则短点抬手时也会被判成长按。
+                state = isRecognized
             }
-            Button(role: .destructive, action: onDelete) {
-                Label("删除下载", systemImage: "trash")
+            .onChanged { isRecognized in
+                // ⚠️ 关键在时机：`onChanged` 在**按下阶段**回调（长按刚被识别、抬手之前），
+                // 而 `onEnded` 与 Button 的 action 都在抬手时执行、顺序不保证
+                // ⇒ 标志只能在这里置位（旧实现写在 `onEnded` 里，真机上没挡住）。
+                // 只在 `true` 时置位：`false` 是抬手 / 复位，不能反过来把标志清掉。
+                guard isRecognized else { return }
+                didRecognizeLongPress = true
             }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.title3)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            .onEnded { _ in
+                onLongPress()
+            }
+    }
+
+    /// 单点动作：按当前模式分派（选择模式 = 切换勾选，否则 = 进阅读页）。
+    ///
+    /// 抬手时若本次触摸**已经被识别成长按**（`didRecognizeLongPress`）或长按**仍在进行**
+    /// （`isLongPressing`），就丢弃这次单点 —— 否则「长按进选择模式」会顺手把书打开
+    /// （owner 真机反馈的缺陷），或把刚切换的勾选又翻回去。
+    func primaryAction() {
+        if didRecognizeLongPress || isLongPressing {
+            didRecognizeLongPress = false
+            return
         }
-        .accessibilityLabel("本书下载操作")
-    }
-
-    /// 单点：进阅读页。长按抬手时 Button 也会收到一次 action，这里挡掉，
-    /// 否则「长按进选择模式」会顺手进阅读页（与书架同一 0.4s 窗口）。
-    func openBook() {
-        guard !isLongPressSuppressed else { return }
-        onOpenBook()
-    }
-
-    func toggleSelection() {
-        // 长按抬手时 Button 也会收到一次 action，这里挡掉，
-        // 否则「长按退出选择模式」会顺手把这本书的勾选又翻一次。
-        guard !isLongPressSuppressed else { return }
-        onToggleSelection()
-    }
-
-    /// 长按抬手后 Button 也会收到一次 action，这里挡掉（与书架同一 0.4s 窗口）。
-    var isLongPressSuppressed: Bool {
-        guard let lastLongPressAt else { return false }
-        return Date().timeIntervalSince(lastLongPressAt) < 0.4
+        if isSelecting {
+            onToggleSelection()
+        } else {
+            onOpenBook()
+        }
     }
 }
 

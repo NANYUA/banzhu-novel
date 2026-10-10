@@ -24,6 +24,14 @@ struct BookDetailView: View {
     /// 移出书架成功后回调，供上层把这本书从列表里摘掉。
     let onRemovedFromShelf: (String) -> Void
 
+    /// 「打开阅读页」的**可注入出口**（U11 修 4）。
+    ///
+    /// `nil`（默认）= 本页自己 push 一层阅读页 —— 探索 / 搜索这些**正常入口**的既有行为不变；
+    /// 非 `nil` = 由调用方接管。阅读页的「更多 → 书籍详情」是**以 sheet 覆盖在阅读页之上**的
+    /// （`ReaderView.detailSheet`），那里若仍走本页自己的 push，就会在 sheet 里再全屏压一层
+    /// 阅读页 ⇒ 卡死（owner 真机反馈）。故那条路径注入「关掉 sheet + 让下层阅读页跳章」。
+    let onOpenReader: ((ChapterItem) -> Void)?
+
     @State private var isIntroExpanded = false
     /// 简介「不被截断时的高度」与「4 行截断后的高度」，用来判断是否真的被截断（U1-5）。
     ///
@@ -44,11 +52,13 @@ struct BookDetailView: View {
         book: Book,
         downloadStore: StoreOf<DownloadFeature>,
         onAddedToShelf: @escaping (ShelfRow) -> Void = { _ in },
-        onRemovedFromShelf: @escaping (String) -> Void = { _ in }
+        onRemovedFromShelf: @escaping (String) -> Void = { _ in },
+        onOpenReader: ((ChapterItem) -> Void)? = nil
     ) {
         self.downloadStore = downloadStore
         self.onAddedToShelf = onAddedToShelf
         self.onRemovedFromShelf = onRemovedFromShelf
+        self.onOpenReader = onOpenReader
         store = Store(initialState: BookDetailFeature.State(fallback: BookDetail(book: book))) {
             BookDetailFeature()
         }
@@ -59,11 +69,13 @@ struct BookDetailView: View {
         title: String,
         downloadStore: StoreOf<DownloadFeature>,
         onAddedToShelf: @escaping (ShelfRow) -> Void = { _ in },
-        onRemovedFromShelf: @escaping (String) -> Void = { _ in }
+        onRemovedFromShelf: @escaping (String) -> Void = { _ in },
+        onOpenReader: ((ChapterItem) -> Void)? = nil
     ) {
         self.downloadStore = downloadStore
         self.onAddedToShelf = onAddedToShelf
         self.onRemovedFromShelf = onRemovedFromShelf
+        self.onOpenReader = onOpenReader
         store = Store(
             initialState: BookDetailFeature.State(
                 fallback: BookDetail(bookPath: bookPath, title: title)
@@ -339,7 +351,15 @@ private extension BookDetailView {
 /// 可见性：`readButton` 现在定义在另一个文件里，而跨文件的 extension 读不到 file-private
 /// 成员，所以本 extension 与 `openReader` 都放开为模块内可见（拆法同 `BookshelfView+GroupBar`）。
 extension BookDetailView {
+    /// 打开某一章。**全页唯一的阅读入口**（目录行「单点」与「开始 / 继续阅读」按钮都走这里）。
+    ///
+    /// 注入了 `onOpenReader`（阅读页的详情 sheet）⇒ 交给调用方接管，本页不 push；
+    /// 没注入（探索 / 搜索等正常入口）⇒ 本页自己 push，行为与既有版本逐字相同。
     func openReader(_ chapter: ChapterItem) {
+        if let onOpenReader {
+            onOpenReader(chapter)
+            return
+        }
         // 防重入：连点两下时第一次已经 push 了阅读页，第二次不该再压一层。
         guard !isShowingReader else { return }
         readerChapter = chapter
@@ -432,6 +452,7 @@ private extension BookDetailView {
                 chapterPath: chapter.path,
                 chapterName: chapter.name,
                 bookPath: viewStore.detail.bookPath,
+                bookTitle: viewStore.detail.title,
                 chapters: viewStore.chapters,
                 downloadStore: downloadStore
             )

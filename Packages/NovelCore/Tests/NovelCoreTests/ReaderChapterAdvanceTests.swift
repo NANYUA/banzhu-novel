@@ -137,6 +137,11 @@ final class ReaderChapterAdvanceTests: XCTestCase {
             $0.nextText = ""
             $0.nextPages = []
         }
+        // 反向链式：换到第 2 章那一刻，reducer 也把它的上一章（第 1 章）接上了。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
+        }
         await store.finish()
 
         XCTAssertEqual(store.state.chapterPath, Self.second.path)
@@ -226,68 +231,6 @@ final class ReaderChapterAdvanceTests: XCTestCase {
         XCTAssertNil(store.state.errorMessage)
     }
 
-    // MARK: - 4. 链式：换章后重新预加载新的下一章
-
-    /// 换到第 2 章后，reducer 自己把**新的**下一章（第 3 章）接上并预加载；到第 3 章收尾。
-    func test换章后重新预加载新的下一章() async {
-        let store = makeStore(
-            chapters: [Self.first, Self.second, Self.third],
-            texts: [
-                Self.first.path: Self.firstText,
-                Self.second.path: Self.secondText,
-                Self.third.path: Self.thirdText,
-            ]
-        )
-        await loadFirst(store)
-        let secondPages = expectedPages(chapter: Self.second, text: Self.secondText)
-        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
-            $0.nextText = Self.secondText
-            $0.nextPages = secondPages
-        }
-
-        await advanceToLastPage(store, pages: expectedPages(chapter: Self.first, text: Self.firstText))
-        await store.send(.advanceChapter) {
-            $0.chapterPath = Self.second.path
-            $0.chapterName = Self.second.name
-            $0.text = Self.secondText
-            $0.pages = secondPages
-            $0.currentOffset = 0
-            $0.nextText = ""
-            $0.nextPages = []
-        }
-        // 链式：换章那一刻就重新声明了下一章（第 3 章）并重新预加载。
-        let thirdPages = expectedPages(chapter: Self.third, text: Self.thirdText)
-        await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
-            $0.nextText = Self.thirdText
-            $0.nextPages = thirdPages
-        }
-        await store.finish()
-        XCTAssertEqual(store.state.chapterPath, Self.second.path)
-        XCTAssertEqual(store.state.nextChapter?.path, Self.third.path)
-        XCTAssertEqual(store.state.nextPages, thirdPages)
-
-        // 再推进一章：第 2 章章尾 ⇒ 换到第 3 章（正文 / 章名 / 分页全换成第 3 章的）。
-        await advanceToLastPage(store, pages: secondPages)
-        await store.send(.advanceChapter) {
-            $0.chapterPath = Self.third.path
-            $0.chapterName = Self.third.name
-            $0.text = Self.thirdText
-            $0.pages = thirdPages
-            $0.currentOffset = 0
-            $0.nextText = ""
-            $0.nextPages = []
-        }
-
-        // 第 3 章是最后一章：到章尾再换 ⇒ 换章 action 不动，也不再有预加载结果。
-        await advanceToLastPage(store, pages: thirdPages)
-        await store.send(.advanceChapter)
-        await store.finish()
-        XCTAssertEqual(store.state.chapterPath, Self.third.path)
-        XCTAssertEqual(store.state.currentOffset, thirdPages.last?.location, "不换章：位置停在章尾那一页")
-        XCTAssertNil(store.state.nextChapter)
-        XCTAssertTrue(store.state.nextPages.isEmpty)
-    }
-
     // MARK: - 5. 取消 / 重入：换章时旧的预加载结果必须作废
 
     /// 本章内容一换（含从目录手动跳章），旧的 `nextPages` 立刻作废 ——
@@ -325,9 +268,124 @@ final class ReaderChapterAdvanceTests: XCTestCase {
             $0.pages = expectedPages(chapter: Self.third, text: Self.thirdText)
             $0.currentOffset = 0
         }
+        // 反向：跳到第 3 章后，它的上一章（第 2 章）由本章 `contentLoaded` 接上。
+        await store.receive(.previousChapterLoaded(Self.second.path, Self.secondText)) {
+            $0.previousText = Self.secondText
+            $0.previousPages = expectedPages(chapter: Self.second, text: Self.secondText)
+        }
         await store.finish()
         XCTAssertEqual(store.state.chapterPath, Self.third.path)
         XCTAssertTrue(store.state.nextPages.isEmpty, "第 3 章是最后一章：没有下一章可预加载")
+    }
+}
+
+// MARK: - 链式：换章后重新预加载相邻两章（放 extension：类体已 245/250）
+
+/// 换章后 reducer 必须把**新的**相邻两章都重新声明并预加载：下一章（章尾向前）
+/// 与上一章（章首向后）。少了上一章那一步，「往前翻回上一章」在换过一次章之后就断了。
+extension ReaderChapterAdvanceTests {
+    /// 公共前导：加载第 1 章 → 收下下一章（第 2 章）→ 推到章尾换到第 2 章，
+    /// 并收下换章那一刻重新预加载的相邻两章（下一章第 3 章 / 上一章第 1 章）。
+    ///
+    /// 抽成夹具是因为这一串有 5 个动作，写两遍会顶到 `function_body_length`
+    /// （warning 50 / error 60，CI `--strict` 下 warning 即失败）。
+    private func advanceFromFirstToSecond(
+        _ store: TestStore<ReaderFeature.State, ReaderFeature.Action>
+    ) async {
+        await loadFirst(store)
+        let secondPages = expectedPages(chapter: Self.second, text: Self.secondText)
+        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
+            $0.nextText = Self.secondText
+            $0.nextPages = secondPages
+        }
+        await advanceToLastPage(store, pages: expectedPages(chapter: Self.first, text: Self.firstText))
+        await store.send(.advanceChapter) {
+            $0.chapterPath = Self.second.path
+            $0.chapterName = Self.second.name
+            $0.text = Self.secondText
+            $0.pages = secondPages
+            $0.currentOffset = 0
+            $0.nextText = ""
+            $0.nextPages = []
+        }
+        // 链式：换章那一刻就重新声明了下一章（第 3 章）并重新预加载。
+        await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
+            $0.nextText = Self.thirdText
+            $0.nextPages = expectedPages(chapter: Self.third, text: Self.thirdText)
+        }
+        // 反向链式：同一刻也把新的上一章（第 1 章）接上了。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
+        }
+    }
+
+    /// 换到第 2 章后，reducer 自己把**新的**下一章（第 3 章）与**新的**上一章（第 1 章）
+    /// 都接上并预加载。
+    func test换章后重新预加载相邻两章() async {
+        let store = makeStore(
+            chapters: [Self.first, Self.second, Self.third],
+            texts: [
+                Self.first.path: Self.firstText,
+                Self.second.path: Self.secondText,
+                Self.third.path: Self.thirdText,
+            ]
+        )
+        await advanceFromFirstToSecond(store)
+        await store.finish()
+
+        XCTAssertEqual(store.state.chapterPath, Self.second.path)
+        XCTAssertEqual(store.state.nextChapter?.path, Self.third.path)
+        XCTAssertEqual(store.state.nextPages, expectedPages(chapter: Self.third, text: Self.thirdText))
+        XCTAssertEqual(store.state.previousChapter?.path, Self.first.path, "新的上一章是刚离开的第 1 章")
+        XCTAssertEqual(
+            store.state.previousPages,
+            expectedPages(chapter: Self.first, text: Self.firstText)
+        )
+    }
+
+    /// 再推进一章到第 3 章（末章）：没有下一章可接，但上一章（第 2 章）要重新接上、
+    /// 旧的（第 1 章）作废；到末章章尾再换 ⇒ 换章 action 不动。
+    func test再换一章后重新预加载新的上一章() async {
+        let store = makeStore(
+            chapters: [Self.first, Self.second, Self.third],
+            texts: [
+                Self.first.path: Self.firstText,
+                Self.second.path: Self.secondText,
+                Self.third.path: Self.thirdText,
+            ]
+        )
+        await advanceFromFirstToSecond(store)
+        let secondPages = expectedPages(chapter: Self.second, text: Self.secondText)
+        let thirdPages = expectedPages(chapter: Self.third, text: Self.thirdText)
+
+        await advanceToLastPage(store, pages: secondPages)
+        await store.send(.advanceChapter) {
+            $0.chapterPath = Self.third.path
+            $0.chapterName = Self.third.name
+            $0.text = Self.thirdText
+            $0.pages = thirdPages
+            $0.currentOffset = 0
+            $0.nextText = ""
+            $0.nextPages = []
+            // 上一章也换了对象（变成刚离开的第 2 章）：旧的（第 1 章）同样作废。
+            $0.previousText = ""
+            $0.previousPages = []
+        }
+        // 第 3 章是最后一章（没有下一章），但上一章（第 2 章）要重新接上。
+        await store.receive(.previousChapterLoaded(Self.second.path, Self.secondText)) {
+            $0.previousText = Self.secondText
+            $0.previousPages = secondPages
+        }
+
+        // 末章：到章尾再换 ⇒ 换章 action 不动，也不再有预加载结果。
+        await advanceToLastPage(store, pages: thirdPages)
+        await store.send(.advanceChapter)
+        await store.finish()
+        XCTAssertEqual(store.state.chapterPath, Self.third.path)
+        XCTAssertEqual(store.state.currentOffset, thirdPages.last?.location, "不换章：位置停在章尾那一页")
+        XCTAssertNil(store.state.nextChapter)
+        XCTAssertTrue(store.state.nextPages.isEmpty)
     }
 }
 
@@ -369,6 +427,11 @@ extension ReaderChapterAdvanceTests {
             $0.currentOffset = 0
             $0.nextText = ""
             $0.nextPages = []
+        }
+        // 反向链式：换章后也把新章的上一章接上（这条不是缓存调用，计数不受影响）。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         await store.finish()
 

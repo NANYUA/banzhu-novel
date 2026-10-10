@@ -139,9 +139,12 @@ final class ReadingProgressTests: XCTestCase {
     ]
 
     /// 分页桩固定按每页 5 字切分：本组断言的是 `currentOffset`，需要确定的页边界。
+    ///
+    /// `progressRecorder` 只在断言「落盘偏移」的用例里传（见文件末尾的 extension）。
     private func makeReaderStore(
         text: String,
-        initialOffset: Int
+        initialOffset: Int,
+        progressRecorder: ProgressOffsetRecorder? = nil
     ) -> TestStore<ReaderFeature.State, ReaderFeature.Action> {
         TestStore(
             initialState: ReaderFeature.State(
@@ -152,7 +155,10 @@ final class ReadingProgressTests: XCTestCase {
             ReaderFeature()
         } withDependencies: {
             $0.readerLoader.load = { _ in text }
-            $0.readingProgressStore.markRead = { _, _, _ in }
+            $0.readingProgressStore.markRead = { _, offset, _ in
+                guard let progressRecorder else { return }
+                await progressRecorder.record(offset)
+            }
             $0.chapterCacheStore.cacheCurrentAndFollowing = { _, _, _ in }
             $0.paginationService.paginate = { pageText, _ in
                 readerTestPageRanges(of: pageText)
@@ -346,4 +352,92 @@ private func readerTestPageRanges(of displayText: String) -> [PageRange] {
         location += length
     }
     return ranges
+}
+
+// MARK: - contentLoaded 落盘的必须是恢复后的偏移（不能恒写 0）
+
+/// 收 `markRead` 落盘 offset 的**跨线程安全**记录器。
+///
+/// `markRead` 是 `@Sendable` 闭包，要把值带出到测试线程就得走 actor
+/// （不用 `@unchecked Sendable` 的自建盒子：那需要自己保证线程安全，得不偿失）。
+private actor ProgressOffsetRecorder {
+    private var offsets: [Int] = []
+
+    func record(_ offset: Int) {
+        offsets.append(offset)
+    }
+
+    /// 最近一次落盘的偏移；从未落盘 ⇒ `nil`（据此能区分「没写」与「写了 0」）。
+    var lastOffset: Int? {
+        offsets.last
+    }
+}
+
+/// 新用例放 extension：`ReadingProgressTests` 的类型体贴近 `type_body_length`
+/// warning 250（CI `--strict` 下 warning 即失败），而**声明在父类型大括号之外**的
+/// extension 不计入该指标（先例：`ReaderFeature.State` 的派生值 extension）。
+extension ReadingProgressTests {
+    /// 🔴 回归：`contentLoaded` 里那句 `markRead(chapterPath, 0, ...)` 会把**刚恢复的位置**
+    /// 当场抹成 0 ⇒ 打开任何一章都会丢掉该章已存的偏移，下次进来只能回到章首
+    /// （owner 真机反馈「换了一本书以后，就只会回到看的章节首页，具体页数回不去」）。
+    ///
+    /// 带 `initialOffset = 3` + 章名「第七章」加载：`currentOffset` 恢复到 8，
+    /// 落盘口径（`progressOffset`，**相对原始正文**）必须是 **3** —— 不是 0。
+    func test加载后落盘的是恢复后的偏移而不是零() async {
+        let recorder = ProgressOffsetRecorder()
+        let store = makeReaderStore(
+            text: Self.sampleText,
+            initialOffset: 3,
+            progressRecorder: recorder
+        )
+
+        await loadFirstChapter(
+            into: store,
+            chapterName: "第七章",
+            expectedPages: Self.titledPages,
+            expectedOffset: 8
+        )
+        await store.finish()
+
+        let recorded = await recorder.lastOffset
+        XCTAssertEqual(recorded, 3, "落盘必须是恢复后的偏移（相对原始正文），不能恒写 0")
+    }
+
+    /// 🔴 往返（一次锁住「恢复 + 不被抹掉」）：加载 → 断言落盘偏移 == 期望 →
+    /// 用**落盘的那个值**再次加载 ⇒ `currentOffset` 回到同一位置。
+    ///
+    /// 取 `initialOffset = 5`（`displayText` 的第 3 页页首，见 `titledPages`）：
+    /// 落盘必须还是 5；拿它再开一次必须回到 10（第 3 页页首）而不是章首。
+    func test落盘偏移往返回到同一位置() async throws {
+        let recorder = ProgressOffsetRecorder()
+        let store = makeReaderStore(
+            text: Self.sampleText,
+            initialOffset: 5,
+            progressRecorder: recorder
+        )
+        await loadFirstChapter(
+            into: store,
+            chapterName: "第七章",
+            expectedPages: Self.titledPages,
+            expectedOffset: 10
+        )
+        await store.finish()
+
+        let recorded = await recorder.lastOffset
+        let persisted = try XCTUnwrap(recorded, "加载完成后必须落盘一次进度")
+
+        // 用落盘值再开一次（模拟「换了一本书又回来」）：必须回到同一个位置。
+        let reopened = makeReaderStore(text: Self.sampleText, initialOffset: persisted)
+        await loadFirstChapter(
+            into: reopened,
+            chapterName: "第七章",
+            expectedPages: Self.titledPages,
+            expectedOffset: 10
+        )
+        await reopened.finish()
+
+        XCTAssertEqual(persisted, 5, "落盘口径：displayText 的 10 是原始正文的 5")
+        XCTAssertEqual(reopened.state.currentOffset, 10, "必须回到原来的 displayText 坐标")
+        XCTAssertEqual(reopened.state.currentPageIndex, 2, "并且仍在同一页（第 3 页页首）")
+    }
 }

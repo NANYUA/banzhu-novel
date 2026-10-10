@@ -251,10 +251,53 @@ final class PagePanTrackingTests: XCTestCase {
         XCTAssertEqual(
             turnAtSettledOffset(pageWidth, index: 0, count: 10, hasNext: true),
             .none,
-            "向右：章首仍是回弹（本需求不跨章回上一章）"
+            "向右：章首且没有上一章（`hasPrevious` 默认 false）仍是回弹"
         )
         XCTAssertEqual(
             turnAtSettledOffset(-pageWidth * 0.5, index: 9, count: 10, hasNext: true),
+            .none,
+            "中线未越过：仍滑回本页"
+        )
+    }
+
+    // MARK: - 章首：上一章最后一页占住「-1」那一格
+
+    /// 本章第一页 + 上一章最后一页已就绪 ⇒ 仍然允许 `.previous`（退章由调用方落位）。
+    ///
+    /// 这是「往前翻回到上一章」唯一的判页改动：边界从「首页一律 `.none`」
+    /// 收窄成「首页**且**前面没东西才 `.none`」—— 与上面章尾那一支完全镜像。
+    func test第一页且上一章就绪时仍允许向后() {
+        XCTAssertEqual(
+            turnAtSettledOffset(pageWidth, index: 0, count: 10, hasPrevious: true),
+            .previous
+        )
+        XCTAssertEqual(
+            turnAtSettledOffset(pageWidth * 0.5 + 0.001, index: 0, count: 10, hasPrevious: true),
+            .previous,
+            "中线刚过一点就该退章，与章内翻页同一判据"
+        )
+    }
+
+    /// 第一章（或上一章还没就绪）⇒ 维持原状：中线越过也不翻，回弹（owner 选择：不提示）。
+    func test第一页没有上一章时仍挡住() {
+        XCTAssertEqual(turnAtSettledOffset(pageWidth, index: 0, count: 10, hasPrevious: false), .none)
+        XCTAssertEqual(turnAtSettledOffset(pageWidth, index: 0, count: 1, hasPrevious: false), .none)
+    }
+
+    /// 「上一章就绪」只放宽**章首向后**这一支，其余判据一律不动。
+    func test上一章就绪不影响章内与向左翻页() {
+        XCTAssertEqual(
+            turnAtSettledOffset(pageWidth, index: 3, count: 10, hasPrevious: true),
+            .previous,
+            "不是第一页：照旧翻页，与有没有上一章无关"
+        )
+        XCTAssertEqual(
+            turnAtSettledOffset(-pageWidth, index: 9, count: 10, hasPrevious: true),
+            .none,
+            "向左：末页且没有下一章仍是回弹（这一支一字未动）"
+        )
+        XCTAssertEqual(
+            turnAtSettledOffset(pageWidth * 0.5, index: 0, count: 10, hasPrevious: true),
             .none,
             "中线未越过：仍滑回本页"
         )
@@ -276,7 +319,16 @@ final class PagePanTrackingTests: XCTestCase {
         let offset = panOffset(from: 12, translation: -12, width: 0, index: 5, count: 10)
         XCTAssertEqual(offset, 0)
         XCTAssertFalse(offset.isNaN)
-        XCTAssertEqual(turnAtSettledOffset(0, width: 0, index: 5, count: 10), .none)
+        // 夹具的页宽是固定的 `pageWidth`，这里要显式给 0 ⇒ 直接调 `turn`。
+        XCTAssertEqual(
+            PagePanTracking.turn(
+                trackedOffset: 0,
+                translation: 0,
+                predictedEndTranslation: 0,
+                geometry: PagePanGeometry(availableWidth: 0, pageIndex: 5, pageCount: 10)
+            ),
+            .none
+        )
         XCTAssertFalse(PagePanTracking.crossesScreenMidline(offset: 100, availableWidth: 0))
     }
 }
@@ -302,24 +354,29 @@ private func panOffset(
 
 /// 用「落点」直接问判页结果（跳过动量合成，专测中线那一步）。
 ///
-/// `hasNext` 默认 `false`（没有下一章）：默认值让「章尾一律回弹」这条**既有**语义
-/// 在旧用例里逐字保持，只有显式传 `true` 的用例才走「换章」那一支。
+/// `hasNext` / `hasPrevious` 默认都是 `false`（前后都没有相邻章）：默认值让
+/// 「章尾一律回弹」「章首一律回弹」这两条**既有**语义在旧用例里逐字保持，
+/// 只有显式传 `true` 的用例才走「换章 / 退章」那一支。
+///
+/// 页宽固定用 `pageWidth`：要测退化盒子（宽 0）的用例直接调 `PagePanTracking.turn`
+/// —— 多一个 `width` 参数会让本夹具越过 `function_parameter_count` 的 5 个上限。
 private func turnAtSettledOffset(
     _ offset: CGFloat,
-    width availableWidth: CGFloat? = nil,
     index: Int,
     count: Int,
-    hasNext: Bool = false
+    hasNext: Bool = false,
+    hasPrevious: Bool = false
 ) -> PagePanTurn {
     PagePanTracking.turn(
         trackedOffset: offset,
         translation: 0,
         predictedEndTranslation: 0,
         geometry: PagePanGeometry(
-            availableWidth: availableWidth ?? pageWidth,
+            availableWidth: pageWidth,
             pageIndex: index,
             pageCount: count,
-            hasNextChapterPage: hasNext
+            hasNextChapterPage: hasNext,
+            hasPreviousChapterPage: hasPrevious
         )
     )
 }

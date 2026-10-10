@@ -23,6 +23,10 @@ import UIKit
 struct ReaderView: View {
     let store: StoreOf<ReaderFeature>
     let bookPath: String
+    /// 书名：角落状态标签（HUD）在**章节第一页**显示它，其余页显示章节名（`ReaderCornerHUD`）。
+    ///
+    /// 默认空串 —— `init(store:)` 那条测试 / 预览路径拿不到书名，HUD 据此回退显示章节名。
+    let bookTitle: String
     let chapters: [ChapterItem]
     let downloadStore: StoreOf<DownloadFeature>?
 
@@ -53,11 +57,13 @@ struct ReaderView: View {
         chapterPath: String,
         chapterName: String = "",
         bookPath: String = "",
+        bookTitle: String = "",
         chapters: [ChapterItem] = [],
         downloadStore: StoreOf<DownloadFeature>? = nil,
         initialOffset: Int = 0
     ) {
         self.bookPath = bookPath
+        self.bookTitle = bookTitle
         self.chapters = chapters
         self.downloadStore = downloadStore
         store = Store(
@@ -81,6 +87,7 @@ struct ReaderView: View {
     init(store: StoreOf<ReaderFeature>) {
         self.store = store
         bookPath = ""
+        bookTitle = ""
         chapters = []
         downloadStore = nil
     }
@@ -116,15 +123,27 @@ struct ReaderView: View {
                     .padding(.top, contentPaddings.top)
                     .padding(.bottom, contentPaddings.bottom)
 
+                    // 角落状态标签（HUD）：与正文层 / 控制栏层**并列**的独立叠加层 ——
+                    // 不参与正文布局、不占正文空间、不改任何 padding / frame / 分页参数。
+                    // ⚠️ 必须加在下面的控制栏层**之前**（owner 口径：控制栏呼出时盖住 HUD）；
+                    // 定位与三格内容见 `ReaderCornerHUD.swift` 里的 `readerCornerHUD`。
+                    readerCornerHUD(
+                        viewStore,
+                        pageColor: pageColor,
+                        safeAreaInsets: geometry.safeAreaInsets,
+                        topPadding: topBarPadding(safeAreaInsets: geometry.safeAreaInsets)
+                    )
+
                     // 控制栏层：与正文层**并列**的叠加层，自己不占正文的布局空间 ⇒
                     // 呼出 / 隐藏不改变正文的分页与阅读位置（设计稿的关键点）。
-                    // 竖向重新吃安全区（内容留在安全区内），玻璃再由 `ReaderChromeGlass`
-                    // 的 `.ignoresSafeArea(edges:)` 铺到状态栏 / Home Indicator 之下。
+                    // **只吃横向安全区**（U9-7）：竖向不再被安全区钉住 —— 上栏的上边缘由
+                    // `topBarPadding(safeAreaInsets:)` 决定、跳章条与下栏各吃 `Spacing.xs`
+                    // ⇒ 三条圆角面板能比正文更贴屏幕上下边（见 `ReaderChromeOverlay`）。
                     if isChromeVisible {
                         ReaderChromeOverlay(
                             style: ReaderChromeStyle.make(page: pageColor),
                             chapterTitle: viewStore.chapterName,
-                            safeAreaInsets: geometry.safeAreaInsets,
+                            topPadding: topBarPadding(safeAreaInsets: geometry.safeAreaInsets),
                             previousChapter: viewStore.previousChapter,
                             nextChapter: viewStore.nextChapter,
                             onBack: { dismiss() },
@@ -144,6 +163,8 @@ struct ReaderView: View {
                                 )
                             }
                         )
+                        .padding(.leading, geometry.safeAreaInsets.leading)
+                        .padding(.trailing, geometry.safeAreaInsets.trailing)
                     }
                 }
                 .task {
@@ -209,7 +230,7 @@ struct ReaderView: View {
             // 阅读页自己声明了 `.toolbar(.hidden, for: .navigationBar)`，push 一层详情页会继承
             // 这条隐藏 ⇒ 详情页既没有标题、也没有返回按钮；sheet 自带自己的导航栈，不受影响。
             .sheet(isPresented: $isShowingDetail) {
-                detailSheet
+                detailSheet(viewStore)
             }
             .preferredColorScheme(viewStore.config.appearanceMode.preferredColorScheme)
         }
@@ -257,6 +278,25 @@ private extension ReaderView {
             width: max(0, size.width - safeAreaInsets.leading - safeAreaInsets.trailing),
             height: max(0, size.height - paddings.top - paddings.bottom)
         )
+    }
+
+    /// 上栏最多可上移的量：理论极限 ≈ 38pt（栏顶 21pt）只剩 0.7pt 余量，太紧 —— 字体度量是
+    /// 查表估的，估错 1pt 标题就会被灵动岛咬 ⇒ 收紧到 34pt。推导见 `topBarPadding(safeAreaInsets:)`。
+    private static let topBarMaxUpwardShift: CGFloat = 34
+
+    /// 上栏的上移量（U9-7）：`T = max(Spacing.xs, safeAreaInsets.top − 34)`。
+    ///
+    /// 上栏的**标题是居中**的，与灵动岛同一列 ⇒ 标题字形必须落在灵动岛下沿（约 48pt）以下。
+    /// 栏内结构是「`Spacing.sm`(12) 内边距 + 44pt 内容行 + 12 内边距」，标题在 44pt 行内垂直
+    /// 居中，其字形顶距栏顶约 27pt ⇒ 栏顶 ≥ 48 − 27 ≈ 21pt 即可（理论上限 59 − 21 ≈ 38pt，
+    /// 但那样只剩 0.7pt 余量）。取 34pt ⇒ 栏顶 59 − 34 = **25pt**，标题字形顶 ≈ 25 + 27 = 52pt，
+    /// 距下沿约 **5.7pt**。栏顶仍进到灵动岛覆盖区（25pt < 48pt）—— 那是预期的：被覆盖的
+    /// 那部分是面板的**空内边距**。下限 `Spacing.xs`(8) 保证无灵动岛 / 无刘海机型上面板也不贴死屏幕边。
+    ///
+    /// ⚠️ 它只作用在**上栏面板**上（控制栏这一层不吃竖向安全区，见 `ReaderView.body`）；
+    /// 跳章条与下栏的下边缘由 `ReaderChromeOverlay` 的 `.padding(.bottom, Spacing.xs)` 决定。
+    private func topBarPadding(safeAreaInsets: EdgeInsets) -> CGFloat {
+        max(DesignTokens.Spacing.xs, safeAreaInsets.top - Self.topBarMaxUpwardShift)
     }
 
     @ViewBuilder
@@ -401,7 +441,7 @@ private extension ReaderView {
         downloadStore.send(.enqueue([
             DownloadChapterRequest(
                 bookPath: bookPath,
-                bookTitle: "",
+                bookTitle: bookTitle,
                 chapterPath: chapter.path,
                 chapterName: chapter.name,
                 chapterNumber: chapter.number
@@ -432,15 +472,28 @@ private extension ReaderView {
     ///
     /// 标题传空串：`BookDetailView` 的 `fallback` 只是首帧占位，
     /// `BookDetailFeature.onAppear` 会立刻用本地快照 / 联网结果把它填上 ——
-    /// 阅读页并不知道书名，不必为此在 `ReaderView` 上多加一个参数。
+    /// 这里的 `title` 与书名无关，所以阅读页**已经**有 `bookTitle`（HUD 左上角要用）也不往这里传。
+    ///
+    /// ## ⚠️ `onOpenReader`：sheet 里点阅读入口**不能**再 push 一层阅读页（修 4）
+    /// `BookDetailView` 默认会自己 `navigationDestination` 出阅读页，而在本 sheet 里那层
+    /// 阅读页是**叠在阅读页之上**的第二层全屏阅读页 ⇒ 卡死（owner 真机反馈）。
+    /// 这里注入回调接管：先关掉 sheet，再让**下面那层**阅读页跳到该章 ——
+    /// 走的是与目录 / 搜索跳章**完全同一条** action（`loadChapterWithName`），
+    /// 不新增任何加载路径。
     @ViewBuilder
-    private var detailSheet: some View {
+    private func detailSheet(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) -> some View {
         if let downloadStore {
             NavigationStack {
                 BookDetailView(
                     bookPath: bookPath,
                     title: "",
-                    downloadStore: downloadStore
+                    downloadStore: downloadStore,
+                    onOpenReader: { chapter in
+                        isShowingDetail = false
+                        viewStore.send(.loadChapterWithName(chapter.path, chapter.name))
+                    }
                 )
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {

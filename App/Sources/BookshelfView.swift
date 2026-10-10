@@ -42,12 +42,17 @@ struct BookshelfView: View {
     /// U9-8：「下载设置」sheet 的开关。入口在本地分组（= 下载队列）下的工具栏里，
     /// 所以这个状态与 `showsLocalGroup` 同生共死；`private` 足够（同文件的 extension 读得到）。
     @State private var isShowingDownloadSettings = false
-    // ⚠️ 下面四个刻意**不是** `private`：「进阅读页」那条链路已拆到
+    // ⚠️ 下面五个刻意**不是** `private`：「进阅读页」那条链路已拆到
     // `BookshelfView+Reader.swift`，而跨文件的 extension 读不到 file-private 状态
     // （与 `isShowingNewGroupAlert` 那组同一处理）。
 
     /// 阅读页目标（整本目录 + 落点）。用显式 push 而不是 `NavigationLink`：见 `rowContent` 的注释。
     @State var readerTarget: ReadingTarget?
+    /// 进阅读页时要带过去的书名（HUD 左上角在章节第一页显示它）。
+    ///
+    /// 由 `prepareReader` 写入 —— 书名**从入口那层传进来**，不在这里按 `bookPath` 反查：
+    /// 下载页可能有不带书架行的书，反查会静默拿到空标题。
+    @State var readerBookTitle = ""
     @State var isShowingReader = false
     /// 正在准备阅读的书路径。非 `nil` = 正在取目录 ⇒ 全页进度覆盖层，
     /// 避免「点了卡片半天没反应」（取目录是异步的，见 `prepareReader`）。
@@ -74,7 +79,9 @@ struct BookshelfView: View {
                             // 底栏显隐都只有这一处所有者（见 `prepareReader`）。
                             DownloadQueueView(
                                 store: downloadStore,
-                                onOpenBook: { bookPath in prepareReader(bookPath: bookPath) }
+                                onOpenBook: { bookPath, bookTitle in
+                                    prepareReader(bookPath: bookPath, bookTitle: bookTitle)
+                                }
                             )
                         } else if viewStore.isLoading, viewStore.rows.isEmpty {
                             // 首次加载中，还没数据也不确定是否失败
@@ -400,7 +407,11 @@ private extension BookshelfView {
             // 并行识别；长按抬手时 Button 也会触发一次 action，用时间戳挡掉。
             Button {
                 guard !isLongPressSuppressed else { return }
-                prepareReader(bookPath: row.bookPath, progressHint: progressHint(of: row))
+                prepareReader(
+                    bookPath: row.bookPath,
+                    bookTitle: row.title,
+                    progressHint: progressHint(of: row)
+                )
             } label: {
                 BookRow(row: row)
             }

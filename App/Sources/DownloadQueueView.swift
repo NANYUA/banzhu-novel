@@ -37,7 +37,10 @@ struct DownloadQueueView: View {
 
     /// 单点书卡 → 直接进阅读页。落点决策与准备态都留在**书架那一层**
     /// （阅读页 push 在书架的 `NavigationStack` 上，覆盖层与底栏显隐只有那一处所有者）。
-    let onOpenBook: (String) -> Void
+    ///
+    /// 两个参数是 `(bookPath, 书名)`：书名由本页的 `BookDownloadSummary.title` 提供，
+    /// 供阅读页角落标签用（不按 `bookPath` 反查书库 —— 下载页可能有不带书架行的书）。
+    let onOpenBook: (String, String) -> Void
 
     /// 书封面的唯一来源：按 `bookPath` 从书库查（`BookCoverLoader`）。
     @Dependency(\.bookCoverLoader) private var bookCoverLoader
@@ -200,6 +203,10 @@ struct DownloadQueueView: View {
     /// 一本书一张卡（**不再渲染逐章任务行**）。
     ///
     /// 单独成函数同样是为了压 `queueList` 的 `function_body_length`。
+    ///
+    /// ⚠️ 卡上**不再有**「暂停 / 删除」入口（U11 删掉右上角「更多」菜单）：
+    /// 这两件事走长按进选择模式后的批量操作栏（`selectionBar` 的 `.pauseSelectedBooks`
+    /// / `pendingDeletePaths`），所以这里也不再接线。
     private func bookCard(
         _ summary: BookDownloadSummary,
         viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
@@ -212,17 +219,11 @@ struct DownloadQueueView: View {
                 viewStore.send(.selectionToggled(summary.id))
             },
             onOpenBook: {
-                onOpenBook(summary.id)
+                onOpenBook(summary.id, summary.title)
             },
             onLongPress: {
                 // 再长按一次退出选择模式（与「完成」同一语义：`selectionModeChanged(false)`）。
                 viewStore.send(.selectionModeChanged(!viewStore.isSelecting))
-            },
-            onPause: {
-                viewStore.send(.pauseBook(summary.id))
-            },
-            onDelete: {
-                pendingDeletePaths = [summary.id]
             }
         )
         .downloadQueueCard()
@@ -479,6 +480,6 @@ private extension DownloadNetworkKind {
             DownloadFeature()
         },
         // 预览里不接阅读页：落点在书架那层，这里给一个空实现即可。
-        onOpenBook: { _ in }
+        onOpenBook: { _, _ in }
     )
 }

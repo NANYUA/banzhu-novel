@@ -92,6 +92,10 @@ extension ReaderView {
     /// `+1` 格有两支：本章还有下一页就用本章的；已经是本章最后一页、且下一章第 1 页
     /// 已就绪（`nextPages` 非空）就用**下一章的第 1 页**；两者都不是（最后一章 / 还没
     /// 预加载完）就不铺 —— 那一格空着，`PagePanTracking.turn` 同样判 `.none`（回弹，不提示）。
+    ///
+    /// `-1` 格是它的**镜像**：已经是本章第一页、且上一章最后一页已就绪（`previousPages`
+    /// 非空）就用**上一章的最后一页**；两者都不是（第一章 / 还没预加载完）就不铺
+    /// —— 那一格空着，`turn` 同样判 `.none`（回弹，不提示）。
     private func panSlots(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> [PanSlot] {
@@ -106,13 +110,24 @@ extension ReaderView {
                     relativeIndex: relative
                 )
             }
-            guard relative == 1, !pages.isEmpty, current == pages.count - 1,
-                  !viewStore.nextPages.isEmpty
-            else { return nil }
+            guard !pages.isEmpty else { return nil }
+            if relative == 1, current == pages.count - 1, !viewStore.nextPages.isEmpty {
+                return PanSlot(
+                    id: PanSlot.Identity(path: viewStore.nextChapter?.path ?? "", index: 0),
+                    text: pageText(at: 0, in: viewStore.nextPages, text: viewStore.nextDisplayText),
+                    relativeIndex: 1
+                )
+            }
+            guard relative == -1, current == 0, !viewStore.previousPages.isEmpty else { return nil }
+            let lastIndex = viewStore.previousPages.count - 1
             return PanSlot(
-                id: PanSlot.Identity(path: viewStore.nextChapter?.path ?? "", index: 0),
-                text: pageText(at: 0, in: viewStore.nextPages, text: viewStore.nextDisplayText),
-                relativeIndex: 1
+                id: PanSlot.Identity(path: viewStore.previousChapter?.path ?? "", index: lastIndex),
+                text: pageText(
+                    at: lastIndex,
+                    in: viewStore.previousPages,
+                    text: viewStore.previousDisplayText
+                ),
+                relativeIndex: -1
             )
         }
     }
@@ -228,7 +243,9 @@ extension ReaderView {
                 pageIndex: viewStore.currentPageIndex,
                 pageCount: viewStore.pages.count,
                 // 下一章第 1 页已就绪 ⇒ 本章最后一页仍可继续 `.next`（换章）。
-                hasNextChapterPage: !viewStore.nextPages.isEmpty
+                hasNextChapterPage: !viewStore.nextPages.isEmpty,
+                // 上一章最后一页已就绪 ⇒ 本章第一页仍可继续 `.previous`（退章）。
+                hasPreviousChapterPage: !viewStore.previousPages.isEmpty
             )
         )
         settlePan(turn, viewStore: viewStore, availableWidth: availableWidth)
@@ -256,8 +273,9 @@ extension ReaderView {
     /// 补一页后它**此刻的屏幕位置完全没变**，接着的动画是连续的平移，不是「先跳一下再滑」。
     /// 这也是「像全景图滑动，但停留在正文页」的落地点 —— 全程只走一页，不连续滚动。
     ///
-    /// **章尾换章走的是同一条路**：此刻 `+1` 格上摆的就是下一章第 1 页，换章后它正好
-    /// 变成当前页 —— 补位那一步与章内翻页**逐值相同**，观感因此连续（owner 要的「不先跳一下」）。
+    /// **章尾换章 / 章首退章走的是同一条路**：此刻 `+1` 格上摆的就是下一章第 1 页
+    /// （`-1` 格上摆的是上一章最后一页），换章后它正好变成当前页 —— 补位那一步与章内
+    /// 翻页**逐值相同**，观感因此连续（owner 要的「不先跳一下」）。
     private func settlePan(
         _ turn: PagePanTurn,
         viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
@@ -279,7 +297,13 @@ extension ReaderView {
                 slideOffset += availableWidth
             }
         case .previous:
-            viewStore.send(.prevPage)
+            // 镜像 `.next`：判 `.previous` 时用的是同一次手势里的 pageIndex，
+            // 所以「当前页是不是第一页」在这里是同一个判据：是 ⇒ 退章，否则章内翻页。
+            if viewStore.currentPageIndex == 0 {
+                viewStore.send(.retreatChapter)
+            } else {
+                viewStore.send(.prevPage)
+            }
             if panning {
                 slideOffset -= availableWidth
             }
