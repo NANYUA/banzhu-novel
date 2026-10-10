@@ -377,6 +377,21 @@ public extension DownloadFeature {
             tasks.filter(\.state.isFinished).count
         }
 
+        /// 这本书已完成（`.done`）章节的 `chapterPath` 集合（纯内存派生：不读库、不新增订阅）。
+        ///
+        /// 详情页据此把**刚下完**的章节就地标成已下载，不改「已下载」的唯一真相
+        /// （仍是 `ChapterRecord.source == .downloaded`）。
+        ///
+        /// 本书的过滤只比 `DownloadTaskSnapshot.bookPath` 字段：**不拼也不拆**
+        /// `bookPath#chapterPath` 复合键，所以调用方不必知道键的形态，
+        /// 键格式将来变化也不会在这一层之外静默失配。
+        ///
+        /// 完成的任务**不会**被移出队列（`DownloadQueueStoreLive.complete(taskID:text:)`
+        /// 只把任务 `markDone()`，只有 `cancelBook` 才会 `remove`），所以 `.done` 是稳定信号。
+        public func completedChapterPaths(forBook bookPath: String) -> Set<String> {
+            Set(tasks.filter { $0.state.isFinished && $0.bookPath == bookPath }.map(\.chapterPath))
+        }
+
         /// 失败任务数。
         public var failedCount: Int {
             tasks.filter { $0.state == .failed }.count

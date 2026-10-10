@@ -116,6 +116,9 @@ struct BookDetailView: View {
                 )
             }
             .task { viewStore.send(.onAppear) }
+            // 下载进行中：观察下载队列的**纯内存**完成信号，把新增完成的章节就地标成已下载
+            // （不重读目录 —— 500 章批量下载那样会退化成 O(n²)，见 `BookDetailView+DownloadRefresh`）。
+            .background { downloadCompletionObserver(viewStore) }
             .onChange(of: viewStore.lastAddedRow) { _, row in
                 if let row {
                     onAddedToShelf(row)

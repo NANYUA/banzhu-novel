@@ -126,6 +126,13 @@ public struct BookDetailFeature: Reducer {
         case chaptersLoaded([ChapterItem])
         /// 目录加载失败（与详情失败分开记，一个失败不该把另一个也拖下水）。
         case chaptersFailed(String)
+        /// 这些章节**刚刚**下载完成（App 层观察下载队列完成信号后回传的 chapterPath）。
+        ///
+        /// 只做纯内存打标：命中目录里的章节就置 `isDownloaded`，**不重读 `chapterListLoader`**。
+        /// 批量下载 500 章时「完成一章就重读一次整本目录」是 O(n²)，已被否决。
+        /// 「已下载」的唯一真相仍是 `ChapterRecord.source == .downloaded`，
+        /// 这里只是让本页在下载进行中不必等下一次 `onAppear`。
+        case chaptersDownloaded([String])
         /// 目录加载失败后点「重试」：只重发目录请求，不重新读详情。
         case reloadChapters
         /// 「查看全部目录 / 收起目录」。
@@ -209,6 +216,10 @@ public struct BookDetailFeature: Reducer {
             case let .chaptersFailed(message):
                 state.isLoadingChapters = false
                 state.chapterErrorMessage = message
+                return .none
+
+            case let .chaptersDownloaded(paths):
+                markChaptersDownloaded(paths, in: &state.chapters)
                 return .none
 
             case .reloadChapters:
@@ -432,6 +443,31 @@ public extension BookDetailFeature.State {
         let bookPath = detail.bookPath
         let path = bookPath.hasPrefix("/") ? bookPath : "/" + bookPath
         return SiteConfig(host: normalizedHost).url(path)
+    }
+}
+
+// MARK: - 下载完成 → 就地刷新「已下载」标记
+
+/// 把「刚下载完成」的章节就地标成已下载（**纯内存**，不读库）。
+///
+/// 判据仍走既有的 `ChapterItem.isDownloaded`（源头是 `ChapterRecord.source`），
+/// 不新增第二套「已下载」判据；不在目录里的路径（别的书的完成事件、已被站点删掉的章节）
+/// 直接忽略，不会凭空长出一行。
+private func markChaptersDownloaded(_ paths: [String], in chapters: inout [ChapterItem]) {
+    guard !paths.isEmpty else { return }
+    let downloaded = Set(paths)
+    for index in chapters.indices {
+        let chapter = chapters[index]
+        guard downloaded.contains(chapter.path), !chapter.isDownloaded else { continue }
+        // `DownloadQueueStoreLive.complete` 先写正文文件、再把 source 置为 .downloaded，
+        // 所以「本地有正文」和「已下载」一起就地置位，不留「已下载却没有正文」的矛盾态。
+        chapters[index] = ChapterItem(
+            number: chapter.number,
+            name: chapter.name,
+            path: chapter.path,
+            hasLocalText: true,
+            isDownloaded: true
+        )
     }
 }
 
