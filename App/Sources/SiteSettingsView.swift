@@ -97,7 +97,7 @@ struct SiteSettingsView: View {
                     newHost = ""
                 } label: {
                     Text("添加")
-                        .frame(minHeight: 44)
+                        .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -121,15 +121,17 @@ struct SiteSettingsView: View {
             )
         ) {
             ForEach(viewStore.settings.hosts) { entry in
+                let isSelected = entry.id == viewStore.settings.currentHostID
                 Button {
                     viewStore.send(.selectHost(entry.id))
                 } label: {
                     hostRow(
                         entry,
-                        isSelected: entry.id == viewStore.settings.currentHostID
+                        isSelected: isSelected
                     )
                 }
                 .buttonStyle(PressableCardButtonStyle())
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
                 .swipeActions {
                     Button("删除", role: .destructive) {
                         viewStore.send(.deleteHost(entry.id))
@@ -157,6 +159,8 @@ struct SiteSettingsView: View {
             if isSelected {
                 Image(systemName: "checkmark")
                     .foregroundStyle(.tint)
+                    // 装饰性图形：选中语义交给行 Button 的 `.isSelected` trait。
+                    .accessibilityHidden(true)
             }
         }
     }

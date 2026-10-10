@@ -120,7 +120,9 @@ private struct DownloadNoticeRow: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            // §9 按下反馈：`.plain` 按下零反馈；强调层按 12pt 内缩贴图标自身的圆，
+            // 不铺成 44pt 大圆盘（命中区仍由 label 的 44×44 + `.contentShape` 提供）。
+            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Circle().inset(by: DesignTokens.Spacing.sm))))
             .accessibilityLabel("关闭提示")
         }
     }
@@ -206,7 +208,7 @@ private struct DownloadBookHeader: View {
     let onCancel: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: DesignTokens.Spacing.sm) {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 Text(section.title)
                     .font(.headline)
@@ -241,13 +243,13 @@ private struct DownloadTaskRow: View {
     let task: DownloadTaskSnapshot
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Image(systemName: statusIcon)
                 .font(.body)
                 .foregroundStyle(statusColor)
                 .frame(minWidth: 22)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 Text("\(task.chapterNumber). \(task.chapterName)")
                     .font(.body)
                     .lineLimit(1)

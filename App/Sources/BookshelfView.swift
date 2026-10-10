@@ -245,7 +245,9 @@ private extension BookshelfView {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            // §9 按下反馈：`.plain` 按下零反馈；强调层按 12pt 内缩贴图标自身的圆，
+            // 不铺成 44pt 大圆盘（命中区仍由 label 的 44×44 + `.contentShape` 提供）。
+            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Circle().inset(by: DesignTokens.Spacing.sm))))
             .accessibilityLabel("关闭提示")
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
@@ -378,11 +380,14 @@ private extension BookshelfView {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
                         .foregroundStyle(isSelected ? AppTheme.accent : Color.secondary)
+                        // 装饰性图形：选中语义交给 Button 的 `.isSelected` trait，避免它被单独读成一个元素。
+                        .accessibilityHidden(true)
                     BookRow(row: row)
                 }
             }
-            // 编辑态整行都是按钮，强调层就按整行矩形铺（默认轮廓）。
-            .buttonStyle(PressableCardButtonStyle())
+            // 编辑态整行都是按钮，强调层贴整行的 12pt 圆角（与行卡一致），不在圆角外露方角。
+            .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
         } else {
             // 🔴 这里刻意不用 NavigationLink：它的点击手势会和长按手势抢识别，
             // 结果「点书进不去详情」（长按进编辑是既有交互，不能砍）。
