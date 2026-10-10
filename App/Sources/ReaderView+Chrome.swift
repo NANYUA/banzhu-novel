@@ -233,13 +233,15 @@ private struct ReaderChromeGlass: View {
 
 /// 上栏：返回 · 章节名（居中、单行、尾部截断）· 更多菜单。
 ///
-/// 「更多」是项目既有的入口（U9-6 把原来的 `eye.slash` 换成了 `ellipsis.circle`），
-/// 菜单**内容原样保留**：里面仍是一条置灰的「更多选项待添加」占位项，本轮不动它
-/// —— 留一条不可点的占位项而不是空 `Menu`，因为空菜单点开是一片空白，
-/// 用户会以为控件坏了（§11 反馈：别给一个点了没反应的入口）。
+/// 「更多」是项目既有的入口（U9-6 把原来的 `eye.slash` 换成了 `ellipsis.circle`）。
+/// 菜单里现在是**真入口**「书籍详情」（owner 需求：详情页入口收进阅读页右上角「更多」）。
+/// `onShowDetail` 为 `nil` 时（测试 / 预览那条没有 `bookPath` 的构造路径）保留原来的置灰占位项
+/// —— 空 `Menu` 点开是一片空白，用户会以为控件坏了（§11 反馈：别给一个点了没反应的入口）。
 private struct ReaderTopBar: View {
     let title: String
     let style: ReaderChromeStyle
+    /// 「书籍详情」的落点；`nil` = 不提供这一项（见类型文档）。
+    var onShowDetail: (() -> Void)?
     var onBack: () -> Void
 
     var body: some View {
@@ -295,11 +297,18 @@ private struct ReaderTopBar: View {
     /// 同一个 `chromeIconLabel`（⇒ 同一个 44pt 命中区 / `contentShape` / 字体 / 无障碍施加方式）、
     /// 同一个 `PressableCardButtonStyle`。
     ///
-    /// 菜单**内容原样保留**（一条置灰的占位项），不换成别的控件 —— 本轮只统一外观与命中区。
+    /// 菜单项：「书籍详情」—— 真入口，点开是**覆盖在阅读页之上**的 sheet（不是 push，
+    /// 理由见 `ReaderView.detailSheet`）；`onShowDetail` 为 `nil` 时保留原来的置灰占位项。
     private var moreMenu: some View {
         Menu {
-            Button("更多选项待添加") {}
-                .disabled(true)
+            if let onShowDetail {
+                Button(action: onShowDetail) {
+                    Label("书籍详情", systemImage: "info.circle")
+                }
+            } else {
+                Button("更多选项待添加") {}
+                    .disabled(true)
+            }
         } label: {
             chromeIconLabel("ellipsis.circle", a11yLabel: "更多")
         }
@@ -467,6 +476,8 @@ struct ReaderChromeOverlay: View {
     var onDownload: () -> Void
     var onSearch: () -> Void
     var onSettings: () -> Void
+    /// 「更多 → 书籍详情」；`nil` = 菜单里不出现这一项（原样透传给 `ReaderTopBar`）。
+    var onShowDetail: (() -> Void)?
     /// 跳章：上一章 / 下一章**共用**一个闭包（两侧都走既有的 `loadChapterWithName` 正常加载路径）。
     var onJumpToChapter: (ChapterItem) -> Void
 
@@ -477,6 +488,7 @@ struct ReaderChromeOverlay: View {
             ReaderTopBar(
                 title: chapterTitle,
                 style: style,
+                onShowDetail: onShowDetail,
                 onBack: onBack
             )
             .padding(.top, safeAreaInsets.top)

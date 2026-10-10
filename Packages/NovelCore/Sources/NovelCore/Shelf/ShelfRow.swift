@@ -6,10 +6,16 @@ import Foundation
 /// 1. `BookRecord` 是 SwiftData `@Model`。界面层若持有它，渲染路径就与
 ///    数据库对象绑死，测试与预览都得先建库；
 /// 2. 列表排版（docs/03 §三）只用到 6 个字段，而 `BookRecord` 有 16 个，
-///    其中 `intro`、`wordCount`、`lastReadOffset` 与列表无关。
+///    其中 `intro`、`wordCount` 与列表无关。
 ///
 /// ## 字段与需求逐行对应
 /// 左侧封面 / 右 1 书名 / 右 2 作者 / 右 3 上次读到 / 右 4 最新章节 / 最右 未读章数。
+///
+/// ## 为什么带上 `lastReadChapterPath` / `lastReadOffset`（列表本身不显示它们）
+/// 「书架 / 本地 / 分组单点书卡 ⇒ 直接进阅读页，落点 = 上次看过的页面」这条需求
+/// 需要「上次读到哪一章、章内哪个偏移」。二者与 `lastReadChapterName` 同在
+/// `BookRecord` 上、同一次读取就能拿到，放在这里可以**免掉一次额外的读库**
+/// （阅读落点解析见 `ReadingTargetLoader`，它把行上的快照当作进度提示）。
 ///
 /// ## 「最新章节」与「未读章数」为什么能离线显示
 /// 二者都取自 `BookRecord` 上**持久化的目录快照**（`latestChapterName` /
@@ -23,6 +29,8 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
         coverUrl: String,
         groupId: UUID? = nil,
         lastReadChapterName: String? = nil,
+        lastReadChapterPath: String? = nil,
+        lastReadOffset: Int = 0,
         latestChapterName: String? = nil,
         unreadCount: Int = 0,
         lastReadAt: Date? = nil
@@ -33,6 +41,8 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
         self.coverUrl = coverUrl
         self.groupId = groupId
         self.lastReadChapterName = lastReadChapterName
+        self.lastReadChapterPath = lastReadChapterPath
+        self.lastReadOffset = lastReadOffset
         self.latestChapterName = latestChapterName
         self.unreadCount = unreadCount
         self.lastReadAt = lastReadAt
@@ -54,6 +64,17 @@ public struct ShelfRow: Equatable, Identifiable, Sendable {
 
     /// 「上次读到：第 N 章 章名」。离线也要能显示，故取的是持久化副本。
     public let lastReadChapterName: String?
+
+    /// 上次读到的章节相对路径（如 `/49/49034/123.html`）。`nil` = 从没读过。
+    ///
+    /// 列表不显示它；它是「单点书卡直接进阅读页」的落点依据（见类型文档）。
+    public let lastReadChapterPath: String?
+
+    /// 🔴 上次读到的位置：**UTF-16 字符偏移，不是页码**（数据契约 ③）。
+    ///
+    /// 从没读过时是 `0`（`BookRecord.lastReadOffset` 的默认值），
+    /// 语义与「第一章第一页」一致，故调用方不必区分。
+    public let lastReadOffset: Int
 
     /// 「最新章节：章名」。🔴 离线时**可能过时**，需求已确认接受。
     public let latestChapterName: String?

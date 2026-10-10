@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import Dependencies
 import NovelCore
 import SwiftUI
 
@@ -27,6 +28,10 @@ struct BookshelfView: View {
     let store: StoreOf<BookshelfFeature>
     let downloadStore: StoreOf<DownloadFeature>
 
+    /// 阅读落点解析（整本目录 + 上次读到哪一章哪个偏移）。依赖注入 ⇒ 测试可换成桩。
+    /// ⚠️ 刻意**不是** `private`：这条链路已拆到 `BookshelfView+Reader.swift`。
+    @Dependency(\.readingTargetLoader) var readingTargetLoader
+
     // ⚠️ 下面三个刻意**不是** `private`：分组栏已拆到 `BookshelfView+GroupBar.swift`，
     // 而跨文件的 extension 读不到 file-private 状态（`newGroupName` 只在本文件用，保持 `private`）。
     @State var isShowingNewGroupAlert = false
@@ -37,9 +42,18 @@ struct BookshelfView: View {
     /// U9-8：「下载设置」sheet 的开关。入口在本地分组（= 下载队列）下的工具栏里，
     /// 所以这个状态与 `showsLocalGroup` 同生共死；`private` 足够（同文件的 extension 读得到）。
     @State private var isShowingDownloadSettings = false
-    /// 详情页目标。用显式 push 而不是 `NavigationLink`：见 `rowContent` 的注释。
-    @State private var detailRow: ShelfRow?
-    @State private var isShowingDetail = false
+    // ⚠️ 下面四个刻意**不是** `private`：「进阅读页」那条链路已拆到
+    // `BookshelfView+Reader.swift`，而跨文件的 extension 读不到 file-private 状态
+    // （与 `isShowingNewGroupAlert` 那组同一处理）。
+
+    /// 阅读页目标（整本目录 + 落点）。用显式 push 而不是 `NavigationLink`：见 `rowContent` 的注释。
+    @State var readerTarget: ReadingTarget?
+    @State var isShowingReader = false
+    /// 正在准备阅读的书路径。非 `nil` = 正在取目录 ⇒ 全页进度覆盖层，
+    /// 避免「点了卡片半天没反应」（取目录是异步的，见 `prepareReader`）。
+    @State var preparingBookPath: String?
+    /// 准备失败的提示。非 `nil` = 弹 alert —— 取目录失败**不静默**。
+    @State var prepareErrorMessage: String?
     /// 最近一次长按时间：用来挡掉长按抬手时 Button 多触发的那次点击。
     @State private var lastLongPressAt: Date?
 
@@ -54,7 +68,14 @@ struct BookshelfView: View {
                             // 「本地」固定分组的内容 = 下载队列。整页复用 `DownloadQueueView`，
                             // 不复制它的实现；分组栏仍在它上方，用户随时能切走。
                             // 它不读 `visibleRows`：本地分组不参与书目过滤。
-                            DownloadQueueView(store: downloadStore)
+                            //
+                            // `onOpenBook` 把「单点书卡 ⇒ 直接进阅读页」的落点决策**留在这层**：
+                            // 阅读页是 push 在本页的 `NavigationStack` 上的，准备态 / 失败提示 /
+                            // 底栏显隐都只有这一处所有者（见 `prepareReader`）。
+                            DownloadQueueView(
+                                store: downloadStore,
+                                onOpenBook: { bookPath in prepareReader(bookPath: bookPath) }
+                            )
                         } else if viewStore.isLoading, viewStore.rows.isEmpty {
                             // 首次加载中，还没数据也不确定是否失败
                             ProgressView("加载中…")
@@ -89,14 +110,19 @@ struct BookshelfView: View {
                 // 两者形成一级层次。分组栏、加载 / 空 / 错误态透出页面色；
                 // 白底只留给列表里的行卡片本身。
                 .background(AppTheme.Surface.page)
+                // 取目录期间的全页覆盖层 + 失败提示（实现在 `BookshelfView+Reader.swift`）。
+                .readerPreparation(
+                    isPreparing: preparingBookPath != nil,
+                    failureMessage: $prepareErrorMessage
+                )
                 .navigationTitle("书架")
                 // 底栏（tabBar）可见性的**唯一所有者**就是每个 tab 根视图，且由状态驱动：
-                // 详情页 / 阅读页都不再自己声明底栏，泄漏在构造上不可能发生。
+                // 阅读页不自己声明底栏（`ReaderView` 里有注释说明为什么），泄漏在构造上不可能发生。
                 // 两种偏好解析模型下行为都正确 ——
-                // · 若「根视图声明胜出」：push 详情期间根的状态是 `.hidden` ⇒ 详情页没有底栏；
+                // · 若「根视图声明胜出」：push 阅读页期间根的状态是 `.hidden` ⇒ 阅读页没有底栏；
                 //   回到根时状态翻回 `.visible` ⇒ 底栏可靠恢复；
                 // · 若「最上层声明胜出」：被 push 的视图不再声明，最上层声明者就是根 ⇒ 同样按状态走。
-                .toolbar(isShowingDetail ? .hidden : .visible, for: .tabBar)
+                .toolbar(isShowingReader ? .hidden : .visible, for: .tabBar)
                 // 底栏**背景**同样由根视图声明为「始终可见」：iOS 15+ 的底栏有 scroll-edge 外观，
                 // 内容没滚动（空态 / 列表不够长）时背景本来就是透明的 —— 真机「底栏偶尔变透明」就是它。
                 // 与上面的可见性同一层声明（`.toolbar(_, for: .tabBar)` 在这层已被真机验证有效）；
@@ -116,20 +142,17 @@ struct BookshelfView: View {
                 // `.navigationBar` 与上面的 `.tabBar` 是两个独立的 `ToolbarPlacement`；
                 // 这里不再对 `.navigationBar` 做可见性声明（默认可见即所要的效果）。
                 .onAppear { viewStore.send(.onAppear) }
-                .navigationDestination(isPresented: $isShowingDetail) {
-                    if let row = detailRow {
-                        BookDetailView(
-                            bookPath: row.bookPath,
-                            title: row.title,
-                            downloadStore: downloadStore,
-                            // 详情页里移出 / 重新加入书架后，书架列表立刻跟上，
-                            // 不依赖「返回时重拉一次」这种时序假设。
-                            onAddedToShelf: { added in viewStore.send(.addSucceeded(added)) },
-                            onRemovedFromShelf: { bookPath in
-                                viewStore.send(.booksDeleted([bookPath]))
-                            }
-                        )
-                    }
+                // 单点书卡 ⇒ **直接进阅读页**（owner 需求：书架 / 本地 / 分组都不再进详情页）。
+                // 详情页入口改在阅读页右上角「更多」里；目标与准备链路见 `BookshelfView+Reader.swift`。
+                .navigationDestination(isPresented: $isShowingReader) {
+                    readerDestination
+                }
+                // 从阅读页回来时重拉一次书架：`lastReadAt` / `上次读到` / 未读章数
+                // 都是刚刚读出来的新值，不重拉就会停在旧快照上。
+                // `.onAppear` 幂等且不重置编辑态（见 `BookshelfFeature`），重发安全。
+                .onChange(of: isShowingReader) { _, isShowing in
+                    guard !isShowing else { return }
+                    viewStore.send(.onAppear)
                 }
                 .toolbar {
                     toolbarContent(viewStore)
@@ -372,13 +395,12 @@ private extension BookshelfView {
             .accessibilityAddTraits(isSelected ? .isSelected : [])
         } else {
             // 🔴 这里刻意不用 NavigationLink：它的点击手势会和长按手势抢识别，
-            // 结果「点书进不去详情」（长按进编辑是既有交互，不能砍）。
+            // 结果「点书进不去阅读页」（长按进编辑是既有交互，不能砍）。
             // 用 Button 拿到按下反馈（HIG：按下即反馈），长按用 simultaneousGesture
             // 并行识别；长按抬手时 Button 也会触发一次 action，用时间戳挡掉。
             Button {
                 guard !isLongPressSuppressed else { return }
-                detailRow = row
-                isShowingDetail = true
+                prepareReader(bookPath: row.bookPath, progressHint: progressHint(of: row))
             } label: {
                 BookRow(row: row)
             }
@@ -393,7 +415,7 @@ private extension BookshelfView {
         }
     }
 
-    /// 长按抬手后 Button 也会收到一次 action，这里挡掉，避免「长按同时跳详情」。
+    /// 长按抬手后 Button 也会收到一次 action，这里挡掉，避免「长按同时进阅读页」。
     private var isLongPressSuppressed: Bool {
         guard let lastLongPressAt else { return false }
         return Date().timeIntervalSince(lastLongPressAt) < 0.4
@@ -479,41 +501,4 @@ private struct BookRow: View {
                     .foregroundStyle(.quaternary)
             }
     }
-}
-
-// MARK: - Preview
-
-#Preview {
-    let store = Store(initialState: BookshelfFeature.State(
-        rows: [
-            ShelfRow(
-                bookPath: "/49/49034/",
-                title: "楚香君游戏",
-                author: "某某某",
-                coverUrl: "",
-                lastReadChapterName: "第七章 夜探皇宫",
-                latestChapterName: "第九章 风云起",
-                unreadCount: 12,
-                lastReadAt: Date()
-            ),
-            ShelfRow(
-                bookPath: "/49/49035/",
-                title: "另一本书",
-                author: "",
-                coverUrl: "",
-                lastReadChapterName: nil,
-                latestChapterName: "第一章",
-                unreadCount: 0,
-                lastReadAt: nil
-            ),
-        ],
-        isLoading: false,
-        errorMessage: nil
-    )) {
-        BookshelfFeature()
-    }
-    let downloadStore = Store(initialState: DownloadFeature.State()) {
-        DownloadFeature()
-    }
-    BookshelfView(store: store, downloadStore: downloadStore)
 }

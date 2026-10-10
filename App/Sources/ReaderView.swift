@@ -29,6 +29,8 @@ struct ReaderView: View {
     @State private var isShowingSettings = false
     @State private var isShowingDirectory = false
     @State private var isShowingSearch = false
+    /// 「更多 → 书籍详情」的 sheet 开关（详情页**覆盖**在阅读页之上，见 `detailSheet`）。
+    @State private var isShowingDetail = false
     @State private var isChromeVisible = false
     // 下面四个是滑动 / 平移的跟手状态。**刻意不加 `private`**：Swift 的 `private` 是本文件级的，
     // 而手势已搬到 `ReaderView+PageGesture.swift`，加 `private` 那边就取不到
@@ -44,12 +46,16 @@ struct ReaderView: View {
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
     /// `chapters` 同时声明给 reducer：到章尾「无缝进下一章」靠它推出下一章。
+    ///
+    /// `initialOffset` 是「上次读到章内哪个字符偏移」，**只在第一次内容加载时**恢复一次
+    /// （`ReaderFeature.consumeInitialOffset` 取出即归零）—— 之后换章 / 从目录跳章仍从章首开始。
     init(
         chapterPath: String,
         chapterName: String = "",
         bookPath: String = "",
         chapters: [ChapterItem] = [],
-        downloadStore: StoreOf<DownloadFeature>? = nil
+        downloadStore: StoreOf<DownloadFeature>? = nil,
+        initialOffset: Int = 0
     ) {
         self.bookPath = bookPath
         self.chapters = chapters
@@ -58,7 +64,8 @@ struct ReaderView: View {
             initialState: ReaderFeature.State(
                 chapterPath: chapterPath,
                 chapterName: chapterName,
-                chapters: chapters
+                chapters: chapters,
+                initialOffset: initialOffset
             )
         ) {
             ReaderFeature()
@@ -125,6 +132,7 @@ struct ReaderView: View {
                             onDownload: { downloadCurrentChapter(viewStore) },
                             onSearch: { isShowingSearch = true },
                             onSettings: { isShowingSettings = true },
+                            onShowDetail: onShowDetail,
                             // 上一章 / 下一章走**同一条**既有加载路径，而不是 `.advanceChapter`：
                             // `loadChapterWithName` 会重置到章首 offset 0、作废旧的下一章预加载、
                             // 写进度并触发后续章节自动缓存；`.advanceChapter` 只服务「章尾左滑」，
@@ -164,8 +172,10 @@ struct ReaderView: View {
             // `characterOffset` 保住（契约 ③），但页断点可能移动一行。
             // 有灵动岛 / 刘海的机型顶部安全区由硬件决定（59pt），不受状态栏影响。
             //
-            // 底栏（tabBar）**刻意不在这里声明**：它的可见性全仓只有三个 tab 根视图一个所有者，
-            // 由 `isShowingDetail` 驱动（U3-5）。阅读页只能从详情页进入，那一刻它已经是隐藏的；
+            // 底栏（tabBar）**刻意不在这里声明**：它的可见性全仓只有三个 tab 根视图一个所有者
+            // （书架 / 书城 / 搜索），由各自的「正在展示下层页面」状态驱动（U3-5）。
+            // 阅读页现在有两条入口 —— 详情页 push（`BookDetailView`）与书架 / 本地页直接 push
+            // （`BookshelfView+Reader.swift`）—— 两条入口处，所属 tab 根视图都已经把底栏置为隐藏；
             // 在这里再写一次 `.toolbar(.hidden, for: .tabBar)` 就会多出第二个所有者，
             // 正是 U3-5 修掉的「pop 回根视图后底栏不恢复」那种泄漏。
             .statusBar(hidden: !isChromeVisible)
@@ -194,6 +204,12 @@ struct ReaderView: View {
                         isShowingSearch = false
                     }
                 )
+            }
+            // 「更多 → 书籍详情」：**sheet 覆盖在阅读页之上**，不是 push。
+            // 阅读页自己声明了 `.toolbar(.hidden, for: .navigationBar)`，push 一层详情页会继承
+            // 这条隐藏 ⇒ 详情页既没有标题、也没有返回按钮；sheet 自带自己的导航栈，不受影响。
+            .sheet(isPresented: $isShowingDetail) {
+                detailSheet
             }
             .preferredColorScheme(viewStore.config.appearanceMode.preferredColorScheme)
         }
@@ -392,6 +408,49 @@ private extension ReaderView {
             ),
         ]))
         setChromeVisible(false)
+    }
+
+    // MARK: - 书籍详情（更多菜单）
+
+    /// 「更多 → 书籍详情」的落点。`nil` = 菜单里不出现这一项。
+    ///
+    /// 两个前提缺一不可：
+    /// - **知道 `bookPath`**：详情页按它加载，空路径只会得到一张空壳；
+    /// - **拿到下载队列 store**：`BookDetailView` 的必需参数（「下载章节」要用它）。
+    ///
+    /// 二者同时缺的只有 `init(store:)` 那条测试 / 预览路径（`bookPath` 为空、`downloadStore` 为 nil）
+    /// —— 那里不给入口，而不是给一个点了打不开的空壳。
+    private var onShowDetail: (() -> Void)? {
+        guard !bookPath.isEmpty, downloadStore != nil else { return nil }
+        return { isShowingDetail = true }
+    }
+
+    /// 详情页 sheet 的内容：自带一层 `NavigationStack`。
+    ///
+    /// 详情页是按「被 push」设计的（标题与「转到原网站」都挂在导航栏上），
+    /// 所以覆盖层里要给它一条自己的栏，并补一个「完成」用来关掉。
+    ///
+    /// 标题传空串：`BookDetailView` 的 `fallback` 只是首帧占位，
+    /// `BookDetailFeature.onAppear` 会立刻用本地快照 / 联网结果把它填上 ——
+    /// 阅读页并不知道书名，不必为此在 `ReaderView` 上多加一个参数。
+    @ViewBuilder
+    private var detailSheet: some View {
+        if let downloadStore {
+            NavigationStack {
+                BookDetailView(
+                    bookPath: bookPath,
+                    title: "",
+                    downloadStore: downloadStore
+                )
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") {
+                            isShowingDetail = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - 控制栏显隐

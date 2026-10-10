@@ -10,6 +10,8 @@ let downloadFixtureDate = Date(timeIntervalSince1970: 1_700_000_000)
 actor InMemoryDownloadQueueStore {
     private var tasksByID: [String: DownloadTaskSnapshot]
     private var orderedIDs: [String]
+    /// 被要求删正文的书（`removeDownloadedChapters` 的调用记录）。
+    private var removedDownloadedBooks: [String] = []
 
     init(initialTasks: [DownloadTaskSnapshot] = []) {
         tasksByID = Dictionary(uniqueKeysWithValues: initialTasks.map { ($0.id, $0) })
@@ -22,7 +24,8 @@ actor InMemoryDownloadQueueStore {
             enqueue: { try await self.enqueue($0) },
             mutate: { try await self.mutate($0, mutation: $1) },
             complete: { try await self.complete(taskID: $0, text: $1) },
-            remove: { try await self.remove($0) }
+            remove: { try await self.remove($0) },
+            removeDownloadedChapters: { try await self.removeDownloadedChapters($0) }
         )
     }
 
@@ -120,6 +123,15 @@ actor InMemoryDownloadQueueStore {
             tasksByID.removeValue(forKey: id)
             orderedIDs.removeAll { $0 == id }
         }
+    }
+
+    /// 记录「删这本书已下载正文」的调用（内存桩里没有正文文件可删）。
+    private func removeDownloadedChapters(_ bookPaths: [String]) throws {
+        removedDownloadedBooks.append(contentsOf: bookPaths)
+    }
+
+    func removedDownloadedBookPaths() -> [String] {
+        removedDownloadedBooks
     }
 
     func snapshot(id: String) -> DownloadTaskSnapshot? {

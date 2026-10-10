@@ -38,7 +38,8 @@ public struct ReaderFeature: Reducer {
             isLoading: Bool = false,
             errorMessage: String? = nil,
             precacheCount: Int = ReaderFeature.defaultPrecacheCount,
-            chapters: [ChapterItem] = []
+            chapters: [ChapterItem] = [],
+            initialOffset: Int = 0
         ) {
             self.chapterPath = chapterPath
             self.chapterName = chapterName
@@ -50,6 +51,7 @@ public struct ReaderFeature: Reducer {
             self.errorMessage = errorMessage
             self.precacheCount = precacheCount
             self.chapters = chapters
+            self.initialOffset = initialOffset
         }
 
         /// 当前章节路径（如 `/49/49034/123.html`）
@@ -67,6 +69,12 @@ public struct ReaderFeature: Reducer {
         /// 🔴 阅读位置：字符偏移，**不是页码**。
         /// 改设置后靠它重新定位到同一处文字。
         public var currentOffset: Int
+
+        /// 首次加载时要恢复到的字符偏移（由 App 从持久化进度读入）。
+        ///
+        /// **只消费一次**：`contentLoaded` 恢复位置后立刻归零（见
+        /// `consumeInitialOffset`）⇒ 之后换章 / 从目录跳章仍从章首开始，既有语义不变。
+        public var initialOffset: Int = 0
 
         /// 最近一次翻页方向，用于让动画与手势方向一致。
         public var pageTurnDirection: PageTurnDirection
@@ -183,7 +191,9 @@ public struct ReaderFeature: Reducer {
                 state.isLoading = false
                 // 内容变化 → 重新分页
                 state.pages = paginationService.paginate(state.displayText, state.config)
-                state.currentOffset = 0
+                // 只有**首次**加载才恢复持久化位置：取出即归零 ⇒ 换章 / 从目录跳章仍从章首开始。
+                let restoredOffset = state.consumeInitialOffset()
+                state.currentOffset = restoredOffset
                 let chapterPath = state.chapterPath
                 let progressStore = readingProgressStore
                 let cacheStore = chapterCacheStore
@@ -350,6 +360,35 @@ public extension ReaderFeature.State {
     /// 对外持久化的字符偏移，始终相对原始正文。
     var progressOffset: Int {
         max(0, currentOffset - titlePrefixLength)
+    }
+
+    /// 取出首次加载要恢复的字符偏移（换算到 `displayText` 坐标系），并**立刻清空**（只恢复一次）。
+    ///
+    /// ## 🔴 两个坐标系（后人最容易搞错的地方）
+    /// - `initialOffset` 来自持久化的 `progressOffset`，**相对原始正文** `text`
+    ///   （落盘时扣掉了章名前缀，见 `progressOffset` / `titlePrefixLength`）；
+    /// - `currentOffset` 与 `displayText` **含章名前缀**（`chapterName + "\n\n"`）。
+    ///
+    /// 两者相差一个 `titlePrefixLength` ⇒ 恢复时**必须加回前缀长度**，
+    /// 否则位置会往前偏一个章名的宽度，正好跨页边界时就差一整页。
+    /// 例如 `displayText = "第七章\n\n" + 10 字`（前缀 5、共 15 字）：
+    /// 落盘的 `progressOffset = 5` 指的是**原始正文第 5 字**，
+    /// 在 `displayText` 里它是第 10 字（第 3 页页首）而不是第 5 字（第 2 页页首）。
+    ///
+    /// ## 顺序：先加前缀，再夹取
+    /// 加完之后才与 `displayText` 同坐标系，再夹到 `0 ... max(0, displayText.count - 1)`
+    /// （正文为空、偏移越界都不越界）。
+    ///
+    /// ## `initialOffset == 0` 是「没有要恢复的位置」，不是「原始正文第 0 字」
+    /// 默认值 0 / 已消费 / 从未看过都走这一支 ⇒ 返回 0（**章首第一页，含章名页**），
+    /// 绝不能加前缀长度（否则「从未看过」会从章名之后开始，且换章语义被破坏）。
+    ///
+    /// 恢复后 `initialOffset` 归零 ⇒ 换章 / 从目录跳章仍从章首开始。
+    mutating func consumeInitialOffset() -> Int {
+        defer { initialOffset = 0 }
+        guard initialOffset > 0 else { return 0 }
+        let displayOffset = initialOffset + titlePrefixLength
+        return min(max(0, displayOffset), max(0, displayText.count - 1))
     }
 
     /// 下一章；当前是最后一章、或列表里找不到当前章时为 `nil`。

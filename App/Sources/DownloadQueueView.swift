@@ -1,8 +1,9 @@
 import ComposableArchitecture
+import Dependencies
 import NovelCore
 import SwiftUI
 
-/// 下载管理页：总进度、分书队列、暂停/重试与下载设置。
+/// 下载管理页：总进度、分书书卡、暂停/重试与下载设置。
 ///
 /// ## U9-8：从「自带导航栏的独立页」变成「书架『本地』分组的内容视图」
 /// 全仓唯一调用点是 `BookshelfView.swift:54`。本视图现在：
@@ -24,12 +25,32 @@ import SwiftUI
 /// **翻转到 `.plain`**，与书架同源。层次 = 页面底（`Surface.page` 分组灰）
 /// → 卡（`Surface.card` 白）→ 卡内行。
 ///
-/// **每个「书」= 一个 `Section` = 一张卡**：同一 `Section` 内的章节行共享同一张卡
-/// （首行只圆上两角、末行只圆下两角、中间行直角，且上下行内边距为 0 ⇒ 视觉上合并），
-/// 而**不是每章一张白卡** —— 书架的隐喻是「一本书一张卡」，
-/// 每章一张白卡会让下载页明显偏重、与"融入书架"相反。
+/// ## U10：逐章任务行 → 书籍卡片
+/// owner 口径：本地页显示成**书籍卡片**，**已下载的章节不在队列里逐条列**
+/// （去书籍阅读界面的目录里看）。所以每本书只剩一张卡，进度与状态写在卡面上，
+/// 卡面观感与书架书卡同源，长按进选择模式（本地页自带一条批量操作栏）。
+/// 原先的「书名 header」（`DownloadBookHeader`）与逐章行（`DownloadTaskRow`）随之删除；
+/// 书卡与选择模式 UI 拆在 `DownloadBookCard.swift`。
+/// **队列级的东西照旧**：提示条、总进度（全部暂停 / 重试失败 / 验证后重试）都保留。
 struct DownloadQueueView: View {
     let store: StoreOf<DownloadFeature>
+
+    /// 单点书卡 → 直接进阅读页。落点决策与准备态都留在**书架那一层**
+    /// （阅读页 push 在书架的 `NavigationStack` 上，覆盖层与底栏显隐只有那一处所有者）。
+    let onOpenBook: (String) -> Void
+
+    /// 书封面的唯一来源：按 `bookPath` 从书库查（`BookCoverLoader`）。
+    @Dependency(\.bookCoverLoader) private var bookCoverLoader
+
+    /// `bookPath → coverUrl`。**不在 `body` 里逐卡查库**：随 `bookPaths` 变化拉一次，
+    /// 书卡只做内存查表 —— `List` 滚动时不再读库。
+    @State private var coverUrls: [String: String] = [:]
+
+    /// 待确认「删除下载」的书（非空即弹确认框）。
+    ///
+    /// 「删除下载」会连已下载正文一起清掉、不可逆，按 HIG §11 先确认一次
+    /// （书架批量删书同样是先确认再删）。
+    @State private var pendingDeletePaths: [String] = []
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -50,6 +71,37 @@ struct DownloadQueueView: View {
             .onAppear {
                 viewStore.send(.task)
             }
+            // 封面：队列里的书目变了才拉一次（一次读库；查不到的书回退占位块）。
+            .task(id: viewStore.bookPaths) {
+                let paths = viewStore.bookPaths
+                guard !paths.isEmpty else {
+                    coverUrls = [:]
+                    return
+                }
+                coverUrls = await (try? bookCoverLoader.load(paths)) ?? [:]
+            }
+            .confirmationDialog(
+                deleteDialogTitle,
+                isPresented: Binding(
+                    get: { !pendingDeletePaths.isEmpty },
+                    set: {
+                        if !$0 {
+                            pendingDeletePaths = []
+                        }
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("删除下载", role: .destructive) {
+                    viewStore.send(.deleteDownloads(pendingDeletePaths))
+                    pendingDeletePaths = []
+                }
+                Button("取消", role: .cancel) {
+                    pendingDeletePaths = []
+                }
+            } message: {
+                Text("会取消这些书的下载并删除已下载的正文；书架上的书会保留，可随时重新下载。")
+            }
         }
     }
 
@@ -61,125 +113,119 @@ struct DownloadQueueView: View {
         )
     }
 
+    /// 删除确认框的标题（由 `@State` 驱动，故单独成属性）。
+    private var deleteDialogTitle: String {
+        if pendingDeletePaths.count == 1 {
+            return "删除这本书的下载？"
+        }
+        return "删除选中的 \(pendingDeletePaths.count) 本书的下载？"
+    }
+
     private func queueList(
         _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
     ) -> some View {
-        List {
-            if let notice = viewStore.notice {
-                Section {
-                    DownloadNoticeRow(notice: notice) {
-                        viewStore.send(.noticeDismissed)
+        VStack(spacing: 0) {
+            if viewStore.isSelecting {
+                selectionBar(viewStore)
+            }
+
+            List {
+                if let notice = viewStore.notice {
+                    Section {
+                        DownloadNoticeRow(notice: notice) {
+                            viewStore.send(.noticeDismissed)
+                        }
+                        .downloadQueueCard()
                     }
-                    .downloadQueueCard()
+                }
+
+                DownloadSummarySection(
+                    progress: viewStore.progress,
+                    finishedCount: viewStore.finishedCount,
+                    queuedCount: viewStore.queuedCount,
+                    failedCount: viewStore.failedCount,
+                    blockedCount: viewStore.blockedCount,
+                    isPaused: viewStore.isPaused,
+                    onTogglePause: {
+                        viewStore.send(viewStore.isPaused ? .resumeAll : .pauseAll)
+                    },
+                    onRetryFailed: {
+                        viewStore.send(.retryFailed)
+                    },
+                    onRetryBlocked: {
+                        viewStore.send(.retryBlocked)
+                    }
+                )
+
+                ForEach(bookSummaries(from: viewStore.tasks, order: viewStore.bookPaths, covers: coverUrls)) { summary in
+                    bookCard(summary, viewStore: viewStore)
                 }
             }
-
-            DownloadSummarySection(
-                progress: viewStore.progress,
-                finishedCount: viewStore.finishedCount,
-                queuedCount: viewStore.queuedCount,
-                failedCount: viewStore.failedCount,
-                blockedCount: viewStore.blockedCount,
-                isPaused: viewStore.isPaused,
-                onTogglePause: {
-                    viewStore.send(viewStore.isPaused ? .resumeAll : .pauseAll)
-                },
-                onRetryFailed: {
-                    viewStore.send(.retryFailed)
-                },
-                onRetryBlocked: {
-                    viewStore.send(.retryBlocked)
-                }
-            )
-
-            ForEach(bookSections(from: viewStore.tasks)) { section in
-                bookSection(section, viewStore: viewStore)
-            }
+            .listStyle(.plain)
+            // 让 List 自己的滚动背景透出页面分组灰（与书架 `shelfList` 同一手法）。
+            .scrollContentBackground(.hidden)
         }
-        .listStyle(.plain)
-        // 让 List 自己的滚动背景透出页面分组灰（与书架 `shelfList` 同一手法）。
-        .scrollContentBackground(.hidden)
     }
 
-    /// 一本书 = 一个 `Section` = 一张卡（章节行合并；header 自成一张卡压在它上面）。
+    /// 选择模式下的批量操作栏（本地页自带；位置在分组栏下方、列表上方）。
     ///
     /// 单独成函数是为了压 `queueList` 的 `function_body_length`
     /// （SwiftLint warning 50 / error 60，判定严格 `>`）。
-    private func bookSection(
-        _ section: BookDownloadSection,
+    private func selectionBar(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> some View {
+        DownloadSelectionBar(
+            selectedCount: viewStore.selectedBookPaths.count,
+            isAllSelected: viewStore.areAllBooksSelected,
+            canPause: viewStore.canPauseSelectedBooks,
+            canRetryFailed: viewStore.canRetryFailedSelectedBooks,
+            onToggleSelectAll: {
+                viewStore.send(.toggleSelectAllBooks)
+            },
+            onPause: {
+                viewStore.send(.pauseSelectedBooks)
+            },
+            onDelete: {
+                pendingDeletePaths = Array(viewStore.selectedBookPaths)
+            },
+            onRetryFailed: {
+                viewStore.send(.retryFailedSelectedBooks)
+            },
+            onDone: {
+                viewStore.send(.selectionModeChanged(false))
+            }
+        )
+    }
+
+    /// 一本书一张卡（**不再渲染逐章任务行**）。
+    ///
+    /// 单独成函数同样是为了压 `queueList` 的 `function_body_length`。
+    private func bookCard(
+        _ summary: BookDownloadSummary,
         viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
     ) -> some View {
-        Section {
-            ForEach(section.tasks.indices, id: \.self) { index in
-                DownloadTaskRow(task: section.tasks[index])
-                    .downloadQueueCard(
-                        topRounded: index == 0,
-                        bottomRounded: index == section.tasks.count - 1
-                    )
+        DownloadBookCard(
+            summary: summary,
+            isSelecting: viewStore.isSelecting,
+            isSelected: viewStore.selectedBookPaths.contains(summary.id),
+            onToggleSelection: {
+                viewStore.send(.selectionToggled(summary.id))
+            },
+            onOpenBook: {
+                onOpenBook(summary.id)
+            },
+            onLongPress: {
+                // 再长按一次退出选择模式（与「完成」同一语义：`selectionModeChanged(false)`）。
+                viewStore.send(.selectionModeChanged(!viewStore.isSelecting))
+            },
+            onPause: {
+                viewStore.send(.pauseBook(summary.id))
+            },
+            onDelete: {
+                pendingDeletePaths = [summary.id]
             }
-        } header: {
-            DownloadBookHeader(section: section) {
-                viewStore.send(.pauseBook(section.id))
-            } onCancel: {
-                viewStore.send(.cancelBook(section.id))
-            }
-            .downloadQueueSectionHeaderCard()
-        }
-    }
-}
-
-// MARK: - U9-8 卡片装饰（与书架同源）
-
-private extension View {
-    /// 不成卡的行（系统控件 / 提示条）：清行底 + 隐藏分隔线 + 书架同款左右 16pt 页边距。
-    func downloadQueueRow(
-        top: CGFloat = DesignTokens.Spacing.xs,
-        bottom: CGFloat = DesignTokens.Spacing.xs
-    ) -> some View {
-        listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-            .listRowInsets(
-                .init(
-                    top: top,
-                    leading: DesignTokens.Spacing.md,
-                    bottom: bottom,
-                    trailing: DesignTokens.Spacing.md
-                )
-            )
-    }
-
-    /// 卡面（`Surface.card` + `Radius.sm`），圆角按「是不是 Section 的首 / 末行」取舍。
-    ///
-    /// 上下行内边距取 0 ⇒ 同一 `Section` 内相邻章节行的卡面直接相接，合并成一张卡；
-    /// 只有首行圆上两角、末行圆下两角，中间行走直角
-    /// （`UnevenRoundedRectangle` 支持逐角指定，iOS 17 起可用）。
-    func downloadQueueCard(
-        topRounded: Bool = true,
-        bottomRounded: Bool = true
-    ) -> some View {
-        padding(.horizontal, DesignTokens.Spacing.sm)
-            .padding(.vertical, DesignTokens.Spacing.xs)
-            .background(
-                AppTheme.Surface.card,
-                in: UnevenRoundedRectangle(
-                    topLeadingRadius: topRounded ? DesignTokens.Radius.sm : 0,
-                    bottomLeadingRadius: bottomRounded ? DesignTokens.Radius.sm : 0,
-                    bottomTrailingRadius: bottomRounded ? DesignTokens.Radius.sm : 0,
-                    topTrailingRadius: topRounded ? DesignTokens.Radius.sm : 0
-                )
-            )
-            .downloadQueueRow(top: 0, bottom: 0)
-    }
-
-    /// 每本书的 header 自成一张卡（四角全圆），压在它自己那张章节行卡之上。
-    func downloadQueueSectionHeaderCard() -> some View {
-        padding(.horizontal, DesignTokens.Spacing.sm)
-            .padding(.vertical, DesignTokens.Spacing.xs)
-            .background(
-                AppTheme.Surface.card,
-                in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-            )
-            .downloadQueueRow(top: 0, bottom: DesignTokens.Spacing.xs)
+        )
+        .downloadQueueCard()
     }
 }
 
@@ -288,120 +334,6 @@ private struct DownloadSummarySection: View {
     }
 }
 
-private struct DownloadBookHeader: View {
-    let section: BookDownloadSection
-    let onPause: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: DesignTokens.Spacing.sm) {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                Text(section.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text("\(section.finishedCount)/\(section.tasks.count) 章")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Menu {
-                Button(action: onPause) {
-                    Label("暂停本书", systemImage: "pause")
-                }
-                Button(role: .destructive, action: onCancel) {
-                    Label("取消本书下载", systemImage: "trash")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("本书下载操作")
-        }
-        .textCase(nil)
-    }
-}
-
-private struct DownloadTaskRow: View {
-    let task: DownloadTaskSnapshot
-
-    var body: some View {
-        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
-            Image(systemName: statusIcon)
-                .font(.body)
-                .foregroundStyle(statusColor)
-                .frame(minWidth: 22)
-
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                Text("\(task.chapterNumber). \(task.chapterName)")
-                    .font(.body)
-                    .lineLimit(1)
-
-                Text(statusTitle)
-                    .font(.caption)
-                    .foregroundStyle(statusColor)
-
-                if let message = task.lastError, task.state == .failed || task.blockedByGuard {
-                    Text(message)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-        }
-        .padding(.vertical, DesignTokens.Spacing.xxs)
-    }
-
-    private var statusTitle: String {
-        switch task.state {
-        case .queued:
-            "等待下载"
-        case .downloading:
-            "下载中"
-        case .paused:
-            task.blockedByGuard ? "需要验证" : "已暂停"
-        case .done:
-            "已下载"
-        case .failed:
-            "下载失败"
-        }
-    }
-
-    private var statusIcon: String {
-        switch task.state {
-        case .queued:
-            "clock"
-        case .downloading:
-            "arrow.down.circle.fill"
-        case .paused:
-            task.blockedByGuard ? "shield.lefthalf.filled" : "pause.circle"
-        case .done:
-            "checkmark.circle.fill"
-        case .failed:
-            "exclamationmark.circle.fill"
-        }
-    }
-
-    /// 状态色统一（§4 / §17）：进行中 = 强调色，已完成 = 系统绿，失败 = 系统红。
-    private var statusColor: Color {
-        switch task.state {
-        case .queued:
-            .secondary
-        case .downloading:
-            AppTheme.accent
-        case .done:
-            AppTheme.statusAdded
-        case .paused:
-            task.blockedByGuard ? AppTheme.statusAttention : .secondary
-        case .failed:
-            AppTheme.statusDanger
-        }
-    }
-}
-
 /// 下载设置页。
 ///
 /// ⚠️ 可见性是 `internal`（U9-8 起），**不是** `public`：入口已搬到
@@ -468,39 +400,6 @@ struct DownloadSettingsView: View {
         case .fast:
             "快速档不设间隔，可能触发网站限制，请谨慎使用。"
         }
-    }
-}
-
-private struct BookDownloadSection: Identifiable {
-    let id: String
-    let title: String
-    let tasks: [DownloadTaskSnapshot]
-
-    var finishedCount: Int {
-        tasks.filter { $0.state == .done }.count
-    }
-}
-
-private func bookSections(from tasks: [DownloadTaskSnapshot]) -> [BookDownloadSection] {
-    var order: [String] = []
-    var grouped: [String: [DownloadTaskSnapshot]] = [:]
-
-    for task in tasks {
-        if grouped[task.bookPath] == nil {
-            order.append(task.bookPath)
-        }
-        grouped[task.bookPath, default: []].append(task)
-    }
-
-    return order.compactMap { bookPath in
-        guard let bookTasks = grouped[bookPath], let first = bookTasks.first else {
-            return nil
-        }
-        return BookDownloadSection(
-            id: bookPath,
-            title: first.bookTitle,
-            tasks: bookTasks
-        )
     }
 }
 
@@ -578,6 +477,8 @@ private extension DownloadNetworkKind {
             )
         ) {
             DownloadFeature()
-        }
+        },
+        // 预览里不接阅读页：落点在书架那层，这里给一个空实现即可。
+        onOpenBook: { _ in }
     )
 }

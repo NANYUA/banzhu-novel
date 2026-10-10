@@ -61,6 +61,10 @@ enum ShelfLoaderLive {
                 coverUrl: book.coverUrl,
                 groupId: book.groupId,
                 lastReadChapterName: book.lastReadChapterName,
+                // 阅读落点（单点书卡直接进阅读页）靠这两个字段，与章名同在 `BookRecord` 上、
+                // 同一次读取即可拿到 ⇒ 调用方不必再为此读一次库。
+                lastReadChapterPath: book.lastReadChapterPath,
+                lastReadOffset: book.lastReadOffset,
                 latestChapterName: book.latestChapterName,
                 unreadCount: unreadCount(of: book, in: context),
                 lastReadAt: book.lastReadAt

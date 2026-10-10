@@ -9,8 +9,10 @@ import XCTest
 /// 换章后有没有把新的下一章接上（链式）。
 /// 判页那条边界规则（`PagePanTracking.turn`）与纯数学放在一起，见 `PagePanTrackingTests`。
 ///
-/// 样本：每章都是「章名 + 10 个中文」，宽预算 10 ⇒ **3 页**
-/// （`[0,6] [6,5] [10,4]`：章名 6 + 两个换行 2 + 1 个中文 2 = 满 10）。
+/// 样本：每章都是「章名 + 10 个中文」，宽预算 10 ⇒ **3 页**：
+/// `[0,6] [6,5] [11,4]` —— 章名宽 6 + 两个换行宽 2 + 1 个中文宽 2 = 满 10，
+/// 所以首页放 6 个字符、之后每页 5 个中文，页首偏移是 **0 / 6 / 11**
+/// （**别写死**：偏移一律从 `expectedPages(chapter:text:)` 推出来）。
 @MainActor
 final class ReaderChapterAdvanceTests: XCTestCase {
     // MARK: - 样本
@@ -87,12 +89,23 @@ final class ReaderChapterAdvanceTests: XCTestCase {
         }
     }
 
-    /// 把当前章推到最后一页（样本都是 3 页 ⇒ 两次 `nextPage`）。
+    /// 把当前章推到最后一页：**按分页结果逐页推进**，偏移一律取自 `pages`，不写死数字。
+    ///
+    /// 首页的宽度预算被章名（宽 6）与两个换行（宽 2）占掉大半 ⇒ 每页字符数并不均匀
+    /// （样本 3 页的页首偏移是 0 / 6 / 11）。写死偏移会在样本或度量一变就与真实分页脱钩。
+    ///
+    /// - Parameter pages: store **当前那一章**的期望分页（`expectedPages(chapter:text:)`）；
+    ///   传错章会在这里的前置断言上立刻红，而不是让后面的断言错得莫名其妙。
     private func advanceToLastPage(
-        _ store: TestStore<ReaderFeature.State, ReaderFeature.Action>
+        _ store: TestStore<ReaderFeature.State, ReaderFeature.Action>,
+        pages: [PageRange]
     ) async {
-        await store.send(.nextPage) { $0.currentOffset = 6 }
-        await store.send(.nextPage) { $0.currentOffset = 10 }
+        XCTAssertEqual(store.state.pages, pages, "前置条件：传进来的分页就是 store 当前那一章的")
+        XCTAssertGreaterThan(pages.count, 1, "前置条件：样本要分出多页，逐页推进才有意义")
+        for index in pages.indices.dropFirst() {
+            await store.send(.nextPage) { $0.currentOffset = pages[index].location }
+        }
+        XCTAssertEqual(store.state.currentPageIndex, pages.count - 1, "前置条件：已推到本章最后一页")
     }
 
     // MARK: - 1. 章尾换章
@@ -110,7 +123,7 @@ final class ReaderChapterAdvanceTests: XCTestCase {
             $0.nextText = Self.secondText
             $0.nextPages = secondPages
         }
-        await advanceToLastPage(store)
+        await advanceToLastPage(store, pages: expectedPages(chapter: Self.first, text: Self.firstText))
         XCTAssertEqual(store.state.currentPageIndex, 2, "前置条件：已在第 1 章最后一页")
         XCTAssertFalse(store.state.nextPages.isEmpty, "前置条件：下一章第 1 页已就绪")
 
@@ -180,7 +193,7 @@ final class ReaderChapterAdvanceTests: XCTestCase {
             options: StoreOptions(failing: [Self.second.path])
         )
         await loadFirst(store)
-        await advanceToLastPage(store)
+        await advanceToLastPage(store, pages: expectedPages(chapter: Self.first, text: Self.firstText))
 
         await store.send(.advanceChapter)
         await store.finish()
@@ -232,7 +245,7 @@ final class ReaderChapterAdvanceTests: XCTestCase {
             $0.nextPages = secondPages
         }
 
-        await advanceToLastPage(store)
+        await advanceToLastPage(store, pages: expectedPages(chapter: Self.first, text: Self.firstText))
         await store.send(.advanceChapter) {
             $0.chapterPath = Self.second.path
             $0.chapterName = Self.second.name
@@ -253,12 +266,24 @@ final class ReaderChapterAdvanceTests: XCTestCase {
         XCTAssertEqual(store.state.nextChapter?.path, Self.third.path)
         XCTAssertEqual(store.state.nextPages, thirdPages)
 
-        // 再推进一章：第 3 章是最后一章 ⇒ 换章 action 不动，也不再有预加载结果。
-        await advanceToLastPage(store)
+        // 再推进一章：第 2 章章尾 ⇒ 换到第 3 章（正文 / 章名 / 分页全换成第 3 章的）。
+        await advanceToLastPage(store, pages: secondPages)
+        await store.send(.advanceChapter) {
+            $0.chapterPath = Self.third.path
+            $0.chapterName = Self.third.name
+            $0.text = Self.thirdText
+            $0.pages = thirdPages
+            $0.currentOffset = 0
+            $0.nextText = ""
+            $0.nextPages = []
+        }
+
+        // 第 3 章是最后一章：到章尾再换 ⇒ 换章 action 不动，也不再有预加载结果。
+        await advanceToLastPage(store, pages: thirdPages)
         await store.send(.advanceChapter)
         await store.finish()
         XCTAssertEqual(store.state.chapterPath, Self.third.path)
-        XCTAssertEqual(store.state.currentOffset, 10)
+        XCTAssertEqual(store.state.currentOffset, thirdPages.last?.location, "不换章：位置停在章尾那一页")
         XCTAssertNil(store.state.nextChapter)
         XCTAssertTrue(store.state.nextPages.isEmpty)
     }
@@ -330,7 +355,7 @@ extension ReaderChapterAdvanceTests {
             $0.nextText = Self.secondText
             $0.nextPages = secondPages
         }
-        await advanceToLastPage(store)
+        await advanceToLastPage(store, pages: expectedPages(chapter: Self.first, text: Self.firstText))
         // 正常开章（`contentLoaded`）那一次已经记完；清空后只数换章这一次。
         await recorder.reset()
         let afterReset = await recorder.allRequests()
@@ -370,7 +395,8 @@ extension ReaderChapterAdvanceTests {
             })
         )
         await loadFirst(store)
-        await advanceToLastPage(store)
+        let firstPages = expectedPages(chapter: Self.first, text: Self.firstText)
+        await advanceToLastPage(store, pages: firstPages)
         await recorder.reset()
 
         await store.send(.advanceChapter)
@@ -378,7 +404,7 @@ extension ReaderChapterAdvanceTests {
 
         // 换章本身的既有口径不变：状态原地不动、不提示。
         XCTAssertEqual(store.state.chapterPath, Self.first.path)
-        XCTAssertEqual(store.state.currentOffset, 10)
+        XCTAssertEqual(store.state.currentOffset, firstPages.last?.location, "不换章：位置停在章尾那一页")
         XCTAssertNil(store.state.nextChapter)
         XCTAssertNil(store.state.errorMessage, "不提示：最后一章不产生任何错误文案")
         let requests = await recorder.allRequests()
@@ -396,7 +422,8 @@ private struct StoreOptions {
     var cache: (@Sendable (String, String, Int) async -> Void)?
 }
 
-/// 分页桩：宽预算 10 ⇒ 每页 5 个中文（`FakeMeasuring` 里中文宽 2、ASCII 宽 1）。
+/// 分页桩：宽预算 10 ⇒ 纯正文页每页 5 个中文（`FakeMeasuring` 里中文宽 2、ASCII 宽 1）；
+/// 首页被章名（宽 6）与两个换行（宽 2）占掉大半，只放得下 1 个中文 ⇒ 共 6 个字符。
 private let paginateWithBudgetTen: @Sendable (String, PaginationConfiguration) -> [PageRange] = { text, configuration in
     Paginator(measurer: FakeMeasuring(widthBudget: 10))
         .paginate(text: text, configuration: configuration)
