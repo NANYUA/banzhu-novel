@@ -78,6 +78,14 @@ private enum ReaderChromeMetrics {
     /// 否则「看得见点不着」。
     static let minTouchTarget: CGFloat = 44
 
+    /// 0.35 —— 到边界时（首章没有上一章 / 末章没有下一章）跳章按钮的**置灰**不透明度。
+    ///
+    /// 只挂 `.disabled(true)` 不够：本项目按钮走**自定义** `ButtonStyle`，系统不会替它降级外观，
+    /// 不显式调透明度就会「看着能点、点下去没反应」。0.35 取系统禁用态的量级
+    /// （栏内其他图标是一眼可分的实色），且它与 `.disabled` 叠加给出**两条**线索：
+    /// 亮度整体下降（看得见）+ VoiceOver 播报「不可用」（听得见）。
+    static let disabledOpacity: Double = 0.35
+
     /// 8 —— 栏内左右内边距（`DesignTokens.Spacing.xs`）：按钮自身已带 44pt 命中区，
     /// 这里只留「图标不贴屏幕边」的呼吸量。
     static let horizontalPadding = DesignTokens.Spacing.xs
@@ -112,6 +120,36 @@ private enum ReaderChromeMetrics {
     /// 17 与 18 的差别在图标上不可辨。
     static let iconFont: Font = .body.weight(.medium)
 
+    /// 1.35 —— `chevron.left` 的**光学补偿**缩放：只作用在上栏的返回箭头上
+    /// （经 `ReaderTopBar.iconButton` 传给文件作用域的 `chromeIconLabel`）。
+    ///
+    /// ## 为什么需要
+    /// `chevron.left`（细折线箭头）与 `ellipsis.circle`（外圆铺满字身）用**同一个** `iconFont` 时，
+    /// 墨迹高度天生不同 —— 字号一样，右边的圆圈看着明显更大。
+    ///
+    /// ## 1.35 的推导（⚠️ **估算值，需真机复核**）
+    /// - SF Pro 的 cap height ≈ **0.70 em**（capHeight 1443 / unitsPerEm 2048 ≈ 0.705）；
+    /// - `ellipsis.circle` 这类**圆形外框**符号按 cap height 绘制 ⇒ 墨迹高 ≈ 0.70 em；
+    /// - `chevron.left` 是细折线，墨迹高约在 x-height 量级 ⇒ 约 **0.52 em**
+    ///   （SF Pro x-height 1062 / 2048 ≈ 0.52）；
+    /// - 0.70 / 0.52 ≈ **1.346** ⇒ 取 **1.35**。
+    ///
+    /// ⚠️ **这两个墨迹比值没有官方数据**：SF Symbols 只公开 bounding box、不公开每个符号的
+    /// 墨迹（ink）框，Apple 也没公布「圆形符号按 cap height 绘制」这条规则 ——
+    /// 上面两条是照 SF Pro 的字体度量 + 符号与文字对齐的通行做法**估**出来的。
+    /// 真机上若仍能看出大小差，**只改这一个数**（这正是把它收成命名常量而不是魔数的原因）。
+    ///
+    /// ## Dynamic Type 下**不漂移**
+    /// `scaleEffect` 是**乘在文本样式之后**的固定比例：`.body` 先随 Dynamic Type 缩放，
+    /// 箭头再乘 1.35 ⇒ 两个图标在任何字号档位都保持 1.35 的墨迹高比。
+    /// （没选「给箭头换更大的文本样式（如 `.title3`）」正是因为它与 `.body` 的**缩放曲线不同**，
+    /// 默认字号下勉强对齐、AX 大字号下比例会漂移。）
+    ///
+    /// ## 与 44pt 命中区的关系
+    /// `scaleEffect` 是纯视觉变换，**不改变布局尺寸** —— 命中区仍是 `minTouchTarget`(44×44)。
+    /// 放大后的箭头墨迹（约 0.52 × 17pt × 1.35 ≈ 12pt 高）仍远在 44pt 命中区之内。
+    static let chevronOpticalScale: CGFloat = 1.35
+
     /// 下栏文字标签字体：`.caption2` 在默认内容尺寸下正好 **11pt**（HIG 标签栏文字标准），
     /// 且随 Dynamic Type 缩放 —— 同样是对设计稿固定 11pt 的「换成文本样式」适配。
     static let labelFont: Font = .caption2
@@ -124,6 +162,32 @@ private enum ReaderChromeMetrics {
         pressedScale: 0.97,
         shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
     )
+}
+
+// MARK: - 图标按钮的 label（唯一构建处）
+
+/// 控制栏**图标按钮 label** 的唯一构建处：上栏的「返回 / 更多」与下栏上方的「上一章 / 下一章」
+/// 全部走它 —— 字体、光学补偿、44pt 命中区、`contentShape`、无障碍标签的施加方式**只有这一处**。
+///
+/// - `systemImage`：SF Symbol 名。
+/// - `a11yLabel`：无障碍标签。施加在 **label** 上而不是各控件上：`Button` / `Menu` 都会聚合
+///   自身 label 的无障碍信息，两种写法等效，写在 label 上才能做到「只有一处」。
+/// - `opticalScale`：抹平符号**墨迹大小**的先天差异，只给细箭头传非 1 值，
+///   取值与推导见 `ReaderChromeMetrics.chevronOpticalScale`。默认 1 = 不补偿。
+private func chromeIconLabel(
+    _ systemImage: String,
+    a11yLabel: String,
+    opticalScale: CGFloat = 1
+) -> some View {
+    Image(systemName: systemImage)
+        .font(ReaderChromeMetrics.iconFont)
+        .scaleEffect(opticalScale)
+        .frame(
+            minWidth: ReaderChromeMetrics.minTouchTarget,
+            minHeight: ReaderChromeMetrics.minTouchTarget
+        )
+        .contentShape(Rectangle())
+        .accessibilityLabel(a11yLabel)
 }
 
 // MARK: - 玻璃背景
@@ -189,7 +253,12 @@ private struct ReaderTopBar: View {
                 .padding(.horizontal, ReaderChromeMetrics.titleSideReserve)
 
             HStack(spacing: 0) {
-                iconButton("返回", systemImage: "chevron.left", action: onBack)
+                iconButton(
+                    "返回",
+                    systemImage: "chevron.left",
+                    opticalScale: ReaderChromeMetrics.chevronOpticalScale,
+                    action: onBack
+                )
                 Spacer(minLength: 0)
                 moreMenu
             }
@@ -209,39 +278,111 @@ private struct ReaderTopBar: View {
     }
 
     /// 图标按钮：视觉图标可小于 44pt，命中区按 HIG 补足。
+    /// label 与 `moreMenu`（以及下栏上方的跳章按钮）**共用** `chromeIconLabel` —— 字体、
+    /// 光学补偿、44pt 命中区、`contentShape`、无障碍标签的施加方式只有那一处，两侧不会漂移。
     private func iconButton(
         _ label: String,
         systemImage: String,
+        opticalScale: CGFloat = 1,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(ReaderChromeMetrics.iconFont)
-                .frame(
-                    minWidth: ReaderChromeMetrics.minTouchTarget,
-                    minHeight: ReaderChromeMetrics.minTouchTarget
-                )
-                .contentShape(Rectangle())
+            chromeIconLabel(systemImage, a11yLabel: label, opticalScale: opticalScale)
         }
-        .accessibilityLabel(label)
     }
 
-    /// 右上角「更多」菜单。命中区与按下反馈与图标按钮**完全一致**
-    /// （同样的 44pt 命中区、同样的 `PressableCardButtonStyle`，由外层 `.buttonStyle` 统一施加）。
+    /// 右上角「更多」菜单。命中区与按下反馈与左侧返回按钮**逐值一致**：
+    /// 同一个 `chromeIconLabel`（⇒ 同一个 44pt 命中区 / `contentShape` / 字体 / 无障碍施加方式）、
+    /// 同一个 `PressableCardButtonStyle`。
+    ///
+    /// 菜单**内容原样保留**（一条置灰的占位项），不换成别的控件 —— 本轮只统一外观与命中区。
     private var moreMenu: some View {
         Menu {
             Button("更多选项待添加") {}
                 .disabled(true)
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(ReaderChromeMetrics.iconFont)
-                .frame(
-                    minWidth: ReaderChromeMetrics.minTouchTarget,
-                    minHeight: ReaderChromeMetrics.minTouchTarget
-                )
-                .contentShape(Rectangle())
+            chromeIconLabel("ellipsis.circle", a11yLabel: "更多")
         }
-        .accessibilityLabel("更多")
+        // 显式再挂一次按下反馈。外层 `ZStack` 已经把**同一个** `buttonStyle` 注入环境，
+        // 所以「`Menu` 读环境里的 `ButtonStyle`」时这一句是等价重复（无副作用）；
+        // 而万一 `Menu` 的 label 走自己的 `MenuStyle` 样式链、不读环境里的 `ButtonStyle`，
+        // 这里就是唯一可能生效的挂点 —— 故显式写上，不依赖外层那一次。
+        //
+        // ⚠️ **未验证**：本机没有 Xcode / 模拟器，无法确认 `Menu` 是否吃 `ButtonStyle`。
+        // 若真机上「更多」按下仍无强调层，下一步是给 `Menu` 的 label 自绘按下态，
+        // **不换控件**（`Menu` 承载既有「更多」入口）。
+        .buttonStyle(ReaderChromeMetrics.buttonStyle)
+    }
+}
+
+// MARK: - 章节跳转条
+
+/// 下栏**正上方**的章节跳转条：左端「上一章」、右端「下一章」，中间留空。
+///
+/// ## 几何
+/// - **宽度**：与上栏 / 下栏同宽 —— 三者都在 `ReaderChromeOverlay` 的同一个 `VStack` 里，
+///   共用同一份左右安全区内缩与 `ReaderChromeMetrics.horizontalPadding`。
+/// - **高度**：`minTouchTarget`(44)，与上栏等高。**是 `minHeight` 不是固定高度**：
+///   Dynamic Type 长大时条与玻璃一起变高（与上下栏同一处理）。
+/// - **位置**：紧贴下栏上方，中间留 `DesignTokens.Spacing.xs`(8pt) 的空隙 ——
+///   两条玻璃**各自独立**（各有自己的 0.5pt 边缘线与柔影），8pt 间隙让「这是另一条」一眼可辨；
+///   两条的玻璃语言逐值同源（都走 `ReaderChromeGlass`）。
+///
+/// ## 为什么用 `edge: .bottom`
+/// 本条的内容（图标）在条**上方**，与下栏同侧 ⇒ 用同一条边语义：边缘线朝上、
+/// 柔影向上扩散、羽化朝上淡出。刻意**不**加 `.ignoresSafeArea`：这条玻璃不贴屏幕边，
+/// 只在安全区内浮着（铺到屏幕外的只有上栏与下栏）。
+///
+/// ## 显隐
+/// 本视图**没有**自己的显隐开关：它装在 `ReaderChromeOverlay` 里，由 `ReaderView.body` 那一个
+/// `if isChromeVisible` 与上下栏一起进出 ⇒ 「跟控制栏一起显隐」在结构上无法分叉。
+/// 它是叠加层的一部分，**不占正文布局**：显隐不改变正文分页与阅读位置。
+///
+/// ## 符号选择
+/// `backward.end` / `forward.end`（上一首 / 下一首的通用字形）而不是 `chevron.left/right`：
+/// 一是上栏的「返回」已经占用 `chevron.left`，重复会让两个不同动作长得一样；
+/// 二是这两个符号的墨迹铺满字身（实心三角 + 竖条），不会重演上栏「细箭头看着小」的问题，
+/// 左右互为镜像 ⇒ 两者之间**不需要**光学补偿。
+private struct ReaderChapterJumpBar: View {
+    let style: ReaderChromeStyle
+    /// 相邻章节；`nil` = 到边界（首章的上一章 / 末章的下一章），对应按钮置灰。
+    let previousChapter: ChapterItem?
+    let nextChapter: ChapterItem?
+    var onJumpToChapter: (ChapterItem) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            jumpButton("上一章", systemImage: "backward.end", chapter: previousChapter)
+            Spacer(minLength: 0)
+            jumpButton("下一章", systemImage: "forward.end", chapter: nextChapter)
+        }
+        .buttonStyle(ReaderChromeMetrics.buttonStyle)
+        .foregroundStyle(style.foreground)
+        .frame(minHeight: ReaderChromeMetrics.minTouchTarget)
+        .padding(.horizontal, ReaderChromeMetrics.horizontalPadding)
+        .frame(maxWidth: .infinity)
+        .background {
+            ReaderChromeGlass(style: style, edge: .bottom)
+        }
+    }
+
+    /// 单侧跳章按钮。`chapter == nil` ⇒ 到边界：`.disabled(true)` + 置灰（见 `disabledOpacity`）。
+    ///
+    /// `.disabled` 同时做三件事：命中测试关掉（不会「看着灰还能点」）、
+    /// VoiceOver 播报「不可用」、自定义 `ButtonStyle` 不再收到按下事件 ⇒ 不会有按下反馈。
+    private func jumpButton(
+        _ label: String,
+        systemImage: String,
+        chapter: ChapterItem?
+    ) -> some View {
+        Button {
+            guard let chapter else { return }
+            onJumpToChapter(chapter)
+        } label: {
+            chromeIconLabel(systemImage, a11yLabel: label)
+        }
+        .disabled(chapter == nil)
+        .opacity(chapter == nil ? ReaderChromeMetrics.disabledOpacity : 1)
     }
 }
 
@@ -317,12 +458,17 @@ struct ReaderChromeOverlay: View {
     let chapterTitle: String
     /// 当前安全区（由 `ReaderView` 的 `GeometryReader` 提供）。
     let safeAreaInsets: EdgeInsets
+    /// 相邻章节（`ReaderFeature.State` 的派生属性）：`nil` = 到边界，跳章条据此置灰。
+    let previousChapter: ChapterItem?
+    let nextChapter: ChapterItem?
 
     var onBack: () -> Void
     var onContents: () -> Void
     var onDownload: () -> Void
     var onSearch: () -> Void
     var onSettings: () -> Void
+    /// 跳章：上一章 / 下一章**共用**一个闭包（两侧都走既有的 `loadChapterWithName` 正常加载路径）。
+    var onJumpToChapter: (ChapterItem) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -338,6 +484,17 @@ struct ReaderChromeOverlay: View {
 
             Spacer(minLength: 0)
 
+            // 章节跳转条：贴在下栏上方 8pt（`DesignTokens.Spacing.xs`）。
+            // 转场与下栏同向（自下 8pt 滑入）：它与下栏是一起从屏幕底部进来的。
+            ReaderChapterJumpBar(
+                style: style,
+                previousChapter: previousChapter,
+                nextChapter: nextChapter,
+                onJumpToChapter: onJumpToChapter
+            )
+            .padding(.bottom, DesignTokens.Spacing.xs)
+            .transition(.chromeBar(edge: .bottom, reduceMotion: reduceMotion))
+
             ReaderBottomBar(
                 style: style,
                 onContents: onContents,
@@ -350,7 +507,7 @@ struct ReaderChromeOverlay: View {
         }
         .padding(.leading, safeAreaInsets.leading)
         .padding(.trailing, safeAreaInsets.trailing)
-        // 两条栏各自带方向相反的转场；容器自己不再叠一层淡入，否则淡入会叠成两层。
+        // 三条栏各自带方向相反的转场；容器自己不再叠一层淡入，否则淡入会叠成两层。
         .transition(.identity)
     }
 }

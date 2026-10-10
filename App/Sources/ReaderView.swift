@@ -118,11 +118,23 @@ struct ReaderView: View {
                             style: ReaderChromeStyle.make(page: pageColor),
                             chapterTitle: viewStore.chapterName,
                             safeAreaInsets: geometry.safeAreaInsets,
+                            previousChapter: viewStore.previousChapter,
+                            nextChapter: viewStore.nextChapter,
                             onBack: { dismiss() },
                             onContents: { isShowingDirectory = true },
                             onDownload: { downloadCurrentChapter(viewStore) },
                             onSearch: { isShowingSearch = true },
-                            onSettings: { isShowingSettings = true }
+                            onSettings: { isShowingSettings = true },
+                            // 上一章 / 下一章走**同一条**既有加载路径，而不是 `.advanceChapter`：
+                            // `loadChapterWithName` 会重置到章首 offset 0、作废旧的下一章预加载、
+                            // 写进度并触发后续章节自动缓存；`.advanceChapter` 只服务「章尾左滑」，
+                            // 它 `guard !nextPages.isEmpty` —— 没预加载完就什么都不做，
+                            // 按钮会显得「点了没反应」。所以这里不新增 action。
+                            onJumpToChapter: { chapter in
+                                viewStore.send(
+                                    .loadChapterWithName(chapter.path, chapter.name)
+                                )
+                            }
                         )
                     }
                 }

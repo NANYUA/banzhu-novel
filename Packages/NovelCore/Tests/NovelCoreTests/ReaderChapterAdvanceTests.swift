@@ -149,6 +149,27 @@ final class ReaderChapterAdvanceTests: XCTestCase {
         XCTAssertEqual(store.state.chapterPath, Self.first.path)
     }
 
+    // MARK: - 2b. 相邻章派生（上一章 / 下一章）
+
+    /// `previousChapter` 与 `nextChapter` 是同一份 `chapters` + `chapterPath` 的派生：
+    /// 中间章两侧都有、**首章没有上一章**、**末章没有下一章**。
+    /// 下栏上方的跳章按钮直接用这两个 `nil` 决定置灰，边界必须在这里锁死。
+    func test相邻章派生在首末两端为空() {
+        let chapters = [Self.first, Self.second, Self.third]
+
+        let middleState = ReaderFeature.State(chapterPath: Self.second.path, chapters: chapters)
+        XCTAssertEqual(middleState.previousChapter?.path, Self.first.path, "中间章两侧都有")
+        XCTAssertEqual(middleState.nextChapter?.path, Self.third.path, "中间章两侧都有")
+
+        let firstState = ReaderFeature.State(chapterPath: Self.first.path, chapters: chapters)
+        XCTAssertNil(firstState.previousChapter, "首章没有上一章 ⇒ 「上一章」置灰")
+        XCTAssertEqual(firstState.nextChapter?.path, Self.second.path)
+
+        let lastState = ReaderFeature.State(chapterPath: Self.third.path, chapters: chapters)
+        XCTAssertEqual(lastState.previousChapter?.path, Self.second.path)
+        XCTAssertNil(lastState.nextChapter, "末章没有下一章 ⇒ 「下一章」置灰")
+    }
+
     // MARK: - 3. 拿不到下一章时安静失败
 
     /// 下一章正文读失败 ⇒ 状态不变、不报错（`finish()` 同时证明没有冒出 `loadFailed`）。
@@ -376,8 +397,7 @@ private struct StoreOptions {
 }
 
 /// 分页桩：宽预算 10 ⇒ 每页 5 个中文（`FakeMeasuring` 里中文宽 2、ASCII 宽 1）。
-private let paginateWithBudgetTen: @Sendable (String, PaginationConfiguration) -> [PageRange] = {
-    text, configuration in
+private let paginateWithBudgetTen: @Sendable (String, PaginationConfiguration) -> [PageRange] = { text, configuration in
     Paginator(measurer: FakeMeasuring(widthBudget: 10))
         .paginate(text: text, configuration: configuration)
 }

@@ -363,6 +363,18 @@ public extension ReaderFeature.State {
         return chapters[index + 1]
     }
 
+    /// 上一章；当前是第一章、或列表里找不到当前章时为 `nil`。
+    ///
+    /// 与 `nextChapter` **同源同写法**（同一份 `chapters` + `chapterPath` 派生，同样
+    /// 换章后自动指向新的上一章）。App 的「上一章」按钮用它决定是否置灰 ——
+    /// 与「下一章」用同一条判据，两侧不会出现一个能点、一个不能点的分叉。
+    var previousChapter: ChapterItem? {
+        guard let index = chapters.firstIndex(where: { $0.path == chapterPath }),
+              chapters.indices.contains(index - 1)
+        else { return nil }
+        return chapters[index - 1]
+    }
+
     /// 下一章的渲染文本（与 `displayText` 同一合成规则）。
     var nextDisplayText: String {
         guard let next = nextChapter else { return "" }
