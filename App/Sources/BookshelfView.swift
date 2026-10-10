@@ -72,6 +72,8 @@ struct BookshelfView: View {
                             shelfList(viewStore)
                         }
                     }
+                    // 自撑满：ZStack 只剩 `emptyState` 一个子视图时不能跟着 CUV 缩水，否则分组栏会被整体居中。
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`），
                 // 两者形成一级层次。分组栏、加载 / 空 / 错误态透出页面色；

@@ -18,6 +18,8 @@ struct DownloadQueueView: View {
                         queueList(viewStore)
                     }
                 }
+                // 先显式撑满再铺底：`Group` 布局透明，`.background` 只覆盖被修饰视图的 frame，而空态是裸 CUV。
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // U1-1：空态与列表态共用同一张页面底（`AppTheme.Surface.page`）。
                 // 挂在 `Group` 上而不是只给 `emptyState` 单独刷一层：两条分支只有一处真相源，日后不会漂移。
                 .background(AppTheme.Surface.page)
