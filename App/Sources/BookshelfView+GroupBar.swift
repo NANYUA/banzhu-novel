@@ -153,5 +153,8 @@ private struct GroupChip: View {
         }
         // 强调层贴胶囊轮廓，避免按下瞬间两端露出方角（U0-4）。
         .buttonStyle(PressableCardButtonStyle(pressedScale: 0.96, shape: AnyShape(Capsule())))
+        // 选中语义交给 Button 的 `.isSelected` trait（照抄 `BookshelfView` 编辑态行的形式）：
+        // 「全部」/「本地」/ 用户分组共用这一处，VoiceOver 才读得出「当前选中」。
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

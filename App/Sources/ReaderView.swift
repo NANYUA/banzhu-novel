@@ -119,7 +119,6 @@ struct ReaderView: View {
             .navigationTitle("")
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
-            .toolbar(.hidden, for: .tabBar)
             .sheet(isPresented: $isShowingSettings) {
                 ReaderSettingsView(
                     configuration: viewStore.config,

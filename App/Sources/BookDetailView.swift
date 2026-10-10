@@ -93,7 +93,6 @@ struct BookDetailView: View {
             .background(AppTheme.Surface.page)
             .navigationTitle("书籍详情")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .tabBar)
             .toolbar { siteToolbarItem(viewStore) }
             .navigationDestination(isPresented: $isShowingReader) {
                 readerDestination(viewStore)

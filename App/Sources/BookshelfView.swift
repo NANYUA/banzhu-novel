@@ -87,11 +87,19 @@ struct BookshelfView: View {
                 // 白底只留给列表里的行卡片本身。
                 .background(AppTheme.Surface.page)
                 .navigationTitle("书架")
-                // 从详情页 pop 回本页后底栏必须回来：详情页有意
-                // `.toolbar(.hidden, for: .tabBar)`，而那是被 push 视图上的偏好，
-                // pop 回根视图后可能残留。全仓只有「隐藏」没有「恢复」，
-                // 所以根视图在这里显式声明一次「底栏可见」。
-                .toolbar(.visible, for: .tabBar)
+                // 底栏（tabBar）可见性的**唯一所有者**就是每个 tab 根视图，且由状态驱动：
+                // 详情页 / 阅读页都不再自己声明底栏，泄漏在构造上不可能发生。
+                // 两种偏好解析模型下行为都正确 ——
+                // · 若「根视图声明胜出」：push 详情期间根的状态是 `.hidden` ⇒ 详情页没有底栏；
+                //   回到根时状态翻回 `.visible` ⇒ 底栏可靠恢复；
+                // · 若「最上层声明胜出」：被 push 的视图不再声明，最上层声明者就是根 ⇒ 同样按状态走。
+                .toolbar(isShowingDetail ? .hidden : .visible, for: .tabBar)
+                // 同屏两条导航栏：「本地」分组的内容是自带 `NavigationStack` 的 `DownloadQueueView`，
+                // 外层这层再画一条就成了两条。本地态隐藏**外层**导航栏，让内层（「下载」标题 + 齿轮）
+                // 占据顶部；分组胶囊栏在 `body` 里、不在导航栏里，所以仍然可见，用户随时能切回「全部」。
+                // 批量操作工具栏在本地态被一起隐藏是对的 —— 本地态没有书目可多选。
+                // `.navigationBar` 与上面的 `.tabBar` 是两个独立的 `ToolbarPlacement`，可并存。
+                .toolbar(viewStore.showsLocalGroup ? .hidden : .visible, for: .navigationBar)
                 .onAppear { viewStore.send(.onAppear) }
                 .navigationDestination(isPresented: $isShowingDetail) {
                     if let row = detailRow {

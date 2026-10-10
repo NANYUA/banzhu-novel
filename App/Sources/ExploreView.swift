@@ -57,12 +57,11 @@ public struct ExploreView: View {
                 // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`）。
                 .background(AppTheme.Surface.page)
                 .navigationTitle("书城")
-                // 从详情页 pop 回本页后底栏必须回来：详情页有意
-                // `.toolbar(.hidden, for: .tabBar)`，而那是被 push 视图上的偏好，
-                // pop 回根视图后可能残留。全仓只有「隐藏」没有「恢复」，
-                // 所以根视图在这里显式声明一次「底栏可见」
-                // （照抄 `BookshelfView.swift:83-87` / `SearchView.swift:41-44`）。
-                .toolbar(.visible, for: .tabBar)
+                // 底栏可见性的**唯一所有者**就是每个 tab 根视图（同 `BookshelfView` / `SearchView`），
+                // 由状态驱动。push 详情期间根的状态是 `.hidden` ⇒ 详情页没有底栏；pop 回根时
+                // 翻回 `.visible` ⇒ 底栏可靠恢复。详情页自己不再声明底栏，所以「根视图声明胜出」
+                // 与「最上层声明胜出」两种偏好解析模型下行为一致。
+                .toolbar(isShowingDetail ? .hidden : .visible, for: .tabBar)
                 // 每次出现都发 `.task`：reducer 内部对「已在加载中」做了去重，
                 // 所以 pop 回来重复触发不会打两次首页（见 `ExploreFeature` 的 `.task` 分支）。
                 .onAppear { viewStore.send(.task) }
