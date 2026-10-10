@@ -232,13 +232,43 @@ struct ReaderSettingsView: View {
         }
         // §9 按下反馈：`.plain` 按下零反馈；强调层按 `Spacing.xs`(8) 内缩
         // （44 − 2×8 = 28）贴住这个 28pt 色块自身的圆，不在 44pt 命中框里铺成大圆盘。
-        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Circle().inset(by: DesignTokens.Spacing.xs))))
+        //
+        // 强调层颜色必须**对比度感知**：色块有纯白 / 纯黑两档，`custom` 还是任意色。
+        // 样式默认的 `Color.primary` 跟的是**明暗外观**（浅色下黑、深色下白），
+        // 深色下压在纯白块、浅色下压在纯黑块时就与色块同色 —— 不透明度调多大都看不见。
+        // 这里改成跟**色块自身亮度**走（见 `swatchHighlightColor`）：亮块配黑、暗块配白，
+        // 强调层与色块因此**永远不同色**，且与当前是浅色还是深色外观无关。
+        .buttonStyle(
+            PressableCardButtonStyle(
+                shape: AnyShape(Circle().inset(by: DesignTokens.Spacing.xs)),
+                pressedHighlightColor: swatchHighlightColor(for: style)
+            )
+        )
         .accessibilityLabel(style.displayName)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
 private extension ReaderSettingsView {
+    /// 按下强调层的颜色：按色块自身的亮度配一个**反色**。
+    ///
+    /// 复用「文字颜色 = 跟随背景」那条既有规则（`ReaderAppearance.swift` 的
+    /// `UIColor.isLightBackground`，阈值 0.6）：亮色块得到黑、暗色块得到白。
+    /// 于是既不新增色值，也不另立一个亮度阈值（全仓只有一个亮度真相源）。
+    /// 纯黑块不可能被判成亮色而配黑，纯白块也不可能被判成暗色而配白，
+    /// 所以有效色块范围内强调层与色块**永远不会重合**。
+    ///
+    /// 放 extension 里：`type_body_length` 不统计 extension，而主类型 body 本就贴着门槛。
+    private func swatchHighlightColor(for style: ReadingBackgroundStyle) -> Color {
+        let background = style.uiColor(custom: configuration.customBackgroundColor)
+        return Color(
+            uiColor: ReadingTextColorMode.automatic.uiColor(
+                on: background,
+                custom: configuration.customBackgroundColor
+            )
+        )
+    }
+
     func binding<Value>(
         _ keyPath: WritableKeyPath<PaginationConfiguration, Value>
     ) -> Binding<Value> {

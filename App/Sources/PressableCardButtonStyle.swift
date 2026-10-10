@@ -12,6 +12,10 @@ import SwiftUI
 /// - 按下：轻微缩小 + 叠一层**可见**的强调层（`Color.primary.opacity(0.12)`）；抬手复原。
 /// - 强调层用 `Color.primary` 而不是硬编码灰：浅色模式下它是黑（压暗白卡），
 ///   深色模式下它是白（提亮深色卡），两种外观下都有可感知的对比。
+/// - ⚠️ 上面这条默认值成立的前提是「元素底色与 `Color.primary` **不同色**」。
+///   底色本身就是纯白 / 纯黑时（阅读背景色块正是这种情形），`Color.primary` 会与底色同色，
+///   **任何不透明度都叠不出来**；那种调用点用 `pressedHighlightColor` 传反色语义色，
+///   不要改动这里的默认值。
 /// - 强度 0.12 ≈ 系统 `systemFill` 量级：浅色下白卡 `#FFFFFF` → `#E0E0E0`，
 ///   一眼能看出「按下了」，又不至于像禁用态。
 /// - `shape` 只用来把强调层贴齐元素自身轮廓，否则按下瞬间会在圆角 / 胶囊外露出方角。
@@ -35,12 +39,21 @@ struct PressableCardButtonStyle: ButtonStyle {
     /// 按下强调层的不透明度。低于约 0.08 就开始「看不见」了，别调太小。
     var pressedHighlightOpacity: Double = 0.12
 
+    /// 按下强调层的颜色。默认 `Color.primary` —— 既有调用点（书卡行、分组 / 分类胶囊、
+    /// 通知关闭按钮）的观感与改造前**逐字不变**。
+    ///
+    /// 只有当元素**自身底色**可能与 `Color.primary` 同色时才需要传别的语义色
+    /// （纯白 / 纯黑色块在相反外观下就是这种情形）：同色叠加时，不透明度调到多少都看不见。
+    /// 传值请用语义色（`Color.primary` / `Color(.systemBackground)` 等），不写死色值。
+    var pressedHighlightColor: Color = .primary
+
     func makeBody(configuration: Configuration) -> some View {
         PressableLabel(
             configuration: configuration,
             pressedScale: pressedScale,
             shape: shape,
-            highlightOpacity: pressedHighlightOpacity
+            highlightOpacity: pressedHighlightOpacity,
+            highlightColor: pressedHighlightColor
         )
     }
 
@@ -49,6 +62,7 @@ struct PressableCardButtonStyle: ButtonStyle {
         let pressedScale: CGFloat
         let shape: AnyShape
         let highlightOpacity: Double
+        let highlightColor: Color
 
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -59,7 +73,7 @@ struct PressableCardButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .overlay {
-                    shape.fill(Color.primary.opacity(isPressed ? highlightOpacity : 0))
+                    shape.fill(highlightColor.opacity(isPressed ? highlightOpacity : 0))
                 }
                 .scaleEffect(reduceMotion || !isPressed ? 1 : pressedScale)
                 .animation(
