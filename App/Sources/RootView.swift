@@ -4,10 +4,15 @@ import SwiftUI
 
 /// App 入口界面。
 ///
-/// 当前提供书架、搜索与下载三个入口，搜索加书成功后即时同步书架状态。
+/// 当前提供书架、书城、搜索、下载与设置五个入口，
+/// 搜索 / 书城加书成功后即时同步书架状态。
 struct RootView: View {
     @State private var bookshelfStore = Store(initialState: BookshelfFeature.State()) {
         BookshelfFeature()
+    }
+
+    @State private var exploreStore = Store(initialState: ExploreFeature.State()) {
+        ExploreFeature()
     }
 
     @State private var searchStore = Store(initialState: SearchFeature.State()) {
@@ -33,6 +38,22 @@ struct RootView: View {
                     .tabItem {
                         Label("书架", systemImage: "books.vertical")
                     }
+
+                ExploreView(
+                    store: exploreStore,
+                    downloadStore: downloadStore,
+                    onBookAdded: { row in
+                        bookshelfStore.send(.addSucceeded(row))
+                    },
+                    onBookRemoved: { bookPath in
+                        // 详情页（从书城进入）移出书架后，书架列表也要立刻摘掉这一行。
+                        // 与搜索 tab 走同一条同步路径，不新造单本移除的状态迁移。
+                        bookshelfStore.send(.booksDeleted([bookPath]))
+                    }
+                )
+                .tabItem {
+                    Label("书城", systemImage: "square.grid.2x2")
+                }
 
                 SearchView(
                     store: searchStore,
