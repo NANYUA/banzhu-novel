@@ -214,7 +214,7 @@ struct SearchView: View {
         _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
     ) -> some View {
         if let notice = viewStore.notice {
-            HStack(spacing: 12) {
+            HStack(spacing: DesignTokens.Spacing.sm) {
                 Text(notice)
                     .font(.subheadline)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -230,12 +230,12 @@ struct SearchView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("关闭提示")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, DesignTokens.Spacing.md)
+            .padding(.vertical, DesignTokens.Spacing.sm)
             .background(.regularMaterial)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            .padding(.horizontal, DesignTokens.Spacing.md)
+            .padding(.bottom, DesignTokens.Spacing.xs)
         }
     }
 }
@@ -248,11 +248,11 @@ private struct SearchResultRow: View {
     let onAdd: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DesignTokens.Spacing.sm) {
             // 🔴 整卡跳详情用 `Button` + 外层显式 push，不用 `NavigationLink`：
             // List 行里的 NavigationLink 会接管整行，行尾的「加入书架」会被一起吞掉。
             Button(action: onOpen) {
-                HStack(spacing: 12) {
+                HStack(spacing: DesignTokens.Spacing.sm) {
                     RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
                         .fill(AppTheme.Surface.inset)
                         .frame(width: 48, height: 64)
@@ -261,7 +261,7 @@ private struct SearchResultRow: View {
                                 .foregroundStyle(.quaternary)
                         }
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                         Text(book.title)
                             .font(.headline)
                             .lineLimit(1)
@@ -271,7 +271,7 @@ private struct SearchResultRow: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
 
-                        HStack(spacing: 8) {
+                        HStack(spacing: DesignTokens.Spacing.xs) {
                             if !book.wordCount.isEmpty {
                                 Text(book.wordCount)
                             }
@@ -296,7 +296,7 @@ private struct SearchResultRow: View {
 
             shelfAction
         }
-        .padding(12)
+        .padding(DesignTokens.Spacing.sm)
         .contentShape(Rectangle())
         // U1-1：卡面 = 白（`AppTheme.Surface.card`），压在页面的分组灰底上形成一级层次；
         // 圆角统一 `DesignTokens.Radius.sm` = 12。

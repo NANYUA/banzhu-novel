@@ -51,7 +51,7 @@ struct BookshelfView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else if let message = viewStore.errorMessage, viewStore.rows.isEmpty {
                             // 加载失败 + 无数据 → 显示错误 + 重试
-                            VStack(spacing: 16) {
+                            VStack(spacing: DesignTokens.Spacing.md) {
                                 Text("加载失败")
                                     .font(.title3.bold())
                                 Text(message)
@@ -178,7 +178,7 @@ private extension BookshelfView {
         _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
     ) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: DesignTokens.Spacing.xs) {
                 GroupChip(
                     title: "全部",
                     isSelected: viewStore.selectedGroupID == nil
@@ -215,8 +215,8 @@ private extension BookshelfView {
                 }
                 .accessibilityLabel("新建分组")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, DesignTokens.Spacing.md)
+            .padding(.vertical, DesignTokens.Spacing.xs)
         }
     }
 
@@ -241,8 +241,8 @@ private extension BookshelfView {
             .buttonStyle(.plain)
             .accessibilityLabel("关闭提示")
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(.horizontal, DesignTokens.Spacing.md)
+        .padding(.bottom, DesignTokens.Spacing.xs)
     }
 
     @ToolbarContentBuilder
@@ -339,7 +339,7 @@ private extension BookshelfView {
             Button {
                 viewStore.send(.selectionToggled(row.bookPath))
             } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: DesignTokens.Spacing.sm) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
                         .foregroundStyle(isSelected ? AppTheme.accent : Color.secondary)
@@ -414,7 +414,7 @@ private struct BookRow: View {
     let row: ShelfRow
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DesignTokens.Spacing.sm) {
             // 封面
             AsyncImage(url: URL(string: row.coverUrl)) { phase in
                 switch phase {
@@ -468,7 +468,7 @@ private struct BookRow: View {
                     .background(.red, in: Circle())
             }
         }
-        .padding(12)
+        .padding(DesignTokens.Spacing.sm)
         .contentShape(Rectangle()) // 整张卡片可点
         // U1-1：卡面 = 白（`AppTheme.Surface.card`），压在页面的分组灰底上形成一级层次；
         // 圆角统一 `DesignTokens.Radius.sm` = 12。

@@ -409,7 +409,7 @@ private extension ReaderView {
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
         .padding(.horizontal, DesignTokens.Spacing.md)
-        .padding(.top, 8)
+        .padding(.top, DesignTokens.Spacing.xs)
     }
 
     private func readerBottomBar(
@@ -429,7 +429,7 @@ private extension ReaderView {
                 isShowingSettings = true
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, DesignTokens.Spacing.sm)
         .padding(.vertical, DesignTokens.Spacing.sm)
         .background(
             reduceTransparency
@@ -438,7 +438,7 @@ private extension ReaderView {
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
         .padding(.horizontal, DesignTokens.Spacing.md)
-        .padding(.bottom, 12)
+        .padding(.bottom, DesignTokens.Spacing.sm)
     }
 
     private func chromeButton(
@@ -447,7 +447,7 @@ private extension ReaderView {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: DesignTokens.Spacing.xxs) {
                 Image(systemName: systemImage)
                     .font(.title3.weight(.medium))
                 Text(title)
