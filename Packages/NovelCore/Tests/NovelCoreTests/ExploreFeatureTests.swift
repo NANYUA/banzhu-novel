@@ -3,22 +3,10 @@ import ComposableArchitecture
 import NovelEngine
 import XCTest
 
-/// 书城测试的共享夹具：全部是**中性合成形状**，不含任何真实站点信息。
-private enum ExploreTestData {
-    /// `{{page}}` 是引擎要求的页码占位符。
-    static let category = ExploreCategory(
-        title: "示例分类",
-        urlTemplate: "/catalog/1_{{page}}.html"
-    )
-
-    /// 满一页（`pageSize` 本）——用来构造「还有下一页」的初态。
-    static func fullPage(_ prefix: Int) -> [Book] {
-        (0 ..< ExploreFeature.pageSize).map {
-            Book(path: "/book/\(prefix)_\($0)/", title: "示例书 \(prefix)-\($0)")
-        }
-    }
-}
-
+/// 书城的分类与首屏书目加载（`.task` / 选分类 / 首屏失败）。
+///
+/// 夹具与调用记录器见 `ExploreTestSupport.swift`；分页用例见 `ExplorePagingTests`；
+/// 失败与重试的用例见 `ExploreFailureTests`（拆开是为了守住 `file_length` 与 `type_body_length`）。
 @MainActor
 final class ExploreFeatureTests: XCTestCase {
     // MARK: - ① 有缓存：直接用缓存，不发网络请求
@@ -75,6 +63,7 @@ final class ExploreFeatureTests: XCTestCase {
         await store.send(.task) {
             $0.isLoading = true
         }
+        XCTAssertTrue(store.state.isLoading, "首次没有分类时仍要进入首屏加载态")
         await store.receive(.categoriesLoaded(fetched)) {
             $0.categories = fetched
             $0.isLoading = false
@@ -108,12 +97,43 @@ final class ExploreFeatureTests: XCTestCase {
         await store.receive(.categoriesFailed("未解析到书城分类，请稍后重试。")) {
             $0.isLoading = false
             $0.errorMessage = "未解析到书城分类，请稍后重试。"
+            $0.failedStep = .categories
         }
         await store.finish()
 
         let saveBatches = await recorder.saveBatches()
         XCTAssertTrue(saveBatches.isEmpty, "一次空结果不得覆盖已有缓存")
         XCTAssertFalse(store.state.isLoading, "空结果也必须复位 loading")
+    }
+
+    // MARK: - ⑥ 切回页面再发 `.task`：静默刷新，不进首屏加载态
+
+    func test已有分类时再发task静默刷新不进入加载态() async {
+        let cached = [ExploreTestData.category]
+        let recorder = ExploreCallRecorder()
+        let store = TestStore(
+            initialState: ExploreFeature.State(categories: cached)
+        ) {
+            ExploreFeature()
+        } withDependencies: {
+            $0.exploreCategoryStore.load = { cached }
+            $0.exploreService.categories = {
+                await recorder.recordCategories()
+                return cached
+            }
+        }
+
+        // ⚠️ 这一次 `.task` 不改变任何状态（手上已经有分类 ⇒ 不置 loading；失败文案本来就是空的）
+        // ⇒ 不能传尾随闭包：不传 = 断言状态没变，`isLoading` 也就不可能在「中途」被置 true。
+        await store.send(.task)
+        XCTAssertFalse(store.state.isLoading, "已有分类时再发 .task 不得进入首屏加载态（会把已展示的内容换成 spinner）")
+        // 缓存里还是同一份分类 ⇒ `categoriesLoaded` 同样不改变状态，也不传尾随闭包。
+        await store.receive(.categoriesLoaded(cached))
+        await store.finish()
+
+        XCTAssertFalse(store.state.isLoading)
+        let categoriesCalls = await recorder.categoryCallCount()
+        XCTAssertEqual(categoriesCalls, 0, "缓存命中时重复触发 .task 仍然不得联网")
     }
 
     // MARK: - ③ 选中分类：拉第 1 页并填入书目
@@ -127,7 +147,7 @@ final class ExploreFeatureTests: XCTestCase {
             ExploreFeature()
         } withDependencies: {
             $0.exploreService.books = { category, page in
-                await recorder.recordBooks(title: category.title, page: page)
+                try await recorder.recordBooks(title: category.title, page: page)
                 return [book]
             }
         }
@@ -150,18 +170,12 @@ final class ExploreFeatureTests: XCTestCase {
     // MARK: - ⑤ 失败路径：写 errorMessage 且复位 loading
 
     func test书目加载失败写入错误文案并复位加载态() async {
-        struct BooksUnavailable: LocalizedError {
-            var errorDescription: String? {
-                "网络不可用。"
-            }
-        }
-
         let store = TestStore(
             initialState: ExploreFeature.State(categories: [ExploreTestData.category])
         ) {
             ExploreFeature()
         } withDependencies: {
-            $0.exploreService.books = { _, _ in throw BooksUnavailable() }
+            $0.exploreService.books = { _, _ in throw ExploreTestFailure() }
         }
 
         await store.send(.categorySelected(ExploreTestData.category)) {
@@ -171,6 +185,7 @@ final class ExploreFeatureTests: XCTestCase {
         await store.receive(.booksFailed("书目加载失败：网络不可用。")) {
             $0.isLoading = false
             $0.errorMessage = "书目加载失败：网络不可用。"
+            $0.failedStep = .firstPage
         }
         await store.finish()
 
@@ -180,7 +195,10 @@ final class ExploreFeatureTests: XCTestCase {
     func test分类失败后重试可重新拉取() async {
         let fetched = [ExploreTestData.category]
         let store = TestStore(
-            initialState: ExploreFeature.State(errorMessage: "分类加载失败：连接超时。")
+            initialState: ExploreFeature.State(
+                errorMessage: "分类加载失败：连接超时。",
+                failedStep: .categories
+            )
         ) {
             ExploreFeature()
         } withDependencies: {
@@ -191,6 +209,7 @@ final class ExploreFeatureTests: XCTestCase {
         await store.send(.retry) {
             $0.isLoading = true
             $0.errorMessage = nil
+            $0.failedStep = nil
         }
         await store.receive(.categoriesLoaded(fetched)) {
             $0.categories = fetched
@@ -213,6 +232,7 @@ final class ExploreFeatureTests: XCTestCase {
 }
 
 /// 分页：追加、加载中 no-op、末页判据。
+/// 「加载更多」**失败与重试**的用例在 `ExploreFailureTests`（局部失败语义另立一处）。
 @MainActor
 final class ExplorePagingTests: XCTestCase {
     // MARK: - ④ 加载下一页：追加；已在加载中则 no-op
@@ -232,7 +252,7 @@ final class ExplorePagingTests: XCTestCase {
             ExploreFeature()
         } withDependencies: {
             $0.exploreService.books = { category, page in
-                await recorder.recordBooks(title: category.title, page: page)
+                try await recorder.recordBooks(title: category.title, page: page)
                 return pageTwo
             }
         }
@@ -266,7 +286,7 @@ final class ExplorePagingTests: XCTestCase {
             ExploreFeature()
         } withDependencies: {
             $0.exploreService.books = { category, page in
-                await recorder.recordBooks(title: category.title, page: page)
+                try await recorder.recordBooks(title: category.title, page: page)
                 return []
             }
         }
@@ -295,7 +315,7 @@ final class ExplorePagingTests: XCTestCase {
             ExploreFeature()
         } withDependencies: {
             $0.exploreService.books = { category, page in
-                await recorder.recordBooks(title: category.title, page: page)
+                try await recorder.recordBooks(title: category.title, page: page)
                 return [lastBook]
             }
         }
@@ -315,40 +335,5 @@ final class ExplorePagingTests: XCTestCase {
 
         let pages = await recorder.pageNumbers()
         XCTAssertEqual(pages, [2], "末页之后不得再发请求")
-    }
-}
-
-/// 记录书城依赖收到的调用，供测试在 `store.finish()` 后断言。
-private actor ExploreCallRecorder {
-    private var categoriesCalls = 0
-    private var booksCalls: [(title: String, page: Int)] = []
-    private var savedBatches: [[ExploreCategory]] = []
-
-    func recordCategories() {
-        categoriesCalls += 1
-    }
-
-    func recordBooks(title: String, page: Int) {
-        booksCalls.append((title, page))
-    }
-
-    func recordSave(_ categories: [ExploreCategory]) {
-        savedBatches.append(categories)
-    }
-
-    func categoryCallCount() -> Int {
-        categoriesCalls
-    }
-
-    func saveBatches() -> [[ExploreCategory]] {
-        savedBatches
-    }
-
-    func bookCalls() -> [(title: String, page: Int)] {
-        booksCalls
-    }
-
-    func pageNumbers() -> [Int] {
-        booksCalls.map(\.page)
     }
 }

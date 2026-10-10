@@ -16,6 +16,12 @@ import NovelEngine
 /// 之后 `.loadMore` 一律 no-op（守卫见 `.loadMore` 分支）。
 /// 阈值与 `SearchFeature` 的分页口径一致（书目列表页满一页才继续翻）。
 /// ⚠️ 若列表页实际每页不足 30 本，翻页会提前停住 —— 只需改 `pageSize` 一处。
+///
+/// ## 「加载更多」失败是局部失败
+/// 翻页失败只记在 `State.moreErrorMessage` 上，**不写 `State.errorMessage`**：
+/// 后者在 `ExploreView` 的内容区里优先级最高，写它会把用户已经看到的整份书目
+/// 换成整页失败态。同时 `books` / `page` / `hasMore` 一律不动，
+/// `.retry` 按 `State.failedStep` 重发**同一页**，而不是退回第 1 页。
 public struct ExploreFeature: Reducer {
     public init() {}
 
@@ -27,6 +33,8 @@ public struct ExploreFeature: Reducer {
             categories: [ExploreCategory] = [],
             isLoading: Bool = false,
             errorMessage: String? = nil,
+            moreErrorMessage: String? = nil,
+            failedStep: FailureStep? = nil,
             selectedCategory: ExploreCategory? = nil,
             books: [Book] = [],
             page: Int = 1,
@@ -36,6 +44,8 @@ public struct ExploreFeature: Reducer {
             self.categories = categories
             self.isLoading = isLoading
             self.errorMessage = errorMessage
+            self.moreErrorMessage = moreErrorMessage
+            self.failedStep = failedStep
             self.selectedCategory = selectedCategory
             self.books = books
             self.page = page
@@ -50,7 +60,24 @@ public struct ExploreFeature: Reducer {
         public var isLoading = false
 
         /// 最近一次的失败 / 空结果提示。空结果与失败都不能伪装成「正常空列表」。
+        ///
+        /// 🔴 只表示**整页级**失败（分类列表 / 选中分类的第 1 页）：View 据此把内容区
+        /// 整体换成失败态。翻页失败走 `moreErrorMessage`，不得写到这里。
         public var errorMessage: String?
+
+        /// 「加载更多」失败原因。与 `errorMessage` **分开**：翻页失败是局部失败，
+        /// 只影响底部分页行，不得把已经加载好的书目换成失败页
+        /// （同 `BookDetailFeature.State.chapterErrorMessage` 的分工）。
+        ///
+        /// View 在底部分页行上就地显示它 + 「重试」，书目与页码原样保留。
+        public var moreErrorMessage: String?
+
+        /// 当前失败发生在哪一步：`.retry` 的**唯一**路由依据。
+        ///
+        /// 不从「哪个 message 非空」「分类是否为空」反推 —— 那样「加载更多失败后重试」
+        /// 会被推成重拉第 1 页，把用户已经翻到的位置丢掉。
+        /// 不变量：它只在失败分支与 message 同一处设置，清理统一走 `clearFailure`。
+        public var failedStep: FailureStep?
 
         /// 当前选中的分类。未选中时书目区为空。
         public var selectedCategory: ExploreCategory?
@@ -85,9 +112,11 @@ public struct ExploreFeature: Reducer {
         case loadMore
         /// 下一页就绪。
         case moreLoaded([Book], page: Int)
-        /// 下一页失败。
+        /// 下一页失败。**局部失败**：只记在 `State.moreErrorMessage` 上，
+        /// 既有书目、页码与整页失败态都不受影响。
         case moreFailed(String)
-        /// 重试「当前失败的那一步」：还没有分类就重拉分类，否则重载当前分类的第 1 页。
+        /// 重试「当前失败的那一步」（依据 `State.failedStep`）：
+        /// 分类失败 → 重拉分类；首屏失败 → 重拉第 1 页；翻页失败 → 重发**同一页**。
         case retry
     }
 
@@ -100,17 +129,26 @@ public struct ExploreFeature: Reducer {
             case .task:
                 // 页面每次出现都会发 `.task`：已在加载中就不重复发，避免打两次首页。
                 guard !state.isLoading else { return .none }
-                return loadCategories(&state, store: exploreCategoryStore, service: exploreService)
+                // 手上已经有分类（切回 tab / 从详情页 pop 回来）⇒ **静默刷新**：不进首屏加载态，
+                // 否则已经展示出来的分类胶囊与书目会被 spinner 顶掉再回来。
+                let showsLoading = state.categories.isEmpty
+                return loadCategories(
+                    &state,
+                    store: exploreCategoryStore,
+                    service: exploreService,
+                    showsLoading: showsLoading
+                )
 
             case let .categoriesLoaded(categories):
                 state.categories = categories
                 state.isLoading = false
-                state.errorMessage = nil
+                clearFailure(&state)
                 return .none
 
             case let .categoriesFailed(message):
                 state.isLoading = false
                 state.errorMessage = message
+                state.failedStep = .categories
                 return .none
 
             case let .categorySelected(category):
@@ -121,28 +159,17 @@ public struct ExploreFeature: Reducer {
                 state.isLoading = false
                 state.page = 1
                 state.hasMore = books.count >= Self.pageSize
+                clearFailure(&state)
                 return .none
 
             case let .booksFailed(message):
                 state.isLoading = false
                 state.errorMessage = message
+                state.failedStep = .firstPage
                 return .none
 
             case .loadMore:
-                // 末页或已在加载中一律不重复触发：同一页拉两次会把书目追加成重复项。
-                guard state.hasMore, !state.isLoadingMore else { return .none }
-                guard let category = state.selectedCategory else { return .none }
-                state.isLoadingMore = true
-                let nextPage = state.page + 1
-                let service = exploreService
-                return .run { send in
-                    do {
-                        let books = try await service.books(category, nextPage)
-                        await send(.moreLoaded(books, page: nextPage))
-                    } catch {
-                        await send(.moreFailed("加载更多失败：\(error.localizedDescription)"))
-                    }
-                }
+                return loadMore(&state, service: exploreService)
 
             case let .moreLoaded(books, page):
                 // 切换分类后旧请求可能晚到：页码对不上就丢弃，
@@ -156,35 +183,77 @@ public struct ExploreFeature: Reducer {
                 state.page = page
                 state.isLoadingMore = false
                 state.hasMore = books.count >= Self.pageSize
+                clearFailure(&state)
                 return .none
 
             case let .moreFailed(message):
+                // 🔴 局部失败：只写 `moreErrorMessage`，**不写 `errorMessage`**。
+                // 写它会让 `ExploreView` 把整份已经加载好的书目换成整页失败态，
+                // 用户翻了半天看到的书会被一次网络抖动全部顶掉。
+                state.moreErrorMessage = message
+                state.failedStep = .more
                 state.isLoadingMore = false
-                state.errorMessage = message
                 return .none
 
             case .retry:
                 guard !state.isLoading, !state.isLoadingMore else { return .none }
-                guard !state.categories.isEmpty else {
-                    return loadCategories(&state, store: exploreCategoryStore, service: exploreService)
+                // 按**显式**记录的失败步骤重发对应请求 —— 不靠「哪个 message 非空」反推。
+                guard let failedStep = state.failedStep else { return .none }
+                switch failedStep {
+                case .categories:
+                    // 显式重试一律给 loading 反馈（静默刷新只属于 `.task`）。
+                    return loadCategories(
+                        &state,
+                        store: exploreCategoryStore,
+                        service: exploreService,
+                        showsLoading: true
+                    )
+
+                case .firstPage:
+                    guard let category = state.selectedCategory else { return .none }
+                    return loadFirstPage(&state, category: category, service: exploreService)
+
+                case .more:
+                    // 重发**同一页**：`loadMore` 只按 `page + 1` 再请求一次，
+                    // 不碰 `books` / `page` / `hasMore`，所以分页位置原地保住。
+                    return loadMore(&state, service: exploreService)
                 }
-                guard let category = state.selectedCategory else { return .none }
-                return loadFirstPage(&state, category: category, service: exploreService)
             }
         }
     }
 }
 
+public extension ExploreFeature {
+    /// 加载失败发生在哪一步（`State.failedStep`）。
+    ///
+    /// 三个阶段各有独立的失败态：分类没拿到与首屏书目失败都是**整页失败**
+    /// （写 `errorMessage`），下一页失败是**局部失败**（写 `moreErrorMessage`）。
+    /// `.retry` 必须知道是哪一步，才能重发对应的那一条请求 —— 尤其不能在
+    /// 「翻页失败」时重拉第 1 页，那等于把用户已经翻开的分页位置丢掉。
+    enum FailureStep: Equatable {
+        /// 分类列表（`.task` 缓存缺失后的那一次联网）。
+        case categories
+        /// 选中分类的第 1 页。
+        case firstPage
+        /// 当前分类的下一页。
+        case more
+    }
+}
+
 /// 读缓存 → 命中即用；未命中才联网并落盘。
 ///
-/// `.task` 与 `.retry` 走同一条路径，所以顺手把首屏 loading / 错误态复位也收在这里。
+/// `.task` 与 `.retry` 走同一条路径，差别只在 `showsLoading`：`.task` 传
+/// `state.categories.isEmpty`（手上已经有分类就**静默刷新**，别用 spinner 把已经展示出来的
+/// 内容顶掉），`.retry` 传 `true`（显式重试必须看得到 loading 反馈）。
+/// 首屏 loading / 失败态复位也收在这里。
 private func loadCategories(
     _ state: inout ExploreFeature.State,
     store: ExploreCategoryStore,
-    service: ExploreService
+    service: ExploreService,
+    showsLoading: Bool
 ) -> Effect<ExploreFeature.Action> {
-    state.isLoading = true
-    state.errorMessage = nil
+    state.isLoading = showsLoading
+    clearFailure(&state)
     return .run { send in
         if let cached = await store.load(), !cached.isEmpty {
             await send(.categoriesLoaded(cached))
@@ -218,7 +287,7 @@ private func loadFirstPage(
     state.hasMore = false
     state.isLoadingMore = false
     state.isLoading = true
-    state.errorMessage = nil
+    clearFailure(&state)
     return .run { send in
         do {
             let books = try await service.books(category, 1)
@@ -227,6 +296,42 @@ private func loadFirstPage(
             await send(.booksFailed("书目加载失败：\(error.localizedDescription)"))
         }
     }
+}
+
+/// 追加当前分类的下一页。
+///
+/// `.loadMore` 与「加载更多失败后的重试」**共用这一条路径**：只按 `state.page + 1`
+/// 再请求一次，不碰 `books` / `page` / `hasMore` —— 所以重试永远回到原来那一页，
+/// 不会把用户打回第 1 页。原有守卫（末页、加载中、无选中分类）逐条保留。
+private func loadMore(
+    _ state: inout ExploreFeature.State,
+    service: ExploreService
+) -> Effect<ExploreFeature.Action> {
+    // 末页或已在加载中一律不重复触发：同一页拉两次会把书目追加成重复项。
+    guard state.hasMore, !state.isLoadingMore else { return .none }
+    guard let category = state.selectedCategory else { return .none }
+    clearFailure(&state)
+    state.isLoadingMore = true
+    let nextPage = state.page + 1
+    return .run { send in
+        do {
+            let books = try await service.books(category, nextPage)
+            await send(.moreLoaded(books, page: nextPage))
+        } catch {
+            await send(.moreFailed("加载更多失败：\(error.localizedDescription)"))
+        }
+    }
+}
+
+/// 清空**全部**失败记录（两个文案 + 失败步骤）。
+///
+/// 语义是「已经重新发起请求 / 已经成功，旧的失败提示就不再成立」。三处字段只在失败
+/// 分支同一处设置、只在这里统一清空 —— 避免出现「文案没了但步骤还留着」这种会让
+/// `.retry` 走错分支的半死状态。
+private func clearFailure(_ state: inout ExploreFeature.State) {
+    state.errorMessage = nil
+    state.moreErrorMessage = nil
+    state.failedStep = nil
 }
 
 /// 书城依赖：分类列表 + 分类分页书目。

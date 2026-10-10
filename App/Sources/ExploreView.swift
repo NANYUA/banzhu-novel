@@ -136,6 +136,10 @@ private extension ExploreView {
     /// 它同时兜住「还没有分类、也还没有失败」的那一帧：`.task` 是 `onAppear` 之后才发的，
     /// 这一帧若判成失败，进页面会先闪一下「加载失败」。reducer 对「首页解析不出分类」
     /// 一律置 `errorMessage`，所以「分类为空且无错误」只可能是还没请求完。
+    ///
+    /// 🔴 这里的整页失败态**只**由 `errorMessage`（分类 / 首屏失败）触发：
+    /// 「加载更多」失败是局部失败，走 `moreErrorMessage`，只在底部分页行上就地提示 ——
+    /// 已经加载好的书目不许被它顶掉（见 `bookList`）。
     @ViewBuilder
     private func content(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
@@ -224,7 +228,12 @@ private extension ExploreView {
                 .listRowBackground(Color.clear)
             }
 
-            if viewStore.hasMore {
+            if let message = viewStore.moreErrorMessage {
+                // 「加载更多」失败：提示与「重试」就地长在分页行上，上面已加载的书目不动。
+                moreErrorRow(message, viewStore: viewStore)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            } else if viewStore.hasMore {
                 loadMoreRow(viewStore)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -233,6 +242,29 @@ private extension ExploreView {
         .listStyle(.plain)
         // 让 List 自己的滚动背景透出页面分组灰。
         .scrollContentBackground(.hidden)
+    }
+
+    /// 「加载更多」失败的行内提示 + 「重试」。
+    ///
+    /// 不套详情的 `InlineErrorBanner`（`ChapterListView.swift:385`）：那条错误条自带标题，
+    /// 文案里已经写了「加载更多失败」，两行会重复同一句话。
+    private func moreErrorRow(
+        _ message: String,
+        viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
+    ) -> some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // HIG §9：`.controlSize(.large)` 把「重试」抬到 44pt 命中区（同 `failureView`）。
+            Button("重试") {
+                viewStore.send(.retry)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        }
     }
 
     /// 分页入口：`hasMore == true` 才出现；加载中显示进度并禁用，重复点不会拉出重复页。
