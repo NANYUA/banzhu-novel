@@ -254,7 +254,7 @@ private extension BookDetailView {
                     shelfLabel(viewStore, title: "移出书架", systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.bordered)
-                .tint(.green)
+                .tint(AppTheme.statusAdded)
             } else {
                 Button {
                     viewStore.send(.addRequested)

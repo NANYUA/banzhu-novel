@@ -268,7 +268,7 @@ private struct DownloadSummarySection: View {
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
-                .tint(.orange)
+                .tint(AppTheme.statusAttention)
                 .downloadQueueRow()
             }
         } header: {
