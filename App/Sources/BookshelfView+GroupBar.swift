@@ -5,9 +5,9 @@ import SwiftUI
 /// 书架分组栏（U5-4 从 `BookshelfView.swift` 原样拆出）。
 ///
 /// ## 为什么单独一个文件
-/// `BookshelfView.swift` 已逼近 SwiftLint `file_length`（warning 600），
-/// 而这一块自成一个整体：只读 `ViewStore` 与三个「分组弹窗」的界面状态，
-/// 与书架列表零耦合 —— 整体搬走，不复制任何代码（拆分口径见 U5-4 报告）。
+/// 这一块自成一个整体：只读 `ViewStore` 与三个「分组弹窗」的界面状态，
+/// 与书架列表零耦合 —— 整体搬走，不复制任何代码（拆分口径见 U5-4 报告）；
+/// 拆出后 `BookshelfView.swift` 与本文件都远离 SwiftLint `file_length` 门槛。
 ///
 /// ## 跨文件的可见性（拆分的唯一代价）
 /// - `groupBar` 必须 `internal`：`BookshelfView.body` 在另一个文件里调用它；

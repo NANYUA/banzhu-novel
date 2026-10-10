@@ -50,7 +50,7 @@ public struct ExploreView: View {
                     categoryBar(viewStore)
 
                     // 自撑满：内容区只剩一个 `ContentUnavailableView` 时不能跟着它缩水，
-                    // 否则分类栏会被整体居中（同 `BookshelfView.swift:75-76` 的写法与理由）。
+                    // 否则分类栏会被整体居中（同 `BookshelfView` 的 `body` 对内容区 `ZStack` 的自撑满写法与理由）。
                     content(viewStore)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -90,7 +90,7 @@ public struct ExploreView: View {
 
 private extension ExploreView {
     /// 分类栏：胶囊行 + 一条发丝分隔线。
-    /// 与书架的 `groupBar`（`BookshelfView.swift:167-182`）同一套结构。
+    /// 与书架的 `groupBar`（见 `BookshelfView+GroupBar.swift` 的 `groupBar(_:)`）同一套结构。
     func categoryBar(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
@@ -104,7 +104,7 @@ private extension ExploreView {
         .background(AppTheme.Surface.page)
     }
 
-    /// 横向滚动的分类胶囊（照抄 `BookshelfView.swift:184-228` 的 `groupChips` 写法）。
+    /// 横向滚动的分类胶囊（照抄 `BookshelfView+GroupBar.swift` 的 `groupChips(_:)` 写法）。
     private func categoryChips(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
@@ -130,7 +130,7 @@ private extension ExploreView {
 private extension ExploreView {
     /// 加载中 / 失败 / 未选分类 / 分类下无书 / 书目列表 五态切换。
     ///
-    /// 加载态排在最前（同 `SearchView.swift:107` 的顺序）：切分类时旧书目要立刻让位，
+    /// 加载态排在最前（同 `SearchView` 的 `content(_:)` 的顺序）：切分类时旧书目要立刻让位，
     /// 否则上一个分类的列表原样留着，看起来像没点中。
     /// 它同时兜住「还没有分类、也还没有失败」的那一帧：`.task` 是 `onAppear` 之后才发的，
     /// 这一帧若判成失败，进页面会先闪一下「加载失败」。reducer 对「首页解析不出分类」
@@ -174,14 +174,14 @@ private extension ExploreView {
             Text(message)
         } actions: {
             // HIG §9：系统 `.borderedProminent` 默认约 34pt 高，
-            // `.controlSize(.large)` 把它抬到 44pt 命中区（同 `SearchView.swift:137-141`）。
+            // `.controlSize(.large)` 把它抬到 44pt 命中区（同 `SearchView` 的 `errorView(_:viewStore:)`）。
             Button("重试") {
                 viewStore.send(.retry)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
         }
-        // 铺底必须显式撑满：缺了它 CUV 只覆盖内容尺寸（`SearchView.swift:143` / `:152` 同写法）。
+        // 铺底必须显式撑满：缺了它 CUV 只覆盖内容尺寸（同 `SearchView` 的 `errorView(_:viewStore:)` / `emptyView(title:message:)`）。
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -223,7 +223,7 @@ private extension ExploreView {
                 .listRowSeparator(.hidden)
                 // 行背景清掉：卡面颜色由 `ExploreBookRow` 自己画（`AppTheme.Surface.card`），
                 // 这里再铺一层 List 默认的 `systemBackground`（浅色纯白）会把卡片之间的
-                // 间隙也涂白，卡片就与页面分不出层次了（同 `SearchView.swift:179-182`）。
+                // 间隙也涂白，卡片就与页面分不出层次了（同 `SearchView` 的 `resultsView(_:)`）。
                 .listRowBackground(Color.clear)
             }
 
@@ -290,7 +290,7 @@ private extension ExploreView {
 
 // MARK: - 分类胶囊
 
-/// 与书架的 `GroupChip`（`BookshelfView.swift:423-449`）逐项对齐：同为 44pt 胶囊、
+/// 与书架的 `GroupChip`（见 `BookshelfView+GroupBar.swift` 的 `GroupChip`）逐项对齐：同为 44pt 胶囊、
 /// 同样的选中填充与按下反馈 —— 同类控件必须用同一种视觉语言。
 private struct ExploreCategoryChip: View {
     let title: String
@@ -321,6 +321,9 @@ private struct ExploreCategoryChip: View {
         }
         // 强调层贴胶囊轮廓，避免按下瞬间两端露出方角（U0-4）。
         .buttonStyle(PressableCardButtonStyle(pressedScale: 0.96, shape: AnyShape(Capsule())))
+        // 选中语义交给 Button 的 `.isSelected` trait（照抄 `BookshelfView+GroupBar.swift` 的 `GroupChip`）：
+        // VoiceOver 才读得出「当前选中」。
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
