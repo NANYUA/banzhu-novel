@@ -475,7 +475,9 @@ private extension ReaderView {
             .frame(maxWidth: .infinity, minHeight: 44)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // §9 按下反馈：`.plain` 按下零反馈。强调层贴按钮自身的 12pt 圆角矩形，
+        // 不再与外面这根 18pt 圆角的材质条在圆角处打架。
+        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
         .foregroundStyle(.primary)
     }
 
