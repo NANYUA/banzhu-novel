@@ -183,9 +183,9 @@ final class DownloadFeatureChapterPathsTests: DownloadFeatureTestCase {
             $0.tasks = []
         }
         await store.receive(.reload)
-        await store.receive(.loaded([])) {
-            $0.tasks = []
-        }
+        // `cancelBook` 已经把 `tasks` 清空，这里再断言「变成 []」是不可观察变化
+        // （TestStore 的尾随闭包语义是「断言发生了变化」）—— 所以不传闭包。
+        await store.receive(.loaded([]))
         await store.finish()
 
         XCTAssertTrue(store.state.completedChapterPaths(forBook: Self.bookPath).isEmpty)
