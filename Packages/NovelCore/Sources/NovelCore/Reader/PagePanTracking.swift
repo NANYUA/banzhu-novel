@@ -10,10 +10,11 @@ public enum PagePanTurn: Equatable, Sendable {
     case previous
 }
 
-/// 一页的几何上下文：页宽 + 当前页下标 + 总页数。
+/// 一页的几何上下文：页宽 + 当前页下标 + 总页数 + 章尾之后还有没有可翻的一页。
 ///
-/// 这三个值在判页里**永远一起出现、一起被读**：页宽定出屏幕中线，下标与总页数定出
-/// 首 / 末页边界。收成一个值类型而不是三个并列参数，有两个好处：
+/// 这四个值在判页里**永远一起出现、一起被读**：页宽定出屏幕中线，下标与总页数定出
+/// 首 / 末页边界，「章尾之后」定出**本章最后一页**该不该继续往前。收成一个值类型而不是
+/// 四个并列参数，有两个好处：
 /// 1. 「它们描述的是同一次手势里的同一页」这层语义落到类型上，调用点不会把顺序摆错；
 /// 2. `turn` 的参数个数守在 SwiftLint `function_parameter_count` 的 5 个以内。
 ///
@@ -25,11 +26,22 @@ public struct PagePanGeometry: Equatable, Sendable {
     public var pageIndex: Int
     /// 总页数。
     public var pageCount: Int
+    /// 本章最后一页之后是否还接得上一页 —— 即**下一章第 1 页已就绪**。
+    ///
+    /// 默认 `false`（「没有下一章」）：只认「已就绪」，还没预加载完就与最后一章同待遇，
+    /// 到章尾一律回弹 —— owner 明确不要任何「已经是最后一章」的提示。
+    public var hasNextChapterPage: Bool
 
-    public init(availableWidth: CGFloat, pageIndex: Int, pageCount: Int) {
+    public init(
+        availableWidth: CGFloat,
+        pageIndex: Int,
+        pageCount: Int,
+        hasNextChapterPage: Bool = false
+    ) {
         self.availableWidth = availableWidth
         self.pageIndex = pageIndex
         self.pageCount = pageCount
+        self.hasNextChapterPage = hasNextChapterPage
     }
 }
 
@@ -112,13 +124,17 @@ public enum PagePanTracking {
     /// 松手后该翻哪一页。
     ///
     /// - 中线未越过屏幕中线 → `.none`（滑回本页）；
-    /// - 越过 → 按落点方向翻**一页**；已在首 / 末页则退化为 `.none`（原地滑回）。
+    /// - 越过 → 按落点方向翻**一页**；已在首页 / **本章最后一页且后面没有下一章** ⇒
+    ///   退化为 `.none`（原地滑回）。
+    ///
+    /// 「本章最后一页」有两支：`geometry.hasNextChapterPage` 为真（下一章第 1 页已就绪）
+    /// ⇒ 仍然 `.next`（换章由调用方落位）；为假（最后一章 / 还没预加载完）⇒ `.none`，回弹。
     ///
     /// - Parameters:
     ///   - trackedOffset: 本次手势跟手后的偏移（`panOffset` 的结果）。
     ///   - translation: 本次手势的 `DragGesture.Value.translation.width`。
     ///   - predictedEndTranslation: 相对手势起点的**总**投射位移。
-    ///   - geometry: 页宽 + 当前页下标 + 总页数。
+    ///   - geometry: 页宽 + 当前页下标 + 总页数 + 章尾之后还有没有一页。
     public static func turn(
         trackedOffset: CGFloat,
         translation: CGFloat,
@@ -134,7 +150,11 @@ public enum PagePanTracking {
             return .none
         }
         if settled < 0 {
-            return geometry.pageIndex + 1 < geometry.pageCount ? .next : .none
+            if geometry.pageIndex + 1 < geometry.pageCount {
+                return .next
+            }
+            // 本章最后一页：只有「下一章第 1 页已就绪」才继续向前。
+            return geometry.hasNextChapterPage ? .next : .none
         }
         return geometry.pageIndex > 0 ? .previous : .none
     }

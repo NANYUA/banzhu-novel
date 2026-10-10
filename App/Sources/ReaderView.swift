@@ -43,6 +43,7 @@ struct ReaderView: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
+    /// `chapters` 同时声明给 reducer：到章尾「无缝进下一章」靠它推出下一章。
     init(
         chapterPath: String,
         chapterName: String = "",
@@ -56,7 +57,8 @@ struct ReaderView: View {
         store = Store(
             initialState: ReaderFeature.State(
                 chapterPath: chapterPath,
-                chapterName: chapterName
+                chapterName: chapterName,
+                chapters: chapters
             )
         ) {
             ReaderFeature()
@@ -88,8 +90,10 @@ struct ReaderView: View {
                     safeAreaInsets: geometry.safeAreaInsets,
                     inset: viewStore.config.inset
                 )
+                // 正文底色只解析一次：正文层铺底与上下栏的玻璃派生共用它（唯一来源）。
+                let pageColor = pageBackgroundColor(for: viewStore.config)
                 ZStack {
-                    backgroundColor(for: viewStore.config)
+                    Color(uiColor: pageColor)
                         .ignoresSafeArea()
 
                     // 正文层：盒顶 = 安全区顶 − 外扩量、盒高 = 全屏高 − 两条内边距（U9-7）。
@@ -105,18 +109,21 @@ struct ReaderView: View {
                     .padding(.top, contentPaddings.top)
                     .padding(.bottom, contentPaddings.bottom)
 
-                    // 控制栏层：**只吃横向安全区**，竖向不再被安全区钉住 —— 两栏各自带竖向
-                    // 内边距（见 `readerChrome`），因此能比正文更贴屏幕上下边（U9-7）。
-                    // 它浮在正文之上（`isChromeVisible`），与正文重叠是预期行为：
-                    // 栏是临时覆盖层，不为避让去改正文布局。
+                    // 控制栏层：与正文层**并列**的叠加层，自己不占正文的布局空间 ⇒
+                    // 呼出 / 隐藏不改变正文的分页与阅读位置（设计稿的关键点）。
+                    // 竖向重新吃安全区（内容留在安全区内），玻璃再由 `ReaderChromeGlass`
+                    // 的 `.ignoresSafeArea(edges:)` 铺到状态栏 / Home Indicator 之下。
                     if isChromeVisible {
-                        readerChrome(
-                            viewStore,
-                            topPadding: topBarPadding(safeAreaInsets: geometry.safeAreaInsets)
+                        ReaderChromeOverlay(
+                            style: ReaderChromeStyle.make(page: pageColor),
+                            chapterTitle: viewStore.chapterName,
+                            safeAreaInsets: geometry.safeAreaInsets,
+                            onBack: { dismiss() },
+                            onContents: { isShowingDirectory = true },
+                            onDownload: { downloadCurrentChapter(viewStore) },
+                            onSearch: { isShowingSearch = true },
+                            onSettings: { isShowingSettings = true }
                         )
-                        .padding(.leading, geometry.safeAreaInsets.leading)
-                        .padding(.trailing, geometry.safeAreaInsets.trailing)
-                        .transition(.opacity)
                     }
                 }
                 .task {
@@ -137,12 +144,19 @@ struct ReaderView: View {
             .navigationTitle("")
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
-            // 正文全屏（U9-3b）：连状态栏一起藏掉 —— 正文的上边界因此就是灵动岛 / 刘海下沿。
+            // 状态栏只在**控制栏隐藏**时才藏（设计稿：`.statusBarHidden(!showChrome)`）：
+            // 呼出控制栏时状态栏可见 —— 这也正是玻璃要往状态栏下面铺的原因；
+            // 隐藏控制栏时进入沉浸阅读，状态栏与两栏一起让位。
+            // ⚠️ 状态栏可见性会改变**顶部安全区**（无缺口机型 20pt ↔ 0），进而改变
+            // `contentSize` 并触发一次重新分页（见下方 `onChange`）—— 阅读位置仍由
+            // `characterOffset` 保住（契约 ③），但页断点可能移动一行。
+            // 有灵动岛 / 刘海的机型顶部安全区由硬件决定（59pt），不受状态栏影响。
+            //
             // 底栏（tabBar）**刻意不在这里声明**：它的可见性全仓只有三个 tab 根视图一个所有者，
             // 由 `isShowingDetail` 驱动（U3-5）。阅读页只能从详情页进入，那一刻它已经是隐藏的；
             // 在这里再写一次 `.toolbar(.hidden, for: .tabBar)` 就会多出第二个所有者，
             // 正是 U3-5 修掉的「pop 回根视图后底栏不恢复」那种泄漏。
-            .statusBar(hidden: true)
+            .statusBar(hidden: !isChromeVisible)
             .sheet(isPresented: $isShowingSettings) {
                 ReaderSettingsView(
                     configuration: viewStore.config,
@@ -215,22 +229,6 @@ private extension ReaderView {
             width: max(0, size.width - safeAreaInsets.leading - safeAreaInsets.trailing),
             height: max(0, size.height - paddings.top - paddings.bottom)
         )
-    }
-
-    /// 上栏最多可上移的量：理论极限 ≈ 38pt（栏顶 21pt）只剩 0.7pt 余量，太紧 —— 字体度量是
-    /// 查表估的，估错 1pt 标题就会被灵动岛咬 ⇒ 收紧到 34pt。推导见 `topBarPadding(safeAreaInsets:)`。
-    private static let topBarMaxUpwardShift: CGFloat = 34
-
-    /// 上栏的上移量（U9-7）：`T = max(Spacing.xs, safeAreaInsets.top − 34)`。
-    ///
-    /// 上栏的**标题是居中**的，与灵动岛同一列 ⇒ 标题字形必须落在灵动岛下沿（约 48pt）以下。
-    /// 栏内结构是「`Spacing.sm`(12) 内边距 + 44pt 内容行 + 12 内边距」，标题在 44pt 行内垂直
-    /// 居中，其字形顶距栏顶约 27pt ⇒ 栏顶 ≥ 48 − 27 ≈ 21pt 即可（理论上限 59 − 21 ≈ 38pt，
-    /// 但那样只剩 0.7pt 余量）。取 34pt ⇒ 栏顶 59 − 34 = **25pt**，标题字形顶 ≈ 25 + 27 = 52pt，
-    /// 距下沿约 **5.7pt**。栏顶仍进到灵动岛覆盖区（25pt < 48pt）—— 那是预期的：被覆盖的
-    /// 那部分是栏的**空内边距**。下限 `Spacing.xs`(8) 保证无灵动岛 / 无刘海机型上栏也不贴死屏幕边。
-    private func topBarPadding(safeAreaInsets: EdgeInsets) -> CGFloat {
-        max(DesignTokens.Spacing.xs, safeAreaInsets.top - Self.topBarMaxUpwardShift)
     }
 
     @ViewBuilder
@@ -307,153 +305,14 @@ private extension ReaderView {
         .transition(pageTransition())
     }
 
-    // MARK: - 控制栏
-
-    /// 上下两栏（浮在正文之上的临时覆盖层，`isChromeVisible` 控制显隐）。
-    ///
-    /// 位置（U9-7）：这一层**不再吃竖向安全区**，竖向位置完全由两栏各自的内边距决定 ——
-    /// 上栏 `.padding(.top, topPadding)`、下栏 `.padding(.bottom, Spacing.xs)`，
-    /// 因此两栏能比正文更贴屏幕上下边（正文还受灵动岛 / Home Indicator 约束）。
-    /// 栏高、栏内按钮、圆角、面板颜色、横向 `Spacing.md` 内边距**一律未动**。
-    private func readerChrome(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        topPadding: CGFloat
-    ) -> some View {
-        VStack {
-            readerTopBar(viewStore)
-                .padding(.top, topPadding)
-
-            Spacer()
-
-            readerBottomBar(viewStore)
-                // 下栏贴到屏幕底 8pt 处：栏自身 `Spacing.sm`(12) 的内边距正好容下底部
-                // 那根约 5pt 的 Home Indicator 细条（按钮落在细条上方，不会被压）。
-                .padding(.bottom, DesignTokens.Spacing.xs)
-        }
-    }
-
-    /// 上栏。
-    ///
-    /// 位置（U9-7）：整条 `readerChrome` 已不再吃竖向安全区，上栏的上边缘由
-    /// `readerChrome` 给的 `topPadding`（推导见 `topBarPadding(safeAreaInsets:)`）决定，
-    /// 目标是「标题字形正好落在灵动岛下沿以下」—— 比正文贴得更上，
-    /// 但字形仍不会被灵动岛盖住。圆角半径本身**不猜**：不同机型一律由安全区自适应。
-    private func readerTopBar(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) -> some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Label("返回", systemImage: "chevron.left")
-            }
-            .buttonStyle(.bordered)
-            // HIG §9：`.bordered` 默认约 34pt 高。阅读页控制栏是阅读区内唯一的导航 /
-            // 关闭入口，命中区按 44pt 补足（控制栏高度 +10pt，视觉语言不变）。
-            .controlSize(.large)
-
-            Spacer()
-
-            Text(viewStore.chapterName)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-
-            Spacer()
-
-            readerMoreMenu()
-        }
-        .padding(.horizontal, DesignTokens.Spacing.md)
-        .padding(.vertical, DesignTokens.Spacing.sm)
-        .background(
-            backgroundColor(for: viewStore.config),
-            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
-        )
-        .padding(.horizontal, DesignTokens.Spacing.md)
-    }
-
-    /// 右上角「更多」菜单（U9-6）。
-    ///
-    /// 只把原来的 `eye.slash`（隐藏控制栏）换成 `ellipsis.circle` —— 控制栏显隐能力本身
-    /// **没有丢**：中央点击那条路径仍在（`pageContent` 的 `onCenterTap`），
-    /// 下载完成后自动隐藏也仍在，两条都还走 `setChromeVisible` 这一个写入口（U1-2）。
-    /// 被去掉的只有 `eye.slash` 这一个**入口**，那是 owner 明确要求的替换。
-    ///
-    /// ⚠️ **更多选项待添加**：先放一条不可点的占位项，而不是留一个空 `Menu`
-    /// —— 空菜单点开是一片空白，用户会以为控件坏了（§11 反馈：别给一个点了没反应的入口）。
-    private func readerMoreMenu() -> some View {
-        Menu {
-            Button("更多选项待添加") {}
-                .disabled(true)
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                // HIG §9：视觉图标可小于 44pt，命中区必须补足。
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .accessibilityLabel("更多")
-    }
-
-    /// 下栏。
-    ///
-    /// 位置（U9-7）与上栏同理：这一层不再吃竖向安全区，下栏的下边缘由 `readerChrome`
-    /// 给的 `.padding(.bottom, Spacing.xs)`(8) 决定 —— 比正文贴得更下，
-    /// 栏自身 12pt 内边距正好把 Home Indicator 那根细条让在空处。
-    private func readerBottomBar(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) -> some View {
-        HStack(spacing: 0) {
-            chromeButton("目录", systemImage: "list.bullet") {
-                isShowingDirectory = true
-            }
-            chromeButton("下载", systemImage: "arrow.down.circle") {
-                downloadCurrentChapter(viewStore)
-            }
-            chromeButton("搜索", systemImage: "magnifyingglass") {
-                isShowingSearch = true
-            }
-            chromeButton("设置", systemImage: "textformat.size") {
-                isShowingSettings = true
-            }
-        }
-        .padding(.horizontal, DesignTokens.Spacing.sm)
-        .padding(.vertical, DesignTokens.Spacing.sm)
-        .background(
-            backgroundColor(for: viewStore.config),
-            in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
-        )
-        .padding(.horizontal, DesignTokens.Spacing.md)
-    }
-
-    private func chromeButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: DesignTokens.Spacing.xxs) {
-                Image(systemName: systemImage)
-                    .font(.title3.weight(.medium))
-                Text(title)
-                    .font(.caption2)
-            }
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        // §9 按下反馈：`.plain` 按下零反馈。强调层贴按钮自身的 `Radius.xs`(6) 圆角矩形：
-        // 按钮四周内缩 `Spacing.sm`(12)，外面这根材质条圆角 `Radius.lg`(18)，
-        // 故 6 = 18 - 12，强调层才能**彻底**落在栏的圆角之内。
-        // （原先的 12 只是缓解 —— 对角方向仍会露出约 2.5pt 方角。）
-        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.xs))))
-        .foregroundStyle(.primary)
-    }
-
     private func directorySheet(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> some View {
         NavigationStack {
             List(chapters) { chapter in
+                // `insetGrouped` 只在分组首 / 末行给卡面圆角，强调层必须逐角跟随（见下面的 `shape`）。
+                let isFirstChapter = chapter.path == chapters.first?.path
+                let isLastChapter = chapter.path == chapters.last?.path
                 Button {
                     viewStore.send(.loadChapterWithName(chapter.path, chapter.name))
                     isShowingDirectory = false
@@ -467,30 +326,30 @@ private extension ReaderView {
                                 .foregroundStyle(.tint)
                         }
                     }
-                    // 行内边距由标签自己持有（配合下面的 `listRowInsets`）：竖向 `Spacing.sm`(12)
-                    // 撑出 44pt 以上命中区，强调层才能覆盖**整行**，而不只是文字那一条。
+                    // 左右内边距改由标签自己持有：下面 `listRowInsets` 水平归零后标签铺满整张卡，
+                    // 强调层才能覆盖**含内边距在内的整行**（真机反馈：原来只到文字与勾之间）。
+                    .padding(.horizontal, DesignTokens.Spacing.md)
                     .padding(.vertical, DesignTokens.Spacing.sm)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 // §9 按下反馈：`.plain` 在 `List` 行里按下只压暗标签内容（真机反馈「目录下
                 // 按下无效果」），行/卡面颜色不变。改用项目既有的 `PressableCardButtonStyle`：
-                // 按下瞬间叠一层可见强调层 + 轻微缩放，抬手复原。
-                // 强调层圆角取 `Radius.sm`(12)：本行没有自绘卡面（不像书架书卡），轮廓是系统
-                // 行背景；强调层水平内缩 `Spacing.md`(16)、垂直不出本行 ⇒ 圆角不会露到行外。
+                // 按下瞬间叠一层可见强调层 + 轻微缩放，抬手复原；强调层轮廓逐角跟随系统卡面
+                // 圆角 —— 铺满整卡后若一律用直角，分组首 / 末行就会在圆角外露出方角。
                 .buttonStyle(PressableCardButtonStyle(
                     pressedScale: 0.99,
-                    shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+                    shape: AnyShape(UnevenRoundedRectangle(
+                        topLeadingRadius: isFirstChapter ? DesignTokens.Radius.sm : 0,
+                        bottomLeadingRadius: isLastChapter ? DesignTokens.Radius.sm : 0,
+                        bottomTrailingRadius: isLastChapter ? DesignTokens.Radius.sm : 0,
+                        topTrailingRadius: isFirstChapter ? DesignTokens.Radius.sm : 0
+                    ))
                 ))
-                // 竖向 0 + 水平 16（= `insetGrouped` 系统默认行内边距）：左右缩进与行高都不变，
-                // 只是把竖向那约 11pt 让给标签自己 ⇒ 强调层铺满整行高度。水平仍留 16 的原因：
-                // 系统卡面的圆角在行两端，强调层内缩后才不会在圆角外露出方角。
-                .listRowInsets(EdgeInsets(
-                    top: 0,
-                    leading: DesignTokens.Spacing.md,
-                    bottom: 0,
-                    trailing: DesignTokens.Spacing.md
-                ))
+                // 水平也归零：标签铺满整张卡 ⇒ 强调层覆盖整行，行高与文字缩进都不变。
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                // 分隔线起点仍留在原内容缩进处（行内边距归零后它本来会跑到卡片边缘）。
+                .alignmentGuide(.listRowSeparatorLeading) { _ in DesignTokens.Spacing.md }
             }
             .navigationTitle("目录")
             .toolbar {
@@ -527,33 +386,25 @@ private extension ReaderView {
 
     /// 控制栏显隐的**唯一**写入口（U1-2）。
     ///
-    /// 上栏（`readerTopBar`）与下栏（`readerBottomBar`）都包在 `readerChrome` 里，
-    /// 由 body 里同一个 `if isChromeVisible` 与同一个 `.transition(.opacity)` 控制：
-    /// 两者在物理上无法分别隐藏，所以显隐的**时机与动画也必须只有一处决定**。
-    /// 中央点击 / 下载后自动隐藏全部走这里（U9-6 之后 `eye.slash` 那条入口已按 owner
-    /// 要求换成「更多」菜单，见 `readerMoreMenu`），杜绝再次分叉。
+    /// 上栏与下栏都装在 `ReaderChromeOverlay` 里（`ReaderView+Chrome.swift`），
+    /// 由 body 里同一个 `if isChromeVisible` 控制：两者在物理上无法分别隐藏，
+    /// 所以显隐的**时机与动画也必须只有一处决定**。中央点击 / 下载后自动隐藏全部走这里；
+    /// 动画曲线也只在 `ReaderView.chromeToggleAnimation(reduceMotion:)` 定义一次，杜绝分叉。
     private func setChromeVisible(_ visible: Bool) {
         guard isChromeVisible != visible else { return }
-        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 1)) {
+        withAnimation(Self.chromeToggleAnimation(reduceMotion: reduceMotion)) {
             isChromeVisible = visible
         }
     }
 
-    // MARK: - 外观
+    // MARK: - 页面身份
 
-    /// 阅读页**正文底色**的唯一来源（上下两栏同色，也用这一个）。
-    /// 返回 `Color(uiColor:)` 包出来的动态色，跟随当前明暗外观解析。
-    private func backgroundColor(for configuration: PaginationConfiguration) -> Color {
-        Color(uiColor: configuration.backgroundStyle.uiColor(
-            custom: configuration.customBackgroundColor,
-            customDark: configuration.customBackgroundColorDark
-        ))
-    }
-
+    /// 页面身份 = **章节路径 + 页码**：换章时身份必须变化，否则章尾无缝进下一章若停在
+    /// `0 → 0`（旧章只有 1 页），Reduce Motion 的单页 `.opacity` 转场就不会播（内容会换但像硬切）。
     private func pageIdentity(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> String {
-        "page-\(viewStore.currentPageIndex)"
+        "\(viewStore.chapterPath)-\(viewStore.currentPageIndex)"
     }
 
     // MARK: - 分页定位

@@ -153,7 +153,13 @@ extension ReadingAppearanceMode {
     }
 }
 
-private extension UIColor {
+/// 「这块背景是深是浅」的**唯一**判据（BT.601 亮度，阈值 **0.6**）。
+///
+/// 三处都走它，不另设阈值、不另写算法：正文文字选黑 / 白（`ReadingTextColorMode.automatic`）、
+/// 阅读设置里色块的明暗预览、阅读页控制栏玻璃选深 / 浅（`ReaderView+ChromeStyle.swift`）。
+///
+/// 原先是 `private`（本文件级）；控制栏要按**同一套**判据派生玻璃，故放开为模块内可见。
+extension UIColor {
     var isLightBackground: Bool {
         relativeLuminance > 0.6
     }

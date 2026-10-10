@@ -220,6 +220,46 @@ final class PagePanTrackingTests: XCTestCase {
         XCTAssertEqual(turnAtSettledOffset(-pageWidth, index: 0, count: 1), .none, "单页两边都没有")
     }
 
+    // MARK: - 章尾：下一章第 1 页占住「+1」那一格
+
+    /// 本章最后一页 + 下一章第 1 页已就绪 ⇒ 仍然允许 `.next`（换章由调用方落位）。
+    ///
+    /// 这是「到章尾无缝进下一章」唯一的判页改动：边界从「末页一律 `.none`」
+    /// 收窄成「末页**且**后面没东西才 `.none`」。
+    func test最后一页且下一章就绪时仍允许向前() {
+        XCTAssertEqual(turnAtSettledOffset(-pageWidth, index: 9, count: 10, hasNext: true), .next)
+        XCTAssertEqual(
+            turnAtSettledOffset(-pageWidth * 0.5 - 0.001, index: 9, count: 10, hasNext: true),
+            .next,
+            "中线刚过一点就该换章，与章内翻页同一判据"
+        )
+    }
+
+    /// 最后一章（或下一章还没就绪）⇒ 维持原状：中线越过也不翻，回弹（owner 选择：不提示）。
+    func test最后一页没有下一章时仍挡住() {
+        XCTAssertEqual(turnAtSettledOffset(-pageWidth, index: 9, count: 10, hasNext: false), .none)
+        XCTAssertEqual(turnAtSettledOffset(-pageWidth, index: 0, count: 1, hasNext: false), .none)
+    }
+
+    /// 「下一章就绪」只放宽**章尾向前**这一支，其余判据一律不动。
+    func test下一章就绪不影响章内与向右翻页() {
+        XCTAssertEqual(
+            turnAtSettledOffset(-pageWidth, index: 3, count: 10, hasNext: true),
+            .next,
+            "不是最后一页：照旧翻页，与有没有下一章无关"
+        )
+        XCTAssertEqual(
+            turnAtSettledOffset(pageWidth, index: 0, count: 10, hasNext: true),
+            .none,
+            "向右：章首仍是回弹（本需求不跨章回上一章）"
+        )
+        XCTAssertEqual(
+            turnAtSettledOffset(-pageWidth * 0.5, index: 9, count: 10, hasNext: true),
+            .none,
+            "中线未越过：仍滑回本页"
+        )
+    }
+
     /// 一次手势最多翻一页：拖过三页也只是 `.next`，不会跳页。
     func test一次手势最多翻一页() {
         let value = PagePanTracking.turn(
@@ -261,11 +301,15 @@ private func panOffset(
 }
 
 /// 用「落点」直接问判页结果（跳过动量合成，专测中线那一步）。
+///
+/// `hasNext` 默认 `false`（没有下一章）：默认值让「章尾一律回弹」这条**既有**语义
+/// 在旧用例里逐字保持，只有显式传 `true` 的用例才走「换章」那一支。
 private func turnAtSettledOffset(
     _ offset: CGFloat,
     width availableWidth: CGFloat? = nil,
     index: Int,
-    count: Int
+    count: Int,
+    hasNext: Bool = false
 ) -> PagePanTurn {
     PagePanTracking.turn(
         trackedOffset: offset,
@@ -274,7 +318,8 @@ private func turnAtSettledOffset(
         geometry: PagePanGeometry(
             availableWidth: availableWidth ?? pageWidth,
             pageIndex: index,
-            pageCount: count
+            pageCount: count,
+            hasNextChapterPage: hasNext
         )
     )
 }

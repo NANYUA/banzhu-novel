@@ -155,7 +155,7 @@ private extension BookDetailView {
 // MARK: - 阅读入口（U1-6）
 
 private extension BookDetailView {
-    /// 主行动入口：有上次阅读记录就是「继续阅读」（+「从第一章开始」），否则是「开始阅读」。
+    /// 主行动入口：有上次阅读记录就是「继续阅读」，否则是「开始阅读」。
     ///
     /// 目录还没加载出来时**什么都不摆** —— 点了没反应的死按钮比没有按钮更糟，
     /// 而「加载中 / 失败 / 为空」由下面的目录区块统一表达（只在那里出一个 ProgressView，
@@ -165,51 +165,24 @@ private extension BookDetailView {
         _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
     ) -> some View {
         if let continueChapter = viewStore.continueChapter {
-            VStack(spacing: DesignTokens.Spacing.xs) {
-                readButton(
-                    "继续阅读",
-                    systemImage: "book.pages",
-                    chapter: continueChapter,
-                    isProminent: true
-                )
-                if let first = viewStore.chapters.first, first.path != continueChapter.path {
-                    readButton(
-                        "从第一章开始",
-                        systemImage: "text.book.closed",
-                        chapter: first,
-                        isProminent: false
-                    )
-                }
-            }
+            readButton("继续阅读", systemImage: "book.pages", chapter: continueChapter)
         } else if let first = viewStore.chapters.first {
-            readButton("开始阅读", systemImage: "book.pages", chapter: first, isProminent: true)
+            readButton("开始阅读", systemImage: "book.pages", chapter: first)
         }
     }
 
-    @ViewBuilder
     func readButton(
         _ title: String,
         systemImage: String,
-        chapter: ChapterItem,
-        isProminent: Bool
+        chapter: ChapterItem
     ) -> some View {
-        if isProminent {
-            Button {
-                openReader(chapter)
-            } label: {
-                readLabel(title, systemImage: systemImage)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-        } else {
-            Button {
-                openReader(chapter)
-            } label: {
-                readLabel(title, systemImage: systemImage)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+        Button {
+            openReader(chapter)
+        } label: {
+            readLabel(title, systemImage: systemImage)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
     }
 
     func readLabel(_ title: String, systemImage: String) -> some View {

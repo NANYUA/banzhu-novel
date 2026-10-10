@@ -2,6 +2,25 @@ import ComposableArchitecture
 import NovelCore
 import SwiftUI
 
+/// 全景图里的一格：身份 + 该格要渲染的文本 + 相对当前页的格数。
+///
+/// 放在文件级而不是嵌在 `ReaderView` 里：它只是渲染数据，没有身份。
+private struct PanSlot: Identifiable {
+    /// 一格的身份 = 「**哪一章**的第几页」。
+    ///
+    /// 跨章时必须靠它保持身份：换章后原本摆在 `+1` 格上的「下一章第 1 页」正好变成当前页，
+    /// 身份不变 ⇒ SwiftUI 复用同一个 `PageTextView`（正文与配置逐字未变，`updateUIView`
+    /// 直接返回），平移因此是连续的，不会先闪一下。只按下标做身份就会整条重建。
+    struct Identity: Hashable {
+        let path: String
+        let index: Int
+    }
+
+    let id: Identity
+    let text: String
+    let relativeIndex: Int
+}
+
 /// 阅读页的翻页手势，以及「平移翻页」（全景图式左右平移）的全景图内容。
 ///
 /// 从 `ReaderView.swift` 拆出来的：那个文件已经贴近 SwiftLint `file_length` 600 的硬门，
@@ -52,48 +71,67 @@ extension ReaderView {
     ///
     /// **一次最多一页**：相邻页只差一页宽，而跟手位移被 `PagePanTracking.panOffset`
     /// 夹在一页之内，所以屏幕上永远最多只看到「当前页 + 一页」。
-    @ViewBuilder
+    ///
+    /// `+1` 那一格在当前是**本章最后一页**、且下一章第 1 页已就绪时渲染下一章的第 1 页
+    /// —— 换章因此就是一次普通的「下一页」平移（落位见 `settlePan`）。
     func panPages(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         availableWidth: CGFloat
     ) -> some View {
-        let current = viewStore.currentPageIndex
-        ForEach([current - 1, current, current + 1], id: \.self) { index in
-            if viewStore.pages.indices.contains(index) {
-                panPage(viewStore, pageIndex: index)
-                    .offset(x: panPageOffset(for: index, current: current, availableWidth: availableWidth))
-                    // §13：相邻页只是「露出来的下一张」，不该进 VoiceOver 焦点 ——
-                    // 否则读屏会顺着把下一章内容也念一遍（单页时代只有一页，不存在这个问题）。
-                    .accessibilityHidden(index != current)
-            }
+        ForEach(panSlots(viewStore)) { slot in
+            panPage(text: slot.text, configuration: viewStore.config)
+                .offset(x: slideOffset + CGFloat(slot.relativeIndex) * availableWidth)
+                // §13：相邻格只是「露出来的下一张」，不该进 VoiceOver 焦点 ——
+                // 否则读屏会顺着把下一章内容也念一遍（单页时代只有一页，不存在这个问题）。
+                .accessibilityHidden(slot.relativeIndex != 0)
         }
     }
 
-    /// 全景图里第 `index` 页此刻应显示的横向偏移：当前页就是跟手位移，相邻页各差一页宽。
-    private func panPageOffset(for index: Int, current: Int, availableWidth: CGFloat) -> CGFloat {
-        slideOffset + CGFloat(index - current) * availableWidth
+    /// 全景图此刻该铺的格：`[-1, 0, +1]`，越界的不铺。
+    ///
+    /// `+1` 格有两支：本章还有下一页就用本章的；已经是本章最后一页、且下一章第 1 页
+    /// 已就绪（`nextPages` 非空）就用**下一章的第 1 页**；两者都不是（最后一章 / 还没
+    /// 预加载完）就不铺 —— 那一格空着，`PagePanTracking.turn` 同样判 `.none`（回弹，不提示）。
+    private func panSlots(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) -> [PanSlot] {
+        let current = viewStore.currentPageIndex
+        let pages = viewStore.pages
+        return [-1, 0, 1].compactMap { relative in
+            let index = current + relative
+            if pages.indices.contains(index) {
+                return PanSlot(
+                    id: PanSlot.Identity(path: viewStore.chapterPath, index: index),
+                    text: pageText(at: index, in: pages, text: viewStore.displayText),
+                    relativeIndex: relative
+                )
+            }
+            guard relative == 1, !pages.isEmpty, current == pages.count - 1,
+                  !viewStore.nextPages.isEmpty
+            else { return nil }
+            return PanSlot(
+                id: PanSlot.Identity(path: viewStore.nextChapter?.path ?? "", index: 0),
+                text: pageText(at: 0, in: viewStore.nextPages, text: viewStore.nextDisplayText),
+                relativeIndex: 1
+            )
+        }
     }
 
-    /// 全景图里的一页。**不接受命中测试**：手势挂在外面那层（见 `slideGesture`）。
+    /// 全景图里的一格。**不接受命中测试**：手势挂在外面那层（见 `slideGesture`）。
     private func panPage(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        pageIndex: Int
+        text: String,
+        configuration: PaginationConfiguration
     ) -> some View {
-        PageTextView(
-            text: pageText(at: pageIndex, in: viewStore),
-            configuration: viewStore.config
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
+        PageTextView(text: text, configuration: configuration)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
     }
 
     /// 指定页的文本片段（与 `currentPageText` 的区别：越界返回空串，不做「整章兜底」）。
-    private func pageText(
-        at pageIndex: Int,
-        in viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) -> String {
-        let pages = viewStore.pages
-        let text = viewStore.displayText
+    ///
+    /// 文本**显式传入**：当前章（`displayText`）与预加载的下一章（`nextDisplayText`）
+    /// 共用这一份切片逻辑，不复制第二份。
+    private func pageText(at pageIndex: Int, in pages: [PageRange], text: String) -> String {
         guard pages.indices.contains(pageIndex), !text.isEmpty else { return "" }
         let page = pages[pageIndex]
         let chars = Array(text)
@@ -188,7 +226,9 @@ extension ReaderView {
             geometry: PagePanGeometry(
                 availableWidth: availableWidth,
                 pageIndex: viewStore.currentPageIndex,
-                pageCount: viewStore.pages.count
+                pageCount: viewStore.pages.count,
+                // 下一章第 1 页已就绪 ⇒ 本章最后一页仍可继续 `.next`（换章）。
+                hasNextChapterPage: !viewStore.nextPages.isEmpty
             )
         )
         settlePan(turn, viewStore: viewStore, availableWidth: availableWidth)
@@ -215,6 +255,9 @@ extension ReaderView {
     /// 翻页那一支先把偏移补上一页再动画归零：换页之后「新的当前页」就是原来摆在旁边那一页，
     /// 补一页后它**此刻的屏幕位置完全没变**，接着的动画是连续的平移，不是「先跳一下再滑」。
     /// 这也是「像全景图滑动，但停留在正文页」的落地点 —— 全程只走一页，不连续滚动。
+    ///
+    /// **章尾换章走的是同一条路**：此刻 `+1` 格上摆的就是下一章第 1 页，换章后它正好
+    /// 变成当前页 —— 补位那一步与章内翻页**逐值相同**，观感因此连续（owner 要的「不先跳一下」）。
     private func settlePan(
         _ turn: PagePanTurn,
         viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
@@ -225,7 +268,13 @@ extension ReaderView {
         case .none:
             break
         case .next:
-            viewStore.send(.nextPage)
+            // 判 `.next` 时 `turn` 用的是同一次手势里的 pageIndex / pageCount，
+            // 所以「当前页是不是最后一页」在这里是同一个判据：是 ⇒ 换章，否则章内翻页。
+            if viewStore.currentPageIndex == viewStore.pages.count - 1 {
+                viewStore.send(.advanceChapter)
+            } else {
+                viewStore.send(.nextPage)
+            }
             if panning {
                 slideOffset += availableWidth
             }

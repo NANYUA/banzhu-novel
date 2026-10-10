@@ -126,25 +126,14 @@ struct ReaderSettingsView: View {
                         backgroundSwatch(style)
                     }
                 }
-                // 第二行：亮 / 暗两个自定义背景色预览色卡，点任一个即切到「自定义」。
+                // 第二行：亮 / 暗两个自定义背景色色卡 —— 色卡**本身就是 `ColorPicker` 的色块**，
+                // 点左卡直接开系统取色器改亮色、点右卡直接开系统取色器改暗色，各改各的。
+                // 改任一个色都会自动切到「自定义」——第一行已过滤掉 `.custom`，
+                // 第二行是进入自定义模式的唯一入口。
                 HStack(spacing: 14) {
-                    customBackgroundSwatch(isLight: true)
-                    customBackgroundSwatch(isLight: false)
+                    customBackgroundPicker(isLight: true)
+                    customBackgroundPicker(isLight: false)
                 }
-            }
-
-            if configuration.backgroundStyle == .custom {
-                ColorPicker(
-                    "亮色背景色",
-                    selection: customBackgroundColorBinding,
-                    supportsOpacity: false
-                )
-
-                ColorPicker(
-                    "暗色背景色",
-                    selection: customBackgroundColorDarkBinding,
-                    supportsOpacity: false
-                )
             }
 
             Picker("文字颜色", selection: binding(\.textColorMode)) {
@@ -164,7 +153,7 @@ struct ReaderSettingsView: View {
 
             HStack {
                 Text("上下边距")
-                Slider(value: verticalInsetBinding, in: -60 ... 48, step: 4)
+                Slider(value: verticalInsetBinding, in: -18 ... 48, step: 3)
                 Text("\(Int(configuration.inset.top))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -272,23 +261,40 @@ private extension ReaderSettingsView {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    /// 自定义背景色色卡（第二行）。`isLight` 决定预览的是亮色还是暗色的自定义色。
+    /// 自定义背景色色卡（第二行）。色卡**本身就是 `ColorPicker` 的色块**：
+    /// 点左卡直接开系统取色器改亮色、点右卡直接开系统取色器改暗色，各改各的。
     ///
-    /// 点任一个都只是把背景样式切到 `.custom` —— 颜色本身由 `.custom` 下的两个
-    /// `ColorPicker` 取。选中态只看**当前外观**对应的那一个：
-    /// 浅色外观 ↔ 亮色预览，深色外观 ↔ 暗色预览（`colorScheme` 见主类型里的说明）。
-    private func customBackgroundSwatch(isLight: Bool) -> some View {
-        let color = isLight ? configuration.customBackgroundColor : configuration.customBackgroundColorDark
-        return colorSwatch(
-            color: color.uiColor,
-            isSelected: configuration.backgroundStyle == .custom
-                && colorScheme == (isLight ? .light : .dark),
-            label: isLight ? "自定义背景色（亮色）" : "自定义背景色（暗色）"
-        ) {
-            var next = configuration
-            next.backgroundStyle = .custom
-            onChange(next)
-        }
+    /// 为什么不能让色卡只当按钮、再弹一个取色器：`ColorPicker` 的取色器**只能由它自己的
+    /// 色块被点开触发**，没有「用代码打开取色器」的 API，所以色卡必须直接就是那个色块。
+    ///
+    /// 选中态：`ColorPicker` 自身没有选中环，由外层叠一圈 `AppTheme.accent`
+    /// （与第一行 `colorSwatch` 同一套观感：28pt 视觉 + 44pt 命中区）。
+    /// 选中判据与改造前逐字一致：只看**当前外观**对应的那一个 ——
+    /// 浅色外观 ↔ 亮色卡，深色外观 ↔ 暗色卡（`colorScheme` 见主类型里的说明）。
+    private func customBackgroundPicker(isLight: Bool) -> some View {
+        let label = isLight ? "自定义背景色（亮色）" : "自定义背景色（暗色）"
+        let isSelected = configuration.backgroundStyle == .custom
+            && colorScheme == (isLight ? .light : .dark)
+        return ColorPicker(
+            label,
+            selection: isLight ? customBackgroundColorBinding : customBackgroundColorDarkBinding,
+            supportsOpacity: false
+        )
+        .labelsHidden()
+        // 外层补到 44pt（HIG 最小可点区域）；选中环按第一行色卡的 28pt 视觉尺寸对齐
+        .frame(minWidth: 44, minHeight: 44)
+        .overlay(
+            Circle()
+                .strokeBorder(
+                    isSelected ? AppTheme.accent : Color.secondary.opacity(0.3),
+                    lineWidth: isSelected ? 3 : 1
+                )
+                .frame(width: 28, height: 28)
+                // 选中环只是视觉，绝不能吃掉取色器色块的点击
+                .allowsHitTesting(false)
+        )
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     /// 按下强调层的颜色：按色块自身的亮度配一个**反色**。
@@ -374,9 +380,15 @@ private extension ReaderSettingsView {
 
     /// 上下边距（U1-8）：与左右分开可调 —— 原先一个「页边距」滑杆同时改四边。
     ///
-    /// 滑杆范围 `-60 ... 48`（owner 决定放开负值）：**负值让正文侵入上下安全区**，
-    /// 最多多出 60pt 正文高度；上限仍是 48pt。上下不需要 HIG 那套水平页边距的下限
+    /// 滑杆范围 `-18 ... 48`（owner 2026-10-11 拍板「收到 -18：全机型都安全」）：
+    /// **负值让正文侵入上下安全区**，上限仍是 48pt；下限从 `-60` 收到 `-18`，
+    /// 因为 `-18` 是**全机型（灵动岛 / 刘海屏）都不会让首行被缺口盖住**的下限 ——
+    /// 此前 `-60` 允许用户把首行直接推到缺口下面（正文整行满宽，躲不开）。
+    /// 步长取 `3` 是为了让上下限**两端都精确可达**（`48 − (−18) = 66 = 22 × 3`；
+    /// 若取 4，步进网格只能到 46，上限 48 就不可达了）。
+    /// 上下不需要 HIG 那套水平页边距的下限
     /// （左右边距的下限仍守 8pt，见 `horizontalInsetBinding`）。
+    /// 本滑杆**同时写 `top` 与 `bottom`** ⇒ `PageInset` 的竖向默认值必须对称（见其文档）。
     var verticalInsetBinding: Binding<CGFloat> {
         Binding(
             get: { configuration.inset.top },
@@ -402,24 +414,29 @@ private extension ReaderSettingsView {
         )
     }
 
+    /// 亮色自定义背景色。改色即把背景样式切到 `.custom`：第一行已过滤掉 `.custom`，
+    /// 第二行的取色器是进入自定义模式的**唯一入口** —— 只改色不切样式，用户就再也进不去。
     var customBackgroundColorBinding: Binding<Color> {
         Binding(
             get: { configuration.customBackgroundColor.swiftUIColor },
             set: { newValue in
                 var next = configuration
                 next.customBackgroundColor = ReadingColor(newValue)
+                next.backgroundStyle = .custom
                 onChange(next)
             }
         )
     }
 
-    /// 暗色自定义背景色（深色外观下生效）。与 `customBackgroundColorBinding` **对称**。
+    /// 暗色自定义背景色（深色外观下生效）。与 `customBackgroundColorBinding` **对称**：
+    /// 同样只写 `customBackgroundColorDark`，同样改色即切到 `.custom`（两个色卡互不影响）。
     var customBackgroundColorDarkBinding: Binding<Color> {
         Binding(
             get: { configuration.customBackgroundColorDark.swiftUIColor },
             set: { newValue in
                 var next = configuration
                 next.customBackgroundColorDark = ReadingColor(newValue)
+                next.backgroundStyle = .custom
                 onChange(next)
             }
         )

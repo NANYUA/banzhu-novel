@@ -186,7 +186,16 @@ private enum ReadingSettingsLive {
 /// 「首次安装 → 用户当轮把滑杆调回正值 → 下次启动被当成旧默认覆盖掉」。
 enum VerticalInsetDefaultMigration {
     /// `UserDefaults` key，沿用本项目「`<域>.<用途>.v<版本>`」的既有命名习惯。
-    static let storageKey = "reader.insetDefaultMigrated.v1"
+    ///
+    /// 版本号从 `v1` 提到 `v2`（U9-7 后续：竖向默认值由 `-24 / -22` 收敛到 `-18 / -18`）：
+    /// 这个迁移的语义是「**标记不存在** ⇒ 把已存的上下 inset 重置为新默认」，而 owner 可能
+    /// 已经装过带 `-24` 的那版包 ⇒ `v1` 标记**早已写下** ⇒ 不改 key 的话，新默认
+    /// **永远不会生效**，owner 真机上会看到「没变化」。换 key 等于让新默认值再迁移一次。
+    ///
+    /// **保持 `v2`，不要再往上提**：`v1` 只存在于**已推送**的 `5050984`（`-24 / -22`），
+    /// 而 `-18 / -22` → `-18 / -18` 这一版**尚未提交、不会到 owner 手上** ⇒ `v2` 已足以让
+    /// 新默认生效；再换 key 只会把已装过 `v2` 的用户无谓地再重置一次。
+    static let storageKey = "reader.insetDefaultMigrated.v2"
 
     /// 迁移已存设置；`settings == nil` 表示本机没有已存设置（返回 nil，不落盘）。
     static func apply(

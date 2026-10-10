@@ -77,7 +77,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（24 文件）
+│   └── Sources/                     # SwiftUI 视图层（26 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条）
@@ -85,7 +85,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       ├── ChapterListView.swift    # 目录页 + 章节下载选择
 │       ├── Reader*.swift            # 阅读器：View / PageGesture / PageTurn /
 │       │                            #   SlideTracking / PageTextView / Appearance /
-│       │                            #   SettingsView / SearchView
+│       │                            #   Chrome / ChromeStyle / SettingsView / SearchView
 │       ├── SearchView.swift         # 搜索
 │       ├── ExploreView.swift        # 发现/分类
 │       ├── DownloadQueueView.swift  # 下载队列 + 下载设置

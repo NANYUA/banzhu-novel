@@ -23,6 +23,9 @@ struct ReaderSearchView: View {
                     )
                 } else {
                     ForEach(results) { hit in
+                        // `insetGrouped` 只在分组首 / 末行给卡面圆角，强调层必须逐角跟随（见 `shape`）。
+                        let isFirstHit = hit.id == results.first?.id
+                        let isLastHit = hit.id == results.last?.id
                         Button {
                             onSelect(hit)
                         } label: {
@@ -35,8 +38,10 @@ struct ReaderSearchView: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
-                            // 行内边距由标签自己持有（配合下面的 `listRowInsets`）：竖向
-                            // `Spacing.sm`(12) 撑出 44pt 以上命中区，强调层才能覆盖**整行**。
+                            // 左右内边距改由标签自己持有：下面 `listRowInsets` 水平归零后标签铺满
+                            // 整张卡，强调层才能覆盖**含内边距在内的整行**（真机反馈「也没有覆盖
+                            // 整个卡片」：原来只覆盖到内容区那一条）。
+                            .padding(.horizontal, DesignTokens.Spacing.md)
                             .padding(.vertical, DesignTokens.Spacing.sm)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             .contentShape(Rectangle())
@@ -46,20 +51,21 @@ struct ReaderSearchView: View {
                         // `PressableCardButtonStyle` 后，反馈变成按下瞬间铺一层可见强调层
                         // （`Color.primary.opacity(0.12)`，浅色压暗 / 深色提亮）+ 轻微缩放，
                         // 且它整条替换了 `.plain` ⇒ 不再有第二套「文字变灰」叠在上面。
-                        // 圆角取 `Radius.sm`(12)：本行没有自绘卡面，轮廓是系统行背景；
-                        // 强调层水平内缩 `Spacing.md`(16)、垂直不出本行 ⇒ 圆角不会露到行外。
+                        // 强调层轮廓逐角跟随系统卡面圆角 —— 铺满整卡后若一律用直角，
+                        // 分组首 / 末行就会在圆角外露出方角。
                         .buttonStyle(PressableCardButtonStyle(
                             pressedScale: 0.99,
-                            shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+                            shape: AnyShape(UnevenRoundedRectangle(
+                                topLeadingRadius: isFirstHit ? DesignTokens.Radius.sm : 0,
+                                bottomLeadingRadius: isLastHit ? DesignTokens.Radius.sm : 0,
+                                bottomTrailingRadius: isLastHit ? DesignTokens.Radius.sm : 0,
+                                topTrailingRadius: isFirstHit ? DesignTokens.Radius.sm : 0
+                            ))
                         ))
-                        // 竖向 0 + 水平 16（= `insetGrouped` 系统默认行内边距）：左右缩进与行高
-                        // 都基本不变，只是把竖向内边距让给标签自己 ⇒ 强调层铺满整行高度。
-                        .listRowInsets(EdgeInsets(
-                            top: 0,
-                            leading: DesignTokens.Spacing.md,
-                            bottom: 0,
-                            trailing: DesignTokens.Spacing.md
-                        ))
+                        // 水平也归零：标签铺满整张卡 ⇒ 强调层覆盖整行，行高与文字缩进都不变。
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        // 分隔线起点仍留在原内容缩进处（行内边距归零后它本来会跑到卡片边缘）。
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in DesignTokens.Spacing.md }
                     }
                 }
             }
