@@ -38,7 +38,10 @@ targets:
     info:
       path: App/Resources/Info.plist
       properties:
+        CFBundleDevelopmentRegion: zh-Hans
         CFBundleDisplayName: 小说阅读器
+        CFBundleLocalizations:
+          - zh-Hans
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
