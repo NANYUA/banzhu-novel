@@ -140,7 +140,7 @@ struct ReaderSettingsView: View {
 
             if configuration.backgroundStyle == .custom {
                 ColorPicker(
-                    "自定义背景色",
+                    "亮色背景色",
                     selection: customBackgroundColorBinding,
                     supportsOpacity: false
                 )

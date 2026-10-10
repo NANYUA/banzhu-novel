@@ -381,9 +381,11 @@ private extension ReaderView {
             .frame(maxWidth: .infinity, minHeight: 44)
             .contentShape(Rectangle())
         }
-        // §9 按下反馈：`.plain` 按下零反馈。强调层贴按钮自身的 12pt 圆角矩形，
-        // 不再与外面这根 18pt 圆角的材质条在圆角处打架。
-        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
+        // §9 按下反馈：`.plain` 按下零反馈。强调层贴按钮自身的 `Radius.xs`(6) 圆角矩形：
+        // 按钮四周内缩 `Spacing.sm`(12)，外面这根材质条圆角 `Radius.lg`(18)，
+        // 故 6 = 18 - 12，强调层才能**彻底**落在栏的圆角之内。
+        // （原先的 12 只是缓解 —— 对角方向仍会露出约 2.5pt 方角。）
+        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.xs))))
         .foregroundStyle(.primary)
     }
 
