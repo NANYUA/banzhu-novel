@@ -1,9 +1,13 @@
 # Novel Reader · Project Guide
 
+> ⚠️ **维护规则（重要）**：本文件是 harness **自动加载**的项目约定，必须与代码同步。
+> 凡改动**目录结构 / 文件增删 / 构建命令 / 数据契约**，**必须在同一个改动里更新本文件**，不要留到下次。
+> 本文件只写**模块级**结构，**不逐文件罗列**（会漂移）；文件级索引（每个文件的行数与主类型行号）、行数红线、测试映射见本地工作区文档 `PROJECT_MAP.md`（该文件不在本仓库内）。
+
 ## Status
 
-业务开发阶段。书架、目录、阅读、搜索、下载队列、书架分组、批量操作、
-阅读设置持久化均已落地；章节级 LRU 缓存淘汰规则与执行器已实现。
+业务开发阶段。书架、目录、阅读、搜索、发现、下载队列、书架分组、批量操作、
+站点设置、阅读设置持久化均已落地；章节级 LRU 缓存淘汰规则与执行器已实现。
 
 缓存闭环已接通：阅读成功后写入 `lastReadAt`；阅读时自动缓存后续章节，
 缓存后触发 LRU 淘汰。
@@ -15,9 +19,10 @@
 | 最低系统版本 | iOS 17.0（SwiftData 的硬门槛） |
 | 状态管理 | TCA (Point-Free) 1.23.0 |
 | 持久化 | SwiftData |
+| 排版度量 | NovelPagination（TextKit：NSTextStorage / NSLayoutManager） |
 | 工程生成 | XcodeGen |
 | 格式化 / 静态检查 | SwiftFormat + SwiftLint |
-| CI | GitHub Actions，五道关卡 |
+| CI | GitHub Actions，五道关卡 + 独立打包 workflow |
 
 ## 架构
 
@@ -25,14 +30,16 @@
 
 ```
 App → NovelCore → NovelEngine
+ └──→ NovelPagination        # 仅 App 直接使用（真实排版度量）
 ```
 
 - `NovelEngine`：纯逻辑层（网络 / 解析 / 解码），零 UI 依赖
-- `NovelCore`：状态管理（TCA）+ 持久化（SwiftData）
+- `NovelCore`：状态管理（TCA）+ 持久化（SwiftData）+ 分页算法
+- `NovelPagination`：TextKit 真实度量，是**包级 UIKit 白名单**（有意豁免）
 - `App`：SwiftUI 视图，不含业务逻辑
 
-`Packages/` 内禁止 `import SwiftUI`，由 `scripts/check-architecture.sh` 强制
-（CI 关卡 0，本地也可跑）。
+`Packages/` 内禁止 `import SwiftUI`（`NovelPagination` 除外），由
+`scripts/check-architecture.sh` 强制（CI 关卡 0，本地也可跑）。
 
 ## 三个必须知道的踩坑结论
 
@@ -58,32 +65,49 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 否则测试读不到文件 → 空字符串 → 解析出 0 条 → **数组越界崩溃**。
 且不能用 `Bundle.module`（xcodebuild 场景下不生成）。
 
-## 目录结构
+## 目录结构（模块级，文件数随代码变化请同步更新）
 
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/
-│       ├── AppMain.swift
-│       ├── RootView.swift
-│       ├── BookshelfView.swift
-│       ├── ChapterListView.swift
-│       ├── ReaderView.swift
-│       └── SearchView.swift
+│   └── Sources/                     # SwiftUI 视图层（23 文件）
+│       ├── AppMain.swift            # @main 入口
+│       ├── RootView.swift           # 三 tab 根视图 + 全局覆盖层
+│       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条）
+│       ├── BookDetailView*.swift    # 详情页（+DownloadRefresh）
+│       ├── ChapterListView.swift    # 目录页 + 章节下载选择
+│       ├── Reader*.swift            # 阅读器：View / PageGesture / PageTurn /
+│       │                            #   SlideTracking / PageTextView / Appearance /
+│       │                            #   SettingsView / SearchView
+│       ├── SearchView.swift         # 搜索
+│       ├── ExploreView.swift        # 发现/分类
+│       ├── DownloadQueueView.swift  # 下载队列 + 下载设置
+│       ├── SiteSettingsView.swift   # 站点设置
+│       ├── GuardView.swift          # 盾页/人机校验覆盖层
+│       └── AppTheme / DesignTokens / PressableCardButtonStyle.swift
 ├── Packages/
-│   ├── NovelEngine/             # 纯逻辑层
-│   │   ├── Sources/NovelEngine/ # 9 个文件
-│   │   └── Tests/               # 含 Fixtures 快照测试
-│   └── NovelCore/               # 状态 + 存储
-│       ├── Sources/NovelCore/
-│       │   ├── Models/          # BookRecord / ChapterRecord / BookGroup / DownloadTask
-│       │   ├── Storage/         # NovelStore (SwiftData)
-│       │   ├── Shelf/           # BookshelfFeature / ShelfRow / ShelfLoader / ShelfAdder / ShelfGroupStore / ShelfBatchDownloader
-│       │   └── Search/          # SearchFeature
-│       └── Tests/
+│   ├── NovelEngine/                 # 纯逻辑层（9 文件）
+│   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
+│   │   └── Tests/                   # 含 Fixtures 快照测试
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（42 文件）
+│   │   ├── Sources/NovelCore/
+│   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
+│   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
+│   │   │   ├── Shelf/               # BookshelfFeature / ShelfRow / ShelfLoader / ShelfAdder /
+│   │   │   │                        #   ShelfGroupStore / ShelfBatchDownloader
+│   │   │   ├── Search/ Detail/ Download/ Explore/
+│   │   │   ├── Reader/              # ReaderFeature / ReaderLoader / ChapterCacheStore /
+│   │   │   │                        #   ReadingSettingsStore / PagePanTracking / SlideTracking …
+│   │   │   ├── Pagination/          # Paginator / TextCursor / TextMeasuring / PageRange
+│   │   │   ├── Site/                # SiteFeature / SiteStore / NavigationRenderer
+│   │   │   └── Guard/               # GuardFeature / GuardCoordinator
+│   │   └── Tests/
+│   └── NovelPagination/             # TextKit 真实度量（UIKit 白名单包，2 文件）
 ├── scripts/
-│   └── check-architecture.sh    # 5 条架构约束
-└── .github/workflows/ci.yml     # 五道关卡
+│   └── check-architecture.sh        # 5 条架构约束
+└── .github/workflows/
+    ├── ci.yml                       # 五道关卡（架构 / 格式 / Lint / 编译 / 测试）
+    └── package-dev.yml              # 未签名打包
 ```
 
 ## 常用命令
@@ -104,6 +128,10 @@ xcodebuild -project BanzhuNovel.xcodeproj -scheme BanzhuNovel \
 swift test --package-path Packages/NovelCore
 swift test --package-path Packages/NovelEngine
 ```
+
+⚠️ 本机（Windows，无 Xcode/Swift）**跑不了编译与单测**，验证只能靠 CI；
+本地只能跑 `check-architecture.sh` 与 `swiftformat --lint`。CI 失败时会自动上传
+`build.log` / `test-core.log` / `test-engine.log` 为 artifact。
 
 ## 两条数据契约（破了就是用户可感知损失）
 
