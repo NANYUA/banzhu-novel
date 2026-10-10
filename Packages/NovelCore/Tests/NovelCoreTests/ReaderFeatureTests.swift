@@ -5,7 +5,9 @@ import XCTest
 
 /// 阅读页 reducer 测试。
 ///
-/// 用 `FakeMeasuring`（宽预算 10，中文 2 宽 → 每页约 5 字）确定性分页，
+/// 分页桩 `FakeMeasuring` 的宽预算**由 `configuration` 推导**（见文件末尾的
+/// `fakeWidthBudget`）：默认配置（320×480 / 字号 17 / 页边距 24）→ 预算 10，
+/// 中文 2 宽 → 每页 5 字。改设置因此会**真的重排 `pages`**，而不是空转。
 /// 钉住翻页和 characterOffset 数据契约。
 @MainActor
 final class ReaderFeatureTests: XCTestCase {
@@ -26,7 +28,7 @@ final class ReaderFeatureTests: XCTestCase {
             $0.readingProgressStore.markRead = progress
             $0.chapterCacheStore.cacheCurrentAndFollowing = cache
             $0.paginationService.paginate = { text, config in
-                Paginator(measurer: FakeMeasuring(widthBudget: 10))
+                Paginator(measurer: FakeMeasuring(widthBudget: fakeWidthBudget(for: config)))
                     .paginate(text: text, configuration: config)
             }
             if let settingsStore {
@@ -144,49 +146,6 @@ final class ReaderFeatureTests: XCTestCase {
         }
         await store.finish()
         XCTAssertEqual(store.state.currentOffset, 5)
-    }
-
-    /// 🔴 数据契约：改配置重新分页，但 currentOffset 不丢
-    func test改配置重新分页且offset不丢() async {
-        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
-        await loadSample(into: store)
-        await store.send(.nextPage) { $0.currentOffset = 5 }
-
-        // 改配置（容器尺寸变 → 重新分页，页数可能变）
-        await store.send(.configChanged(PaginationConfiguration(
-            containerSize: CGSize(width: 400, height: 480)
-        ))) {
-            $0.config.containerSize = CGSize(width: 400, height: 480)
-        }
-        await store.finish()
-        XCTAssertEqual(store.state.currentOffset, 5, "改配置后 offset 不应丢")
-    }
-
-    /// 外观类设置只更新配置，不触发重新分页，offset 同样不丢。
-    func test改外观设置保留分页和offset() async {
-        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
-        await loadSample(into: store)
-        await store.send(.nextPage) { $0.currentOffset = 5 }
-
-        var appearance = store.state.config
-        appearance.backgroundStyle = .black
-        appearance.customBackgroundColorDark = ReadingColor(red: 0.08, green: 0.08, blue: 0.1)
-        appearance.appearanceMode = .dark
-
-        await store.send(.configChanged(appearance)) {
-            $0.config.backgroundStyle = .black
-            $0.config.customBackgroundColorDark = ReadingColor(red: 0.08, green: 0.08, blue: 0.1)
-            $0.config.appearanceMode = .dark
-        }
-        await store.finish()
-        XCTAssertEqual(store.state.currentOffset, 5)
-        XCTAssertEqual(
-            store.state.pages,
-            [
-                PageRange(location: 0, length: 5),
-                PageRange(location: 5, length: 5),
-            ]
-        )
     }
 
     /// 加载失败：errorMessage 记录，isLoading 结束
@@ -318,6 +277,83 @@ final class ReaderFeatureTests: XCTestCase {
     }
 }
 
+// MARK: - 配置变化 → 重新分页
+
+/// 这几条放在 extension 里是有意的：`ReaderFeatureTests` 的类体已逼近 SwiftLint
+/// `type_body_length` 的 250 行 warning 线（CI `--strict` 下 warning 即失败），
+/// 而 extension **不计入**该指标（既有先例见下方「阅读设置持久化」）。
+@MainActor extension ReaderFeatureTests {
+    /// 校准点：默认配置必须推出宽预算 10 —— 本文件所有「每页 5 字」的期望都锚在这。
+    ///
+    /// 桩的预算改为由 config 推导后，这条就是**默认值护栏**：谁动了
+    /// `ReaderFeature.State` 的默认 config 或推导系数，它会立刻红，
+    /// 而不是让一批期望值莫名其妙地一起失败。
+    func test默认配置推出宽预算十() {
+        let config = ReaderFeature.State(chapterPath: "/1/1.html").config
+        XCTAssertEqual(fakeWidthBudget(for: config), 10, "默认配置必须推出预算 10")
+    }
+
+    /// 🔴 数据契约：改配置**真的重新分页**，且 currentOffset 不丢（重排后仍能定位）。
+    func test改配置重新分页且offset不丢() async {
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
+        await store.send(.nextPage) { $0.currentOffset = 5 }
+
+        let pagesBefore = store.state.pages
+        XCTAssertEqual(
+            pagesBefore,
+            [PageRange(location: 0, length: 5), PageRange(location: 5, length: 5)],
+            "前置条件：改配置前每页 5 字（预算 10）"
+        )
+        XCTAssertEqual(store.state.currentPageIndex, 1, "前置条件：offset 5 是第 1 页页首")
+
+        // 改配置：容器变宽 320 → 400，净宽 272 → 352，预算 10 → 13，每页 5 字 → 6 字。
+        // 页边界必须真的变，否则这条用例里的「重新分页」就是空转。
+        let sixPerPage = [PageRange(location: 0, length: 6), PageRange(location: 6, length: 4)]
+        await store.send(.configChanged(PaginationConfiguration(
+            containerSize: CGSize(width: 400, height: 480)
+        ))) {
+            $0.config.containerSize = CGSize(width: 400, height: 480)
+            $0.pages = sixPerPage
+        }
+        await store.finish()
+
+        XCTAssertNotEqual(store.state.pages, pagesBefore, "改配置后必须真的重新分页")
+        XCTAssertEqual(store.state.pages, sixPerPage, "重排后页边界应随新预算变化")
+        XCTAssertEqual(store.state.currentOffset, 5, "改配置后 offset 不应丢")
+        // offset 5 在旧分页里是第 1 页页首，重排后落进第 0 页（0..<6）中间 ——
+        // 仍能由 offset 反查出所在页，证明「重排后定位」不是靠页码。
+        XCTAssertEqual(store.state.currentPageIndex, 0, "重排后 offset 仍能定位到所在页")
+    }
+
+    /// 外观类设置只更新配置，不触发重新分页，offset 同样不丢。
+    func test改外观设置保留分页和offset() async {
+        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
+        await loadSample(into: store)
+        await store.send(.nextPage) { $0.currentOffset = 5 }
+
+        var appearance = store.state.config
+        appearance.backgroundStyle = .black
+        appearance.customBackgroundColorDark = ReadingColor(red: 0.08, green: 0.08, blue: 0.1)
+        appearance.appearanceMode = .dark
+
+        await store.send(.configChanged(appearance)) {
+            $0.config.backgroundStyle = .black
+            $0.config.customBackgroundColorDark = ReadingColor(red: 0.08, green: 0.08, blue: 0.1)
+            $0.config.appearanceMode = .dark
+        }
+        await store.finish()
+        XCTAssertEqual(store.state.currentOffset, 5)
+        XCTAssertEqual(
+            store.state.pages,
+            [
+                PageRange(location: 0, length: 5),
+                PageRange(location: 5, length: 5),
+            ]
+        )
+    }
+}
+
 // MARK: - 阅读设置持久化
 
 @MainActor extension ReaderFeatureTests {
@@ -343,15 +379,25 @@ final class ReaderFeatureTests: XCTestCase {
 
         await loadSample(into: store)
         // reducer 现在会立即应用真实容器尺寸（比例修复的一部分），所以 send 要带断言。
+        // 容器变宽 320 → 400（净宽 272 → 352，预算 10 → 13）→ 页边界随之重排。
         await store.send(.loadSavedSettings(CGSize(width: 400, height: 600))) {
             $0.config.containerSize = CGSize(width: 400, height: 600)
+            $0.pages = [
+                PageRange(location: 0, length: 6),
+                PageRange(location: 6, length: 4),
+            ]
         }
+        // 恢复的字号 20 参与推导：352 / (20 × 1.6) = 11 → 每页 5 字，页边界再变一次。
         await store.receive(.settingsLoaded(saved, CGSize(width: 400, height: 600))) {
             $0.config.containerSize = CGSize(width: 400, height: 600)
             $0.config.fontSize = 20
             $0.config.lineSpacing = 8
             $0.config.customBackgroundColorDark = ReadingColor(red: 0.12, green: 0.12, blue: 0.14)
             $0.precacheCount = 5
+            $0.pages = [
+                PageRange(location: 0, length: 5),
+                PageRange(location: 5, length: 5),
+            ]
         }
         await store.finish()
         XCTAssertEqual(store.state.config.fontSize, 20)
@@ -393,6 +439,11 @@ final class ReaderFeatureTests: XCTestCase {
 
         await store.send(.containerSizeChanged(CGSize(width: 400, height: 600))) {
             $0.config.containerSize = CGSize(width: 400, height: 600)
+            // 尺寸变化 → 预算 10 → 13 → 页边界真的重排（不只是 config 变了）
+            $0.pages = [
+                PageRange(location: 0, length: 6),
+                PageRange(location: 6, length: 4),
+            ]
         }
         await store.finish()
         XCTAssertEqual(store.state.currentOffset, 5, "尺寸变化后 offset 不应丢")
@@ -417,6 +468,12 @@ final class ReaderFeatureTests: XCTestCase {
         await store.send(.configChanged(next)) {
             $0.config.fontSize = 22
             $0.config.backgroundStyle = .black
+            // 字号 17 → 22：272 / (22 × 1.6) ≈ 7.7 → 预算 8 → 每页 4 字 → 3 页
+            $0.pages = [
+                PageRange(location: 0, length: 4),
+                PageRange(location: 4, length: 4),
+                PageRange(location: 8, length: 2),
+            ]
         }
         await store.send(.precacheCountChanged(7)) {
             $0.precacheCount = 7
@@ -484,4 +541,37 @@ private final class SettingsRecorder: @unchecked Sendable {
         defer { lock.unlock() }
         return latestSaved
     }
+}
+
+/// 由分页配置推导 `FakeMeasuring` 的宽预算 —— 让「改设置」在测试里**真的**改变分页。
+///
+/// ## 为什么需要
+/// 此前 `makeStore` 把预算钉死成 10，`FakeMeasuring` 又丢弃 `configuration`，
+/// 于是改容器 / 字号 / 行距 / 页边距都改不动 `pages`，
+/// 「改配置 → 重新分页」的用例其实是空转（只验证了 offset 不丢）。
+///
+/// ## 映射
+/// `f(config) = max(1, round(净宽 / (fontSize × 1.6)))`，
+/// 净宽 = `containerSize.width - inset.leading - inset.trailing`。
+///
+/// 与 `PaginatorTests` 同一思路：宽预算就是「容器 / 字号」的代理，
+/// 容器变宽或字号变小 → 预算变大 → 每页字数变多。
+///
+/// ## 校准点：默认配置必须推出 10
+/// 本文件绝大多数期望都锚在「默认配置 → 预算 10 → 每页 5 个中文」。
+/// 默认配置取自 `ReaderFeature.State`（`containerSize = 320×480`、`fontSize = 17`、
+/// `inset = PageInset()` 即左右各 24）：净宽 `320 - 24 - 24 = 272`，
+/// `272 / (17 × 1.6) = 272 / 27.2 = 10` —— 正好 10，既有期望因此全部成立。
+/// 系数 1.6 正是从这个校准点反推出来的（`272 / 17 / 10 = 1.6`），不是另挑的魔数。
+///
+/// 取整用 `rounded()` 而不是截断：`17 × 1.6` 在二进制浮点下是 27.200000000000003，
+/// 截断会把 10 变成 9，本文件所有「每页 5 字」的期望会集体变红。
+private func fakeWidthBudget(for configuration: PaginationConfiguration) -> Int {
+    let netWidth = configuration.containerSize.width
+        - configuration.inset.leading
+        - configuration.inset.trailing
+    // 字号下限 1：除零会得到 ∞，`Int(∞)` 直接崩
+    let lineHeight = max(configuration.fontSize, 1) * 1.6
+    let budget = Int((netWidth / lineHeight).rounded())
+    return max(1, budget)
 }
