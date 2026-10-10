@@ -81,9 +81,7 @@ extension ReaderView {
     ) -> some View {
         PageTextView(
             text: pageText(at: pageIndex, in: viewStore),
-            offset: 0,
-            configuration: viewStore.config,
-            onOffsetChange: { _ in }
+            configuration: viewStore.config
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)

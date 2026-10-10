@@ -132,8 +132,6 @@ public struct ReaderFeature: Reducer {
         case nextPage
         /// 上一页
         case prevPage
-        /// 跳到指定字符偏移
-        case jumpToOffset(Int)
         /// 分页配置变化（触发重算分页 + 按 offset 重新定位）
         case configChanged(PaginationConfiguration)
         /// 自动预缓存后续章节数变化
@@ -232,16 +230,6 @@ public struct ReaderFeature: Reducer {
                 }
                 state.pageTurnDirection = .backward
                 state.currentOffset = state.pages[pageIndex - 1].location
-                return saveProgress(
-                    chapterPath: state.chapterPath,
-                    offset: state.progressOffset,
-                    store: readingProgressStore
-                )
-
-            case let .jumpToOffset(offset):
-                // clamp 到文本范围
-                let maxOffset = max(0, state.displayText.count)
-                state.currentOffset = min(max(0, offset), maxOffset)
                 return saveProgress(
                     chapterPath: state.chapterPath,
                     offset: state.progressOffset,

@@ -244,11 +244,7 @@ private extension ReaderView {
     ) -> some View {
         PageTextView(
             text: currentPageText(viewStore),
-            offset: viewStore.currentOffset,
-            configuration: configuration,
-            onOffsetChange: { offset in
-                viewStore.send(.jumpToOffset(offset))
-            }
+            configuration: configuration
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 正文永远不接受命中测试：手势统一挂在外层（`slideGesture`），

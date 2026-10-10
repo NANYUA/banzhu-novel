@@ -115,32 +115,6 @@ final class ReaderFeatureTests: XCTestCase {
         XCTAssertEqual(store.state.currentOffset, 0)
     }
 
-    /// jumpToOffset：跳到一个位置，随后 nextPage 从那里继续
-    func test跳转到指定offset() async {
-        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
-        await loadSample(into: store)
-
-        await store.send(.jumpToOffset(3)) {
-            $0.currentOffset = 3
-        }
-        // offset=3 在第 0 页（0..<5），next 去第 1 页（5）
-        await store.send(.nextPage) {
-            $0.currentOffset = 5
-        }
-        await store.finish()
-    }
-
-    /// jumpToOffset 越界 clamp
-    func test跳转越界clamp() async {
-        let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
-        await loadSample(into: store)
-
-        await store.send(.jumpToOffset(999)) {
-            $0.currentOffset = 10 // 文本 10 字符，clamp 到 10
-        }
-        await store.finish()
-    }
-
     /// 🔴 数据契约：改配置重新分页，但 currentOffset 不丢
     func test改配置重新分页且offset不丢() async {
         let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
