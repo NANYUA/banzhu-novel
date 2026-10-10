@@ -22,10 +22,9 @@ extension DependencyValues {
 
     private enum ReaderLoaderKey: DependencyKey {
         static let liveValue = ReaderLoader { chapterPath in
-            if let localText = try? await ReaderLoaderLive.load(chapterPath: chapterPath) {
-                return localText
+            try await ReaderLoaderLive.loadWithHeal(chapterPath: chapterPath) { path in
+                try await NovelEngine.shared.content(chapterPath: path)
             }
-            return try await NovelEngine.shared.content(chapterPath: chapterPath)
         }
 
         /// 测试默认值：返回空串，避免忘记注入桩的测试意外联网。
@@ -33,28 +32,63 @@ extension DependencyValues {
     }
 }
 
-/// 阅读正文的本地缓存读取。
+/// 阅读正文的本地缓存读取与**自愈**。
 ///
-/// 已缓存或用户下载的章节直接读文件，离线也能打开；
-/// 没有本地正文时再由依赖调用网络加载。
+/// 本地正文**新鲜**就直接用（已缓存秒开、离线可读，不发网络请求）；
+/// 本地正文**过期**（可能是旧构建写下的不完整正文）或没有本地正文时才联网；
+/// 联网失败则退回过期的本地正文 —— 少一段好过整章空白。
 @MainActor
 enum ReaderLoaderLive {
-    static func load(chapterPath: String) throws -> String? {
-        let context = try ModelContext(NovelStore.makeContainer())
-        return try load(chapterPath: chapterPath, in: context)
+    /// 生产接线：本地新鲜即返回本地，过期或缺失才联网，联网失败退回旧正文。
+    static func loadWithHeal(
+        chapterPath: String,
+        fetch: (String) async throws -> String
+    ) async throws -> String {
+        guard let context = try? ModelContext(NovelStore.makeContainer()) else {
+            return try await fetch(chapterPath)
+        }
+        return try await loadWithHeal(chapterPath: chapterPath, in: context, fetch: fetch)
     }
 
-    static func load(chapterPath: String, in context: ModelContext) throws -> String? {
+    /// 可注入容器 / 世代 / 正文加载器的实现，供测试直接验证自愈规则。
+    static func loadWithHeal(
+        chapterPath: String,
+        in context: ModelContext,
+        epoch: Date = ContentEpoch.current(),
+        fetch: (String) async throws -> String
+    ) async throws -> String {
+        let local = try? load(chapterPath: chapterPath, in: context, epoch: epoch)
+        if let local, !local.isStale {
+            return local.text
+        }
+        do {
+            return try await fetch(chapterPath)
+        } catch {
+            // 离线兜底：返回过期的本地正文。它会在下次联网成功时被完整正文替换。
+            if let local {
+                return local.text
+            }
+            throw error
+        }
+    }
+
+    /// 读取本地正文，并回报它是否「过期」（`savedAt` 早于本安装的正文世代）。
+    static func load(
+        chapterPath: String,
+        in context: ModelContext,
+        epoch: Date = ContentEpoch.current()
+    ) throws -> (text: String, isStale: Bool)? {
         let descriptor = FetchDescriptor<ChapterRecord>(
             predicate: #Predicate { $0.path == chapterPath }
         )
         guard let chapter = try context.fetch(descriptor).first, chapter.hasLocalText else {
             return nil
         }
-        return try NovelStore.loadChapterText(
+        let text = try NovelStore.loadChapterText(
             bookPath: chapter.bookPath,
             number: chapter.number
         )
+        return (text, ContentEpoch.isStale(savedAt: chapter.savedAt, epoch: epoch))
     }
 }
 

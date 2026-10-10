@@ -53,10 +53,15 @@ public struct TextKitMeasuring: TextMeasuring {
         storage.addLayoutManager(layoutManager)
 
         // 一页容器（尺寸来自 configuration，减掉内边距）
+        //
+        // 竖向 inset 必须与 `PageTextView` **同款 clamp 到 >= 0**（U9-7）：`PageInset` 的
+        // 上下默认值是负的（= 相对安全区向屏幕边缘推的偏移量），那部分外扩已经由
+        // `ReaderView` 放大 `containerSize` 兑现（盒子高了 24 + 22）。这里若再按负值
+        // 加回去，净高会多算 2 × 46pt ⇒ 每页多塞进正文，分页与实际渲染错位（B0-2）。
         let contentWidth = max(configuration.containerSize.width
             - configuration.inset.leading - configuration.inset.trailing, 0)
         let contentHeight = max(configuration.containerSize.height
-            - configuration.inset.top - configuration.inset.bottom, 0)
+            - max(0, configuration.inset.top) - max(0, configuration.inset.bottom), 0)
         let container = NSTextContainer(size: CGSize(width: contentWidth, height: contentHeight))
         container.lineFragmentPadding = 0
         container.heightTracksTextView = false

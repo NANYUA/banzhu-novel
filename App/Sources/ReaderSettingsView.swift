@@ -9,12 +9,6 @@ private struct ReaderFontOption {
     let familyName: String
 }
 
-/// 自定义背景色的两个 hex 输入框（亮色 / 暗色），用于跟踪"当前聚焦的是哪一个"。
-private enum HexColorField: Hashable {
-    case light
-    case dark
-}
-
 /// 阅读设置面板。
 ///
 /// 面板只负责把用户选择整理成新的 `PaginationConfiguration`，
@@ -27,15 +21,11 @@ struct ReaderSettingsView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    /// hex 输入框的**草稿文本**：`nil` = 未编辑、跟随配置；非 nil = 用户敲进去的原始串。
-    /// 必须留草稿，否则每敲一键都回写 —— hex 打到一半（如 `#F2F`）必然非法，
-    /// 输入框会跟用户抢输入，一个色值也打不完。
-    @State private var lightHexDraft: String?
-    @State private var darkHexDraft: String?
-
-    /// 当前聚焦的 hex 输入框：**失焦时丢弃非法草稿**，让文字退回当前有效值
-    /// （apple-design-2 §11 就地校验：不让用户看着一个没生效的串以为生效了）。
-    @FocusState private var focusedHexField: HexColorField?
+    /// 当前生效的外观。自定义背景色的两个预览色卡靠它判断**哪一个算选中**
+    /// （浅色外观 ↔ 亮色预览，深色外观 ↔ 暗色预览）。阅读页的「夜间模式」会经
+    /// `.preferredColorScheme` 传到这个 sheet，所以这里拿到的是阅读页**实际生效**的外观，
+    /// 而不是裸的系统外观。
+    @Environment(\.colorScheme) private var colorScheme
 
     /// 字体白名单：默认系统字体（SF Pro），另给几个适合中文正文阅读的字体族。
     /// 不用 `UIFont.familyNames`，避免把 Roboto / Inter 等第三方字体灌进 Picker。
@@ -132,9 +122,14 @@ struct ReaderSettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("背景色")
                 HStack(spacing: 14) {
-                    ForEach(ReadingBackgroundStyle.allCases, id: \.self) { style in
+                    ForEach(ReadingBackgroundStyle.allCases.filter { $0 != .custom }, id: \.self) { style in
                         backgroundSwatch(style)
                     }
+                }
+                // 第二行：亮 / 暗两个自定义背景色预览色卡，点任一个即切到「自定义」。
+                HStack(spacing: 14) {
+                    customBackgroundSwatch(isLight: true)
+                    customBackgroundSwatch(isLight: false)
                 }
             }
 
@@ -145,7 +140,11 @@ struct ReaderSettingsView: View {
                     supportsOpacity: false
                 )
 
-                customBackgroundHexFields
+                ColorPicker(
+                    "暗色背景色",
+                    selection: customBackgroundColorDarkBinding,
+                    supportsOpacity: false
+                )
             }
 
             Picker("文字颜色", selection: binding(\.textColorMode)) {
@@ -209,15 +208,36 @@ struct ReaderSettingsView: View {
 
     // MARK: - 控件
 
+    /// 预置背景色色卡（第一行）。
     private func backgroundSwatch(_ style: ReadingBackgroundStyle) -> some View {
-        let isSelected = configuration.backgroundStyle == style
-        return Button {
+        colorSwatch(
+            color: backgroundUIColor(for: style),
+            isSelected: configuration.backgroundStyle == style,
+            label: style.displayName
+        ) {
             var next = configuration
             next.backgroundStyle = style
             onChange(next)
-        } label: {
+        }
+    }
+}
+
+private extension ReaderSettingsView {
+    /// 一个背景色卡：28pt 圆 + 44pt 命中区 + 选中环 + 按下强调。
+    ///
+    /// 两行（预置 / 自定义）共用同一套视觉与交互 —— owner 要求自定义色卡
+    /// 「使用现在的亮色背景色选项的色卡」，所以这里只把差异抽成参数，观感逐值不变。
+    ///
+    /// 放 extension 里：`type_body_length` 不统计 extension，而主类型 body 本就贴着门槛。
+    private func colorSwatch(
+        color: UIColor,
+        isSelected: Bool,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
             Circle()
-                .fill(Color(uiColor: backgroundUIColor(for: style)))
+                .fill(Color(uiColor: color))
                 .frame(width: 28, height: 28)
                 .overlay(
                     Circle()
@@ -245,15 +265,32 @@ struct ReaderSettingsView: View {
         .buttonStyle(
             PressableCardButtonStyle(
                 shape: AnyShape(Circle().inset(by: DesignTokens.Spacing.xs)),
-                pressedHighlightColor: swatchHighlightColor(for: style)
+                pressedHighlightColor: swatchHighlightColor(for: color)
             )
         )
-        .accessibilityLabel(style.displayName)
+        .accessibilityLabel(label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
-}
 
-private extension ReaderSettingsView {
+    /// 自定义背景色色卡（第二行）。`isLight` 决定预览的是亮色还是暗色的自定义色。
+    ///
+    /// 点任一个都只是把背景样式切到 `.custom` —— 颜色本身由 `.custom` 下的两个
+    /// `ColorPicker` 取。选中态只看**当前外观**对应的那一个：
+    /// 浅色外观 ↔ 亮色预览，深色外观 ↔ 暗色预览（`colorScheme` 见主类型里的说明）。
+    private func customBackgroundSwatch(isLight: Bool) -> some View {
+        let color = isLight ? configuration.customBackgroundColor : configuration.customBackgroundColorDark
+        return colorSwatch(
+            color: color.uiColor,
+            isSelected: configuration.backgroundStyle == .custom
+                && colorScheme == (isLight ? .light : .dark),
+            label: isLight ? "自定义背景色（亮色）" : "自定义背景色（暗色）"
+        ) {
+            var next = configuration
+            next.backgroundStyle = .custom
+            onChange(next)
+        }
+    }
+
     /// 按下强调层的颜色：按色块自身的亮度配一个**反色**。
     ///
     /// 复用「文字颜色 = 跟随背景」那条既有规则（`ReaderAppearance.swift` 的
@@ -261,11 +298,8 @@ private extension ReaderSettingsView {
     /// 于是既不新增色值，也不另立一个亮度阈值（全仓只有一个亮度真相源）。
     /// 纯黑块不可能被判成亮色而配黑，纯白块也不可能被判成暗色而配白，
     /// 所以有效色块范围内强调层与色块**永远不会重合**。
-    ///
-    /// 放 extension 里：`type_body_length` 不统计 extension，而主类型 body 本就贴着门槛。
-    private func swatchHighlightColor(for style: ReadingBackgroundStyle) -> Color {
-        let background = backgroundUIColor(for: style)
-        return Color(
+    private func swatchHighlightColor(for background: UIColor) -> Color {
+        Color(
             uiColor: ReadingTextColorMode.automatic.uiColor(
                 on: background,
                 custom: configuration.customBackgroundColor
@@ -379,116 +413,16 @@ private extension ReaderSettingsView {
         )
     }
 
-    /// 亮色自定义背景色的 hex 输入框绑定（与 `customBackgroundColorBinding` 写**同一份配置**）。
-    var customBackgroundColorHexBinding: Binding<String> {
-        hexTextBinding(
-            draft: $lightHexDraft,
-            current: configuration.customBackgroundColor
-        ) { color in
-            var next = configuration
-            next.customBackgroundColor = color
-            onChange(next)
-        }
-    }
-
-    /// 暗色自定义背景色的 hex 输入框绑定：与上面那个**对称**，只是写 `customBackgroundColorDark`。
-    var customBackgroundColorDarkHexBinding: Binding<String> {
-        hexTextBinding(
-            draft: $darkHexDraft,
-            current: configuration.customBackgroundColorDark
-        ) { color in
-            var next = configuration
-            next.customBackgroundColorDark = color
-            onChange(next)
-        }
-    }
-
-    /// 亮 / 暗两个 hex 输入框（与上面的 `ColorPicker` 并存：取色器负责「挑」，输入框负责「精确填」）。
-    var customBackgroundHexFields: some View {
-        Group {
-            hexColorField(
-                title: "亮色代码",
-                accessibilityLabel: "亮色自定义背景色，输入颜色代码",
-                field: .light,
-                text: customBackgroundColorHexBinding
-            )
-            hexColorField(
-                title: "暗色代码",
-                accessibilityLabel: "暗色自定义背景色，输入颜色代码",
-                field: .dark,
-                text: customBackgroundColorDarkHexBinding
-            )
-        }
-        // 焦点一旦离开某个输入框，就丢掉它的草稿 → 文字被 `get` 拉回当前有效值。
-        .onChange(of: focusedHexField) { previous, _ in
-            revertHexDraft(previous)
-        }
-        // 取色器改了颜色 ⇒ 同侧的草稿作废，输入框立刻显示新色值（否则会停在旧串上）。
-        .onChange(of: configuration.customBackgroundColor) { _, _ in
-            lightHexDraft = nil
-        }
-        .onChange(of: configuration.customBackgroundColorDark) { _, _ in
-            darkHexDraft = nil
-        }
-    }
-
-    /// 一行 hex 输入框：左边标签，右边等宽输入区。
-    ///
-    /// 触控目标：`Form` 的行本身已是 44pt 高（HIG §9 最小可点区域），输入框撑满行高。
-    private func hexColorField(
-        title: String,
-        accessibilityLabel: String,
-        field: HexColorField,
-        text: Binding<String>
-    ) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            TextField("#F2F2F7", text: text)
-                .multilineTextAlignment(.trailing)
-                .monospaced()
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($focusedHexField, equals: field)
-                // 回车不一定失焦：这里也要丢草稿，否则无效串会一直留在框里。
-                .onSubmit { revertHexDraft(field) }
-                .accessibilityLabel(accessibilityLabel)
-        }
-    }
-
-    /// hex 文本 ⇄ `ReadingColor` 的桥。
-    ///
-    /// `get`：有草稿就回吐草稿（**不与正在输入的用户抢光标**），否则回吐当前有效值的 `#RRGGBB`。
-    /// `set`：**能解析才写回配置**；解析失败只更新草稿 —— 配置保留上一个有效值，
-    /// 既不写坏配置也不会崩（`ReadingColor(hex:)` 解析失败返回 `nil`，不是陷阱）。
-    private func hexTextBinding(
-        draft: Binding<String?>,
-        current: ReadingColor,
-        apply: @escaping (ReadingColor) -> Void
-    ) -> Binding<String> {
+    /// 暗色自定义背景色（深色外观下生效）。与 `customBackgroundColorBinding` **对称**。
+    var customBackgroundColorDarkBinding: Binding<Color> {
         Binding(
-            get: { draft.wrappedValue ?? current.hexString },
-            set: { text in
-                guard let color = ReadingColor(hex: text) else {
-                    draft.wrappedValue = text
-                    return
-                }
-                draft.wrappedValue = nil
-                apply(color)
+            get: { configuration.customBackgroundColorDark.swiftUIColor },
+            set: { newValue in
+                var next = configuration
+                next.customBackgroundColorDark = ReadingColor(newValue)
+                onChange(next)
             }
         )
-    }
-
-    /// 丢掉指定输入框的草稿；`nil`（焦点离开全部输入框）时无事可做。
-    private func revertHexDraft(_ field: HexColorField?) {
-        switch field {
-        case .light:
-            lightHexDraft = nil
-        case .dark:
-            darkHexDraft = nil
-        case nil:
-            break
-        }
     }
 
     var customTextColorBinding: Binding<Color> {

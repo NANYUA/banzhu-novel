@@ -1,4 +1,3 @@
-import Foundation
 import NovelCore
 import SwiftUI
 import UIKit
@@ -28,38 +27,6 @@ extension ReadingColor {
         } else {
             self = .defaultCustomBackground
         }
-    }
-
-    /// `#RRGGBB` 形式的十六进制串（阅读设置面板的 hex 输入框回显用）。
-    ///
-    /// 透明度**不参与**：自定义背景色恒为不透明（`ColorPicker` 也关掉了 `supportsOpacity`）。
-    /// 通道值一律先 `rounded()` 再转 `Int`（**不用 `UInt8`**：越界值会直接触发运行时陷阱，
-    /// 而这个值可能来自手工改过的持久化 JSON）。
-    var hexString: String {
-        String(
-            format: "#%02X%02X%02X",
-            Int((red * 255).rounded()),
-            Int((green * 255).rounded()),
-            Int((blue * 255).rounded())
-        )
-    }
-
-    /// 解析 `#RRGGBB` / `RRGGBB`（6 位十六进制，大小写皆可）；不合法返回 `nil`。
-    ///
-    /// 只认 6 位：3 位缩写（`#FFF`）与 8 位带透明度（`#RRGGBBAA`）都判非法 ——
-    /// 自定义背景色恒不透明，接受透明度会制造"输入了却不生效"的歧义。
-    /// 非法的输入由调用方（`ReaderSettingsView` 的 hex 输入框）**丢弃**，配置保留上一个有效值。
-    init?(hex: String) {
-        let trimmed = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        let digits = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
-        guard digits.count == 6, digits.allSatisfy(\.isHexDigit), let value = UInt32(digits, radix: 16) else {
-            return nil
-        }
-        self.init(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
-        )
     }
 }
 

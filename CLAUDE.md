@@ -96,7 +96,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   ├── NovelEngine/                 # 纯逻辑层（9 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（42 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（43 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner

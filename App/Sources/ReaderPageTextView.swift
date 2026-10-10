@@ -43,10 +43,16 @@ struct PageTextView: UIViewRepresentable {
         // 上面关掉了 `isScrollEnabled`（UITextView 会因此重配文本容器），此处重新钉一次宽度不变量。
         // 高度**不钉**：容器高由 UITextView 自己维护（排完本页）；手动设定属未验证改动。
         uiView.textContainer.widthTracksTextView = true
+        // 竖向 inset **clamp 到 >= 0**（U9-7）：`PageInset.top/bottom` 的默认值是负的，
+        // 语义是「相对安全区向屏幕边缘推的偏移量」——但负值在这里**不是外扩，是被裁掉**：
+        // `UITextView.clipsToBounds` 默认 `true`，负 inset 只是把正文挪出自身 bounds。
+        // 真正的外扩由 `ReaderView` 放大布局盒兑现（盒高 = 安全区盒高 + 外扩量，
+        // 与 `configuration.containerSize` 逐值相同），本视图因此恒按 0 起排。
+        // 左右**不动**：仍是「安全区盒内再减左右边距」，正值语义未变。
         uiView.textContainerInset = UIEdgeInsets(
-            top: configuration.inset.top,
+            top: max(0, configuration.inset.top),
             left: configuration.inset.leading,
-            bottom: configuration.inset.bottom,
+            bottom: max(0, configuration.inset.bottom),
             right: configuration.inset.trailing
         )
         uiView.backgroundColor = configuration.backgroundStyle.uiColor(

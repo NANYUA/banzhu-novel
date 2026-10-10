@@ -122,7 +122,7 @@ final class ChapterCacheStoreTests: XCTestCase {
 
         let text = try ReaderLoaderLive.load(chapterPath: chapter.path, in: context)
 
-        XCTAssertEqual(text, "本地缓存正文")
+        XCTAssertEqual(text?.text, "本地缓存正文")
     }
 
     func test没有本地正文时不返回缓存结果() throws {

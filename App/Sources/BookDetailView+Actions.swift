@@ -33,7 +33,11 @@ extension BookDetailView {
                 shelfButton(viewStore)
                 downloadChaptersButton
             }
-            // 两个次级按钮共用一档控件尺寸 ⇒ 都是 44pt 触控目标（§9）。
+            // 两个次级按钮共用一档控件尺寸 **且** 标签侧共用同一个 44pt 最小高度
+            // （`shelfLabel` / `downloadChaptersButton`）⇒ 短边等高，且都是 44pt 触控目标（§9）。
+            // ⚠️ 只写 `.controlSize(.large)` 不够：真机上「加入 / 移出书架」比「下载章节」矮，
+            // 差别就在标签有没有 `.frame(minHeight: 44)` —— 控件尺寸只决定按钮的**内边距**，
+            // 高度是「标签高度 + 内边距」，故标签侧的差异会原样变成按钮的高度差。
             .controlSize(.large)
 
             if let notice = viewStore.shelfNotice {
@@ -53,9 +57,12 @@ extension BookDetailView {
 private extension BookDetailView {
     /// 书架开关（**次级**按钮）。按 `isOnShelf` 切换。
     ///
-    /// 视觉分工（§9 主次分明）：主按钮只留给「开始 / 继续阅读」，本按钮一律 `.bordered`；
-    /// 已加入时用绿色 checkmark 表达「已在书架」这个状态，文字仍写动作
-    /// （§11：按钮标签用动词），避免「已加入」当按钮却看不出点了会怎样。
+    /// 视觉分工（§9 主次分明）：主按钮只留给「开始 / 继续阅读」，本按钮一律 `.bordered`。
+    ///
+    /// 已加入时用**红色**（`statusDanger`）而不是绿色：本按钮此刻的动作是「移出书架」，
+    /// 是**破坏性操作**，按 §11 要给警示色；红色同时说明「点下去会失去什么」。
+    /// （原先用绿色表达「已在书架」这个状态 —— 那是拿状态色去粉饰一个删除动作，已废。）
+    /// 文字仍写**动作**而不是状态（§11：按钮标签用动词）：写「已加入」会看不出点了会怎样。
     func shelfButton(
         _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
     ) -> some View {
@@ -66,7 +73,8 @@ private extension BookDetailView {
                 } label: {
                     shelfLabel(viewStore, title: "移出书架", systemImage: "checkmark.circle.fill")
                 }
-                .tint(AppTheme.statusAdded)
+                // 红色 = 破坏性操作（§11）。绿色留给「已完成 / 已在架」这类**状态**表达。
+                .tint(AppTheme.statusDanger)
             } else {
                 Button {
                     viewStore.send(.addRequested)
@@ -79,19 +87,32 @@ private extension BookDetailView {
         .disabled(viewStore.isShelfBusy)
     }
 
-    @ViewBuilder
+    /// 按钮标签：忙碌时是 `ProgressView`，否则是图标 + 动作文字。
+    ///
+    /// **三个按钮短边等高的唯一来源**：与「下载章节」（`downloadChaptersButton`）、
+    /// 「开始 / 继续阅读」（`readLabel`）共用同一个 `.frame(minHeight: 44)`。
+    /// 原先只有另外两处带这一行，本标签没有 ⇒ 同一个 `HStack` 里左右两个次级按钮高度不同
+    /// （真机反馈「按钮大小不一致，三个按钮应该短边长度一致」）。
+    ///
+    /// 补在标签侧而不是去掉另外两处：这一行的高度**本来就由「下载章节」决定**
+    /// （`HStack` 取两者最大值），所以补齐只是让左按钮长到与右按钮一样高，按钮组整体不变高；
+    /// 反过来去掉另外两处会把整组按钮连同主按钮一起压矮，改动面更大。
+    /// 忙碌态（`ProgressView`）同样吃这个最小高度 ⇒ 切到加载态时按钮不会突然变矮。
     func shelfLabel(
         _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>,
         title: String,
         systemImage: String
     ) -> some View {
-        if viewStore.isShelfBusy {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-        } else {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
+        Group {
+            if viewStore.isShelfBusy {
+                ProgressView()
+            } else {
+                Label(title, systemImage: systemImage)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 
     func removeFromShelf(

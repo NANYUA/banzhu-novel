@@ -152,14 +152,54 @@ private enum ReadingSettingsLive {
     private static let storageKey = "reader.settings.v1"
 
     static func load() -> ReadingSettings? {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
-            return nil
+        let stored = UserDefaults.standard.data(forKey: storageKey)
+            .flatMap { try? JSONDecoder().decode(ReadingSettings.self, from: $0) }
+        let settings = VerticalInsetDefaultMigration.apply(to: stored)
+        // 迁移真的改了值才回写（标记已存在时 `migrated == stored`，不写）。
+        if let settings, let stored, settings.inset != stored.inset {
+            save(settings)
         }
-        return try? JSONDecoder().decode(ReadingSettings.self, from: data)
+        return settings
     }
 
     static func save(_ settings: ReadingSettings) {
         guard let data = try? JSONEncoder().encode(settings) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+    }
+}
+
+/// 竖向边距默认值的一次性迁移（U9-7）。
+///
+/// ## 为什么需要
+/// `ReadingSettings` 是**整份**落盘的（`reader.settings.v1`）⇒ 已安装的设备上存着旧默认
+/// `inset.top/bottom = 0`，不改的话 `PageInset` 的新默认**永远轮不到生效**，
+/// owner 在真机上就看不到任何变化。
+///
+/// ## 语义（惰性写入 + 标记，写法沿用 `ContentEpoch`）
+/// - 标记不存在 ⇒ 把已存的 `inset.top/bottom` 重置为新默认（`PageInset()`），并写入标记；
+/// - 标记存在 ⇒ 一律尊重用户已存的值（用户自己调过滑杆就不再覆盖）。
+///
+/// ## 边界
+/// **只动上下 inset**：字号 / 行距 / 颜色 / 字体 / 翻页方式等已存设置原样保留
+/// —— 不清空整份设置，也不改 `reader.settings.v1` 的版本号（那会连带丢掉用户其它设置）。
+/// 本机**没有**已存设置时也写标记：那种情况新默认本来就生效，标记只是防止
+/// 「首次安装 → 用户当轮把滑杆调回正值 → 下次启动被当成旧默认覆盖掉」。
+enum VerticalInsetDefaultMigration {
+    /// `UserDefaults` key，沿用本项目「`<域>.<用途>.v<版本>`」的既有命名习惯。
+    static let storageKey = "reader.insetDefaultMigrated.v1"
+
+    /// 迁移已存设置；`settings == nil` 表示本机没有已存设置（返回 nil，不落盘）。
+    static func apply(
+        to settings: ReadingSettings?,
+        defaults: UserDefaults = .standard
+    ) -> ReadingSettings? {
+        guard defaults.object(forKey: storageKey) == nil else { return settings }
+        defaults.set(true, forKey: storageKey)
+
+        guard var migrated = settings else { return nil }
+        let newDefault = PageInset()
+        migrated.inset.top = newDefault.top
+        migrated.inset.bottom = newDefault.bottom
+        return migrated
     }
 }

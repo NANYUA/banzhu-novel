@@ -86,15 +86,23 @@ public struct PageInset: Equatable, Sendable, Codable {
     public var bottom: CGFloat
     public var trailing: CGFloat
 
-    /// 默认：左右 **24pt**、上下 **0pt**。
+    /// 默认：左右 **24pt**、上下 **-24 / -22pt**。
     ///
     /// - 左右 24（U1-8，owner 指定）比 HIG 的 16pt 底线更宽松：中文正文一行排得下的字数更舒服，
     ///   也避开屏幕圆角。
-    /// - 上下 **0**（U9-3b，owner 指定「上下边距 0 起点」）：正文显示区域就是**安全区**矩形
-    ///   （上边到灵动岛 / 刘海下沿、下边到 Home Indicator 上沿），正文从该区域顶端开始，
-    ///   **不再额外加顶部留白**。此前是 8（U1-8 落的），在安全区之上又叠了一层同样厚度的留白。
-    ///   滑杆下限本就是 0，用户仍可自己加回上下边距 —— 改的只是**起点值**。
-    public init(top: CGFloat = 0, leading: CGFloat = 24, bottom: CGFloat = 0, trailing: CGFloat = 24) {
+    /// - 上下 **-24 / -22**（U9-7，owner 真机反馈「距离屏幕上下太远」）：
+    ///   **负值不是「减掉边距」，而是「相对安全区向屏幕边缘推的偏移量」**。
+    ///   此前是 0（U9-3b），正文正好贴在安全区边界上 —— 而状态栏已隐藏，安全区顶那 59pt
+    ///   是纯留白（量测：屏幕顶到章标题首字形 72px = 安全区顶 59 + 行高留白 ~13）。
+    ///   - `-24`：盒顶上移到安全区顶之上 24pt（59 → 35），首行**字形**顶 ≈ 35 + 13 = 48pt，
+    ///     正好落在灵动岛下沿；再多就会被灵动岛盖住（正文整行满宽，躲不开）。
+    ///   - `-22`：盒底再往下探 22pt，末行到屏幕底的空档从 66px 收到约 44px，
+    ///     仍在 Home Indicator（屏幕底往上约 8–13pt）之上。
+    ///   负值由 SwiftUI 层**放大盒子**实现（`ReaderView.readerContentSize`）——
+    ///   传给 TextKit 的竖向 inset 一律 clamp 到 `>= 0`（`UITextView.clipsToBounds` 默认 true，
+    ///   负 inset 只会把正文裁掉而不是往外扩）。
+    ///   滑杆范围 `-60 ... 48` 覆盖这两个值，用户仍可自己调回 0 或加正边距。
+    public init(top: CGFloat = -24, leading: CGFloat = 24, bottom: CGFloat = -22, trailing: CGFloat = 24) {
         self.top = top
         self.leading = leading
         self.bottom = bottom

@@ -41,7 +41,6 @@ struct ReaderView: View {
     @State var slidePresentation = SlidePresentation()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
     init(
@@ -82,30 +81,43 @@ struct ReaderView: View {
             GeometryReader { geometry in
                 let contentSize = readerContentSize(
                     size: geometry.size,
-                    safeAreaInsets: geometry.safeAreaInsets
+                    safeAreaInsets: geometry.safeAreaInsets,
+                    inset: viewStore.config.inset
+                )
+                let contentPaddings = readerContentPaddings(
+                    safeAreaInsets: geometry.safeAreaInsets,
+                    inset: viewStore.config.inset
                 )
                 ZStack {
                     backgroundColor(for: viewStore.config)
                         .ignoresSafeArea()
 
-                    // 正文与上下栏共用同一个「安全区可用盒」：两栏不再按全屏坐标钉边，
-                    // 避免顶栏压灵动岛、底栏压 Home Indicator（B0-4）。
-                    ZStack {
-                        readerContent(
-                            viewStore,
-                            availableWidth: contentSize.width,
-                            availableHeight: contentSize.height
-                        )
-
-                        if isChromeVisible {
-                            readerChrome(viewStore)
-                                .transition(.opacity)
-                        }
-                    }
+                    // 正文层：盒顶 = 安全区顶 − 外扩量、盒高 = 全屏高 − 两条内边距（U9-7）。
+                    // `contentSize` 就是这一层渲染盒的尺寸，与 `configuration.containerSize`
+                    // 逐值相同（B0-2 几何契约）。
+                    readerContent(
+                        viewStore,
+                        availableWidth: contentSize.width,
+                        availableHeight: contentSize.height
+                    )
                     .padding(.leading, geometry.safeAreaInsets.leading)
                     .padding(.trailing, geometry.safeAreaInsets.trailing)
-                    .padding(.top, geometry.safeAreaInsets.top)
-                    .padding(.bottom, geometry.safeAreaInsets.bottom)
+                    .padding(.top, contentPaddings.top)
+                    .padding(.bottom, contentPaddings.bottom)
+
+                    // 控制栏层：**只吃横向安全区**，竖向不再被安全区钉住 —— 两栏各自带竖向
+                    // 内边距（见 `readerChrome`），因此能比正文更贴屏幕上下边（U9-7）。
+                    // 它浮在正文之上（`isChromeVisible`），与正文重叠是预期行为：
+                    // 栏是临时覆盖层，不为避让去改正文布局。
+                    if isChromeVisible {
+                        readerChrome(
+                            viewStore,
+                            topPadding: topBarPadding(safeAreaInsets: geometry.safeAreaInsets)
+                        )
+                        .padding(.leading, geometry.safeAreaInsets.leading)
+                        .padding(.trailing, geometry.safeAreaInsets.trailing)
+                        .transition(.opacity)
+                    }
                 }
                 .task {
                     viewStore.send(.loadSavedSettings(contentSize))
@@ -165,19 +177,60 @@ struct ReaderView: View {
 private extension ReaderView {
     // MARK: - 内容
 
-    /// 阅读正文可用的安全区尺寸（全屏减去状态栏 / 灵动岛 / Home Indicator）。
+    /// 正文盒的竖向两条内边距（U9-7）。
     ///
-    /// 这就是 U9-3b 说的「正文显示区域 = 贴安全区」：上边到灵动岛 / 刘海下沿、
-    /// 下边到 Home Indicator 上沿；左右两侧另由 `PageInset` 的左右边距设置负责。
-    /// **上下不再额外加留白** —— `PageInset` 的上下默认值已改为 0（U9-3b）。
+    /// `PageInset.top/bottom` 允许为负，语义是「**相对安全区向屏幕边缘推**的偏移量」：
+    /// 盒子要向上/向下外扩 `max(0, -inset)`，盒顶/盒底各外移同样距离
+    /// ⇒ 内边距 = `安全区 − 外扩量`，下限 0（外扩超过安全区时盒子顶到屏幕边为止）。
+    /// 正值时外扩为 0，内边距与旧实现**逐值相同** ⇒ 用户加正边距的行为完全不变。
+    ///
+    /// ⚠️ 负值**不能**直接进 `UITextView.textContainerInset`：`clipsToBounds` 默认 `true`，
+    /// 负 inset 只会把正文裁掉而不是往外扩。外扩因此由这里的布局兑现，
+    /// 传给 TextKit 的竖向 inset 一律 clamp 到 `>= 0`
+    /// （`PageTextView` 与 `TextKitMeasuring` 各一处，后者关系分页，漏了就与渲染错位）。
+    private func readerContentPaddings(
+        safeAreaInsets: EdgeInsets,
+        inset: PageInset
+    ) -> (top: CGFloat, bottom: CGFloat) {
+        (
+            max(0, safeAreaInsets.top - max(0, -inset.top)),
+            max(0, safeAreaInsets.bottom - max(0, -inset.bottom))
+        )
+    }
+
+    /// 阅读正文可用的安全区尺寸（全屏减去状态栏 / 灵动岛 / Home Indicator，再按竖向边距外扩）。
+    ///
+    /// 宽 = 全屏宽 − 左右安全区；高 = 全屏高 − **上面那两条内边距**
+    /// —— 刻意与内边距**同源**：渲染盒的实际高度就是「全屏高 − 两条 padding」，
+    /// 写成别的等价式（如「安全区盒高 + 外扩量」）会在「外扩量 > 安全区」的极端滑杆值下
+    /// 与渲染盒不等（`max(0, …)` 已把内边距夹到 0），分页立刻与实际渲染错位（B0-2）。
+    /// 左右两侧另由 `PageInset` 的左右边距设置负责（正值语义未变）。
     private func readerContentSize(
         size: CGSize,
-        safeAreaInsets: EdgeInsets
+        safeAreaInsets: EdgeInsets,
+        inset: PageInset
     ) -> CGSize {
-        CGSize(
+        let paddings = readerContentPaddings(safeAreaInsets: safeAreaInsets, inset: inset)
+        return CGSize(
             width: max(0, size.width - safeAreaInsets.leading - safeAreaInsets.trailing),
-            height: max(0, size.height - safeAreaInsets.top - safeAreaInsets.bottom)
+            height: max(0, size.height - paddings.top - paddings.bottom)
         )
+    }
+
+    /// 上栏最多可上移的量：理论极限 ≈ 38pt（栏顶 21pt）只剩 0.7pt 余量，太紧 —— 字体度量是
+    /// 查表估的，估错 1pt 标题就会被灵动岛咬 ⇒ 收紧到 34pt。推导见 `topBarPadding(safeAreaInsets:)`。
+    private static let topBarMaxUpwardShift: CGFloat = 34
+
+    /// 上栏的上移量（U9-7）：`T = max(Spacing.xs, safeAreaInsets.top − 34)`。
+    ///
+    /// 上栏的**标题是居中**的，与灵动岛同一列 ⇒ 标题字形必须落在灵动岛下沿（约 48pt）以下。
+    /// 栏内结构是「`Spacing.sm`(12) 内边距 + 44pt 内容行 + 12 内边距」，标题在 44pt 行内垂直
+    /// 居中，其字形顶距栏顶约 27pt ⇒ 栏顶 ≥ 48 − 27 ≈ 21pt 即可（理论上限 59 − 21 ≈ 38pt，
+    /// 但那样只剩 0.7pt 余量）。取 34pt ⇒ 栏顶 59 − 34 = **25pt**，标题字形顶 ≈ 25 + 27 = 52pt，
+    /// 距下沿约 **5.7pt**。栏顶仍进到灵动岛覆盖区（25pt < 48pt）—— 那是预期的：被覆盖的
+    /// 那部分是栏的**空内边距**。下限 `Spacing.xs`(8) 保证无灵动岛 / 无刘海机型上栏也不贴死屏幕边。
+    private func topBarPadding(safeAreaInsets: EdgeInsets) -> CGFloat {
+        max(DesignTokens.Spacing.xs, safeAreaInsets.top - Self.topBarMaxUpwardShift)
     }
 
     @ViewBuilder
@@ -256,25 +309,35 @@ private extension ReaderView {
 
     // MARK: - 控制栏
 
+    /// 上下两栏（浮在正文之上的临时覆盖层，`isChromeVisible` 控制显隐）。
+    ///
+    /// 位置（U9-7）：这一层**不再吃竖向安全区**，竖向位置完全由两栏各自的内边距决定 ——
+    /// 上栏 `.padding(.top, topPadding)`、下栏 `.padding(.bottom, Spacing.xs)`，
+    /// 因此两栏能比正文更贴屏幕上下边（正文还受灵动岛 / Home Indicator 约束）。
+    /// 栏高、栏内按钮、圆角、面板颜色、横向 `Spacing.md` 内边距**一律未动**。
     private func readerChrome(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
+        topPadding: CGFloat
     ) -> some View {
         VStack {
             readerTopBar(viewStore)
+                .padding(.top, topPadding)
 
             Spacer()
 
             readerBottomBar(viewStore)
+                // 下栏贴到屏幕底 8pt 处：栏自身 `Spacing.sm`(12) 的内边距正好容下底部
+                // 那根约 5pt 的 Home Indicator 细条（按钮落在细条上方，不会被压）。
+                .padding(.bottom, DesignTokens.Spacing.xs)
         }
     }
 
     /// 上栏。
     ///
-    /// 位置（U9-5）：整条 `readerChrome` 已经在「安全区可用盒」里（body 的四条
-    /// `.padding(…safeAreaInsets…)`），所以**不再额外加顶部内边距**，上栏的上边缘
-    /// 正好落在正文区域的上边界 —— 也就是屏幕左上 / 右上圆角弧度开始处，
-    /// 而不是贴在状态栏上（状态栏已由 `.statusBar(hidden: true)` 藏掉）。
-    /// 圆角半径本身**不猜**：不同机型一律由安全区自适应。
+    /// 位置（U9-7）：整条 `readerChrome` 已不再吃竖向安全区，上栏的上边缘由
+    /// `readerChrome` 给的 `topPadding`（推导见 `topBarPadding(safeAreaInsets:)`）决定，
+    /// 目标是「标题字形正好落在灵动岛下沿以下」—— 比正文贴得更上，
+    /// 但字形仍不会被灵动岛盖住。圆角半径本身**不猜**：不同机型一律由安全区自适应。
     private func readerTopBar(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> some View {
@@ -302,9 +365,7 @@ private extension ReaderView {
         .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.vertical, DesignTokens.Spacing.sm)
         .background(
-            reduceTransparency
-                ? AnyShapeStyle(Color(.systemBackground))
-                : AnyShapeStyle(.regularMaterial),
+            backgroundColor(for: viewStore.config),
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
         .padding(.horizontal, DesignTokens.Spacing.md)
@@ -336,8 +397,9 @@ private extension ReaderView {
 
     /// 下栏。
     ///
-    /// 位置（U9-5）与上栏同理：**不再额外加底部内边距**，下栏的下边缘正好落在正文区域的
-    /// 下边界 —— 也就是屏幕左下 / 右下圆角弧度开始处，而不是贴在 Home Indicator 上。
+    /// 位置（U9-7）与上栏同理：这一层不再吃竖向安全区，下栏的下边缘由 `readerChrome`
+    /// 给的 `.padding(.bottom, Spacing.xs)`(8) 决定 —— 比正文贴得更下，
+    /// 栏自身 12pt 内边距正好把 Home Indicator 那根细条让在空处。
     private func readerBottomBar(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> some View {
@@ -358,9 +420,7 @@ private extension ReaderView {
         .padding(.horizontal, DesignTokens.Spacing.sm)
         .padding(.vertical, DesignTokens.Spacing.sm)
         .background(
-            reduceTransparency
-                ? AnyShapeStyle(Color(.systemBackground))
-                : AnyShapeStyle(.regularMaterial),
+            backgroundColor(for: viewStore.config),
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
         )
         .padding(.horizontal, DesignTokens.Spacing.md)
@@ -407,8 +467,30 @@ private extension ReaderView {
                                 .foregroundStyle(.tint)
                         }
                     }
+                    // 行内边距由标签自己持有（配合下面的 `listRowInsets`）：竖向 `Spacing.sm`(12)
+                    // 撑出 44pt 以上命中区，强调层才能覆盖**整行**，而不只是文字那一条。
+                    .padding(.vertical, DesignTokens.Spacing.sm)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                // §9 按下反馈：`.plain` 在 `List` 行里按下只压暗标签内容（真机反馈「目录下
+                // 按下无效果」），行/卡面颜色不变。改用项目既有的 `PressableCardButtonStyle`：
+                // 按下瞬间叠一层可见强调层 + 轻微缩放，抬手复原。
+                // 强调层圆角取 `Radius.sm`(12)：本行没有自绘卡面（不像书架书卡），轮廓是系统
+                // 行背景；强调层水平内缩 `Spacing.md`(16)、垂直不出本行 ⇒ 圆角不会露到行外。
+                .buttonStyle(PressableCardButtonStyle(
+                    pressedScale: 0.99,
+                    shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+                ))
+                // 竖向 0 + 水平 16（= `insetGrouped` 系统默认行内边距）：左右缩进与行高都不变，
+                // 只是把竖向那约 11pt 让给标签自己 ⇒ 强调层铺满整行高度。水平仍留 16 的原因：
+                // 系统卡面的圆角在行两端，强调层内缩后才不会在圆角外露出方角。
+                .listRowInsets(EdgeInsets(
+                    top: 0,
+                    leading: DesignTokens.Spacing.md,
+                    bottom: 0,
+                    trailing: DesignTokens.Spacing.md
+                ))
             }
             .navigationTitle("目录")
             .toolbar {
@@ -459,7 +541,7 @@ private extension ReaderView {
 
     // MARK: - 外观
 
-    /// 阅读页**正文底色**的唯一来源（上下栏仍走材质，与它无关）。
+    /// 阅读页**正文底色**的唯一来源（上下两栏同色，也用这一个）。
     /// 返回 `Color(uiColor:)` 包出来的动态色，跟随当前明暗外观解析。
     private func backgroundColor(for configuration: PaginationConfiguration) -> Color {
         Color(uiColor: configuration.backgroundStyle.uiColor(

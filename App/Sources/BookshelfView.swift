@@ -382,7 +382,7 @@ private extension BookshelfView {
             } label: {
                 BookRow(row: row)
             }
-            // 强调层贴书卡自己的 8pt 圆角，避免按下瞬间在圆角外露出方角（U0-4）。
+            // 强调层贴书卡自己的 12pt 圆角（`Radius.sm`），避免按下瞬间在圆角外露出方角（U0-4）。
             .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
