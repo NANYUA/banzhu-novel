@@ -116,7 +116,9 @@ jobs:
             if [ ! -f "$log" ]; then
               continue
             fi
-            matches=$(grep -E "error:|fatal error:|Test Case .* failed|XCTAssert|failed -|XCTFailureError" "$log" || true)
+            # ⚠️ 不要放裸的 XCTAssert：编译警告的源码上下文行含 XCTAssertEqual(...)，会被误捞成假失败注解，
+            #    把真实失败挤出注解名额（GitHub 只留最后约 10 条）；真实失败行一定带 error:，去掉不影响命中。
+            matches=$(grep -E "error:|fatal error:|Test Case .* failed|failed -|XCTFailureError" "$log" || true)
             if [ -z "$matches" ]; then
               matches=$(tail -n 40 "$log")
             fi
@@ -124,6 +126,20 @@ jobs:
               echo "::error title=XCTest::$line"
             done <<< "$matches"
           done
+
+      # 注解只保留最后约 10 条，真正带"实际值 vs 期望值"的 error: 行会被截掉，
+      # 所以把失败时的原始日志整体传成 artifact（公开仓库可匿名下载）。
+      - name: 上传失败日志
+        if: always() && (steps.test.outcome == 'failure' || steps.build.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-logs-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            build.log
+            test-core.log
+            test-engine.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: 结果
         run: echo "✅ 全部关卡通过"

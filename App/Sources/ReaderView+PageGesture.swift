@@ -205,9 +205,11 @@ extension ReaderView {
             ),
             translation: value.translation.width,
             predictedEndTranslation: value.predictedEndTranslation.width,
-            availableWidth: availableWidth,
-            pageIndex: viewStore.currentPageIndex,
-            pageCount: viewStore.pages.count
+            geometry: PagePanGeometry(
+                availableWidth: availableWidth,
+                pageIndex: viewStore.currentPageIndex,
+                pageCount: viewStore.pages.count
+            )
         )
         settlePan(turn, viewStore: viewStore, availableWidth: availableWidth)
     }

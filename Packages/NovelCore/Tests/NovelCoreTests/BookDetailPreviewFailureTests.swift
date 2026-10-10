@@ -145,7 +145,11 @@ final class BookDetailPreviewFailureTests: XCTestCase {
             $0.isLoading = true
             $0.isLoadingChapters = true
         }
-        await store.receive(.hostLoaded("https://example.com"))
+        // host 非空 ⇒ `hostLoaded` 一定会改写 `state.host`，尾随闭包不能省：
+        // 省掉就是断言「状态没变」，TestStore 会判 `State was not expected to change`。
+        await store.receive(.hostLoaded("https://example.com")) {
+            $0.host = "https://example.com"
+        }
         await store.receive(.loaded(nil)) {
             $0.isLoading = false
         }

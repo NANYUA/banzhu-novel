@@ -10,6 +10,29 @@ public enum PagePanTurn: Equatable, Sendable {
     case previous
 }
 
+/// 一页的几何上下文：页宽 + 当前页下标 + 总页数。
+///
+/// 这三个值在判页里**永远一起出现、一起被读**：页宽定出屏幕中线，下标与总页数定出
+/// 首 / 末页边界。收成一个值类型而不是三个并列参数，有两个好处：
+/// 1. 「它们描述的是同一次手势里的同一页」这层语义落到类型上，调用点不会把顺序摆错；
+/// 2. `turn` 的参数个数守在 SwiftLint `function_parameter_count` 的 5 个以内。
+///
+/// 值类型：只装数据、没有身份，`Equatable` 便于测试里直接比对两个几何。
+public struct PagePanGeometry: Equatable, Sendable {
+    /// 阅读区可用宽度 —— 也就是**一页**的宽（`0` 是退化盒子，见 `crossesScreenMidline`）。
+    public var availableWidth: CGFloat
+    /// 当前页下标。
+    public var pageIndex: Int
+    /// 总页数。
+    public var pageCount: Int
+
+    public init(availableWidth: CGFloat, pageIndex: Int, pageCount: Int) {
+        self.availableWidth = availableWidth
+        self.pageIndex = pageIndex
+        self.pageCount = pageCount
+    }
+}
+
 /// 阅读页「平移翻页」（全景图式左右平移）的纯数学，CI 可测。
 ///
 /// ## 与 `SlideTracking` 的分工
@@ -90,25 +113,29 @@ public enum PagePanTracking {
     ///
     /// - 中线未越过屏幕中线 → `.none`（滑回本页）；
     /// - 越过 → 按落点方向翻**一页**；已在首 / 末页则退化为 `.none`（原地滑回）。
+    ///
+    /// - Parameters:
+    ///   - trackedOffset: 本次手势跟手后的偏移（`panOffset` 的结果）。
+    ///   - translation: 本次手势的 `DragGesture.Value.translation.width`。
+    ///   - predictedEndTranslation: 相对手势起点的**总**投射位移。
+    ///   - geometry: 页宽 + 当前页下标 + 总页数。
     public static func turn(
         trackedOffset: CGFloat,
         translation: CGFloat,
         predictedEndTranslation: CGFloat,
-        availableWidth: CGFloat,
-        pageIndex: Int,
-        pageCount: Int
+        geometry: PagePanGeometry
     ) -> PagePanTurn {
         let settled = settledOffset(
             trackedOffset: trackedOffset,
             translation: translation,
             predictedEndTranslation: predictedEndTranslation
         )
-        guard crossesScreenMidline(offset: settled, availableWidth: availableWidth) else {
+        guard crossesScreenMidline(offset: settled, availableWidth: geometry.availableWidth) else {
             return .none
         }
         if settled < 0 {
-            return pageIndex + 1 < pageCount ? .next : .none
+            return geometry.pageIndex + 1 < geometry.pageCount ? .next : .none
         }
-        return pageIndex > 0 ? .previous : .none
+        return geometry.pageIndex > 0 ? .previous : .none
     }
 }

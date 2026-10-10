@@ -157,9 +157,7 @@ final class PagePanTrackingTests: XCTestCase {
                 trackedOffset: -20,
                 translation: -20,
                 predictedEndTranslation: -260,
-                availableWidth: pageWidth,
-                pageIndex: 5,
-                pageCount: 10
+                geometry: PagePanGeometry(availableWidth: pageWidth, pageIndex: 5, pageCount: 10)
             ),
             .next
         )
@@ -197,9 +195,11 @@ final class PagePanTrackingTests: XCTestCase {
                         trackedOffset: translation,
                         translation: translation,
                         predictedEndTranslation: value,
-                        availableWidth: availableWidth,
-                        pageIndex: pageCase.index,
-                        pageCount: pageCase.count
+                        geometry: PagePanGeometry(
+                            availableWidth: availableWidth,
+                            pageIndex: pageCase.index,
+                            pageCount: pageCase.count
+                        )
                     )
                     XCTAssertEqual(
                         actual,
@@ -226,9 +226,7 @@ final class PagePanTrackingTests: XCTestCase {
             trackedOffset: panOffset(translation: -pageWidth * 3, index: 5, count: 10),
             translation: -pageWidth * 3,
             predictedEndTranslation: -pageWidth * 4,
-            availableWidth: pageWidth,
-            pageIndex: 5,
-            pageCount: 10
+            geometry: PagePanGeometry(availableWidth: pageWidth, pageIndex: 5, pageCount: 10)
         )
         XCTAssertEqual(value, .next)
     }
@@ -273,9 +271,11 @@ private func turnAtSettledOffset(
         trackedOffset: offset,
         translation: 0,
         predictedEndTranslation: 0,
-        availableWidth: availableWidth ?? pageWidth,
-        pageIndex: index,
-        pageCount: count
+        geometry: PagePanGeometry(
+            availableWidth: availableWidth ?? pageWidth,
+            pageIndex: index,
+            pageCount: count
+        )
     )
 }
 
