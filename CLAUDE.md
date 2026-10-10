@@ -60,10 +60,17 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 
 → 格式归 SwiftFormat 独家负责，冲突的 Lint 规则已在 `.swiftlint.yml` 关闭。
 
-### 3. Fixtures 必须声明为 SwiftPM 资源
+### 3. Fixtures 靠 `#filePath` 定位，不要用 `Bundle.module`
 
-否则测试读不到文件 → 空字符串 → 解析出 0 条 → **数组越界崩溃**。
-且不能用 `Bundle.module`（xcodebuild 场景下不生成）。
+测试里的 `fixture(_:)` 辅助函数用 `#filePath` 反推**源码目录**，再按
+「`Tests/NovelEngineTests/Fixtures/` → `Tests/Fixtures/`」两级候选探测；
+12 个 `.html` 实际放在 `Packages/NovelEngine/Tests/Fixtures/`（即**第二级候选命中**），
+测试**不经过 bundle**。
+
+→ 因此 `testTarget` **不声明 `resources:`**。曾写过的 `.copy("Fixtures")` 是**失效声明**
+  （`Tests/NovelEngineTests/` 下并没有 `Fixtures/` 目录），没有任何消费者，已删除。
+→ **仍不要用 `Bundle.module`**（xcodebuild 场景下不生成）。
+→ 定位失败时辅助函数会把尝试过的路径打进断言消息，CI 日志能直接指出问题。
 
 ## 目录结构（模块级，文件数随代码变化请同步更新）
 

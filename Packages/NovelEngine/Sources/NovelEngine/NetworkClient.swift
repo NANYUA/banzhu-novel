@@ -93,16 +93,6 @@ public enum NetworkError: LocalizedError {
         }
         return false
     }
-
-    /// 是否属于当前 host 不可用，可尝试切换到下一个 host。
-    public var isHostUnavailable: Bool {
-        switch self {
-        case .guarded, .decodeFailed, .noCandidates, .invalidURL:
-            return false
-        case .httpStatus, .nonHTTPResponse, .transport:
-            return true
-        }
-    }
 }
 
 /// 网络客户端：GBK 编解码、移动 UA、Cookie 复用、GET/POST、重试退避、人机验证检测。

@@ -122,14 +122,12 @@ final class NetworkErrorTests: XCTestCase {
         XCTAssertTrue(description?.contains(raw) ?? false, "文案应含原始地址串，实际 \(description ?? "nil")")
     }
 
-    func test两个新错误的重试与host可用性分类() {
-        // 非 HTTP 响应：保持原先「可重试 + 可换 host」的分类，属最小改动。
+    func test两个新错误的重试分类() {
+        // 非 HTTP 响应：保持原先「可重试」的分类，属最小改动。
         XCTAssertTrue(NetworkError.nonHTTPResponse("https://demo.example").shouldRetry)
-        XCTAssertTrue(NetworkError.nonHTTPResponse("https://demo.example").isHostUnavailable)
 
-        // 地址非法：重试与换 host 都没有意义，同一个字符串重试多少次还是解析不出来。
+        // 地址非法：重试没有意义，同一个字符串重试多少次还是解析不出来。
         XCTAssertFalse(NetworkError.invalidURL("ht tp://demo.example").shouldRetry)
-        XCTAssertFalse(NetworkError.invalidURL("ht tp://demo.example").isHostUnavailable)
     }
 
     /// 回归意图（B0-7 的根因）：同一个失败原因只对应一个 case。
