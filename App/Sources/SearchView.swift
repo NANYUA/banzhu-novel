@@ -38,6 +38,10 @@ struct SearchView: View {
                     // 两者形成一级层次。搜索结果卡的白色由 `SearchResultRow` 自己画。
                     .background(AppTheme.Surface.page)
                     .navigationTitle("搜索")
+                    // 同书架页：本页也会 push 详情页（见下面的 `navigationDestination`），
+                    // 底栏被详情页隐藏后 pop 回根视图可能不恢复，
+                    // 所以根视图同样显式声明一次「底栏可见」。
+                    .toolbar(.visible, for: .tabBar)
                     // §1 一致性：与同项目的 `ReaderSearchView` 统一到系统 `.searchable`
                     // 范式，自绘搜索栏（TextField + 搜索按钮）已删除。
                     // 提交语义不变，仍是同一个 `.search` action。

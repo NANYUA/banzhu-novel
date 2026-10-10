@@ -78,6 +78,11 @@ struct BookshelfView: View {
                 // 白底只留给列表里的行卡片本身。
                 .background(AppTheme.Surface.page)
                 .navigationTitle("书架")
+                // 从详情页 pop 回本页后底栏必须回来：详情页有意
+                // `.toolbar(.hidden, for: .tabBar)`，而那是被 push 视图上的偏好，
+                // pop 回根视图后可能残留。全仓只有「隐藏」没有「恢复」，
+                // 所以根视图在这里显式声明一次「底栏可见」。
+                .toolbar(.visible, for: .tabBar)
                 .onAppear { viewStore.send(.onAppear) }
                 .navigationDestination(isPresented: $isShowingDetail) {
                     if let row = detailRow {
