@@ -173,10 +173,55 @@ public actor NovelEngine {
 
     // MARK: - 正文（含解码还原）
 
+    /// 一章最多取几段（含第一段）。
+    ///
+    /// 取值理由：站点按屏切分正文，正常一章 2–4 段，8 段足够覆盖长章；
+    /// 同时把「页面互相指向」这类坏数据下的请求数**钉死在 8 次以内** ——
+    /// 终止保护靠它 + `visited` 去重两道，绝不无限循环。
+    static let maxContentPages = 8
+
+    /// 取一章正文。站点把同一章切成多个 HTML 分段时（后续段地址形如
+    /// `<数字>_<数字>.html`，由 `HTMLParser.nextSegmentReference` 按形状识别），
+    /// 把后续段按序取回并拼接 —— 只取第一段就是「阅读页正文只能看到第一页」。
+    ///
+    /// 后续段取失败**不整章报错**：已取到的部分照常返回，少一段好过整章空白
+    /// （含后续段撞验证盾、用户取消验证的情形）。错误语义沿用 `NetworkError`，
+    /// 但只有第一段失败才向上抛。
     public func content(chapterPath: String) async throws -> String {
         let html = try await fetch(path: chapterPath, body: nil)
-        let text = ContentDecoder.decode(html: html)
-        return text.isEmpty ? "（本章内容为空，可能需要重新过验证或稍后重试）" : text
+        var text = ContentDecoder.decode(html: html)
+        guard !text.isEmpty else { return "（本章内容为空，可能需要重新过验证或稍后重试）" }
+
+        var visited: Set<String> = [chapterPath]
+        var segments = 1
+        var next = nextSegmentPath(from: html, currentPath: chapterPath)
+        while let path = next, segments < Self.maxContentPages, !visited.contains(path) {
+            visited.insert(path)
+            do {
+                let segmentHTML = try await fetch(path: path, body: nil)
+                let segment = ContentDecoder.decode(html: segmentHTML)
+                if !segment.isEmpty {
+                    text += "\n" + segment
+                }
+                segments += 1
+                next = nextSegmentPath(from: segmentHTML, currentPath: path)
+            } catch {
+                EngineLog.log(
+                    .warning,
+                    "content",
+                    "第 \(segments + 1) 段取失败，已保留 \(segments) 段：\(path)"
+                )
+                break
+            }
+        }
+        return text
+    }
+
+    /// 把正文页里识别出的「下一段」相对文件名，解析成可请求的路径（与当前段同目录）。
+    private func nextSegmentPath(from html: String, currentPath: String) -> String? {
+        guard let reference = HTMLParser.nextSegmentReference(in: html),
+              let base = config.url(currentPath) else { return nil }
+        return URL(string: reference, relativeTo: base)?.path
     }
 
     /// 供测试使用。

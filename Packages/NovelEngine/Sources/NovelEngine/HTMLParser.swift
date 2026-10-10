@@ -297,4 +297,47 @@ enum HTMLParser {
         s = s.replacingOccurrences(of: "&gt;", with: ">")
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    // MARK: - 正文分段（同一章的后续分页）
+
+    /// 内联脚本里「四个引号数字」的调用形状：第 3、4 个数即后续段地址里的两个数字。
+    ///
+    /// 与书源规则同形：`('a','b','<p1>','<p2>')` → `<p1>_<p2>.html`。
+    /// 只认「四个」引号数字（与规则里的形状一致），放宽会误收无关脚本。
+    private static let segmentCallPattern =
+        "\\(\\s*['\"](\\d+)['\"]\\s*,\\s*['\"](\\d+)['\"]\\s*,\\s*['\"](\\d+)['\"]\\s*,\\s*['\"](\\d+)['\"]\\s*\\)"
+
+    /// 独立的相对引用形状：`<数字>_<数字>.html`，且**前面不是** `/`、词字符、`.`、`-`、`_`。
+    /// 前导 `/` 的绝对路径（分类导航等同形链接）因此天然落选，不会被当成后续段。
+    private static let segmentLinkPattern = "(?:^|[^/\\w.\\-])(\\d+)_(\\d+)\\.html"
+
+    /// 从正文页里取「下一段」的相对文件名（**只按形状**匹配，零站点字面量）。
+    ///
+    /// 站点把同一章的正文切成多个 HTML 分页，后续段地址形如 `<数字>_<数字>.html`，
+    /// 且**相对**当前章节页（没有前导 `/`）。页面里它有两种形状，两种都收：
+    /// 1. 内联脚本的四元引号数字调用 —— 取第 3、4 个数拼出地址（书源规则即此形状）；
+    /// 2. 直接的相对引用 `<数字>_<数字>.html`。
+    ///
+    /// 两种都取不到返回 nil：**没有后续段是常态，不是错误**，调用方据此收尾。
+    static func nextSegmentReference(in html: String) -> String? {
+        if let filename = segmentFilename(pattern: segmentCallPattern, nameGroup: 3, pageGroup: 4, in: html) {
+            return filename
+        }
+        return segmentFilename(pattern: segmentLinkPattern, nameGroup: 1, pageGroup: 2, in: html)
+    }
+
+    /// 按给定正则取「名称数字 + 页码数字」，拼成 `<名称>_<页码>.html`。
+    private static func segmentFilename(pattern: String, nameGroup: Int, pageGroup: Int,
+                                        in html: String) -> String? {
+        guard let re = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else { return nil }
+        let ns = html as NSString
+        guard let m = re.firstMatch(in: html, options: [], range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > max(nameGroup, pageGroup) else { return nil }
+        let name = ns.substring(with: m.range(at: nameGroup))
+        let page = ns.substring(with: m.range(at: pageGroup))
+        return "\(name)_\(page).html"
+    }
 }

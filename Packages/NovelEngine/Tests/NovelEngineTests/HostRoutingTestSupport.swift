@@ -23,6 +23,11 @@ actor FakeTransport: NetworkTransport {
     func requestedHosts() -> [String] {
         urls.compactMap(\.host)
     }
+
+    /// 请求过的路径（按发出顺序）——正文分段的拼接顺序靠它断言。
+    func requestedPaths() -> [String] {
+        urls.map(\.path)
+    }
 }
 
 /// 手动验证门的测试桩：consumePass 返回当前是否应放行，markPassed 记录弹窗回调。

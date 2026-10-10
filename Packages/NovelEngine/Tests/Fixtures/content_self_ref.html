@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Self Reference</title></head>
+<body>
+<!-- 合成 fixture：后续段地址指回自己（3001_2.html）—— 用来验证「已访问集合」这道终止保护 -->
+<div class="page-content">
+  <p>Self reference segment.</p>
+</div>
+<script type="text/javascript">
+  openSegment('7','1','3001','2');
+</script>
+</body>
+</html>
