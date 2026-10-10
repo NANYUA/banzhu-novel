@@ -70,9 +70,9 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（23 文件）
+│   └── Sources/                     # SwiftUI 视图层（24 文件）
 │       ├── AppMain.swift            # @main 入口
-│       ├── RootView.swift           # 三 tab 根视图 + 全局覆盖层
+│       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条）
 │       ├── BookDetailView*.swift    # 详情页（+DownloadRefresh）
 │       ├── ChapterListView.swift    # 目录页 + 章节下载选择
@@ -88,7 +88,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ├── Packages/
 │   ├── NovelEngine/                 # 纯逻辑层（9 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
-│   │   └── Tests/                   # 含 Fixtures 快照测试
+│   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
 │   ├── NovelCore/                   # 状态 + 存储 + 分页算法（42 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
@@ -133,11 +133,15 @@ swift test --package-path Packages/NovelEngine
 本地只能跑 `check-architecture.sh` 与 `swiftformat --lint`。CI 失败时会自动上传
 `build.log` / `test-core.log` / `test-engine.log` 为 artifact。
 
-## 两条数据契约（破了就是用户可感知损失）
+## 三条数据契约（破了就是用户可感知损失）
 
-1. **缓存淘汰不能删用户下载的章节**
+1. **「已下载」的唯一真相是 `ChapterRecord.source == .downloaded`**
+   **不得**用 `hasLocalText` 或本地文件名反推 —— 阅读时的自动缓存同样会让
+   `hasLocalText` 为 true，但那**可被 LRU 淘汰**，不是用户下载的内容。
+
+2. **缓存淘汰不能删用户下载的章节**
    `ChapterSource.isEvictable` 是闸门，且必须**按章不按书**淘汰。
    缓存上限只统计含自动缓存章节的书；用户下载的章节既不计入上限，也永不被淘汰。
 
-2. **阅读位置存 `characterOffset`，不存页码**
+3. **阅读位置存 `characterOffset`，不存页码**
    字号/行距/页边距等设置都会改变分页。
