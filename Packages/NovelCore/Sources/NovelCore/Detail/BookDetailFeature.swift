@@ -2,7 +2,6 @@ import ComposableArchitecture
 import Dependencies
 import Foundation
 import NovelEngine
-import SwiftData
 
 /// 书籍详情快照。字段全部来自搜索/详情页解析，缺失时留空，由 UI 显示“暂无”。
 public struct BookDetail: Equatable, Identifiable, Sendable {
@@ -135,6 +134,11 @@ public struct BookDetailFeature: Reducer {
         case chaptersDownloaded([String])
         /// 目录加载失败后点「重试」：只重发目录请求，不重新读详情。
         case reloadChapters
+        /// 未上架（本地读不到记录）时远端兜底回来的详情 + 目录。
+        ///
+        /// 不能复用 `loaded` / `chaptersLoaded`：`loaded` 的非 nil 直接等于「已在书架」，
+        /// 兜底数据却来自网络、这本书并没有进书架，复用它会把按钮错切成「移出书架」。
+        case previewLoaded(detail: BookDetail, chapters: [ChapterItem])
         /// 「查看全部目录 / 收起目录」。
         case toggleAllChapters
 
@@ -175,11 +179,11 @@ public struct BookDetailFeature: Reducer {
                     let settings = await siteStore.load()
                     await send(.hostLoaded(settings.currentHostValue ?? ""))
 
-                    // 三段**串行**发送，而不是并发 effect：三步都是本地读，串行不拖慢首屏，
-                    // 却能让动作顺序确定 —— 并发 effect 的到达顺序不可断言，测试会变成掷骰子。
+                    // 四段**串行**发送：顺序确定；并发 effect 的到达顺序不可断言，测试会变成掷骰子。
+                    var local: BookDetail?
                     do {
-                        let detail = try await loader.load(bookPath)
-                        await send(.loaded(detail))
+                        local = try await loader.load(bookPath)
+                        await send(.loaded(local))
                     } catch {
                         await send(.loadFailed(error.localizedDescription))
                     }
@@ -188,6 +192,12 @@ public struct BookDetailFeature: Reducer {
                         await send(.chaptersLoaded(chapters))
                     } catch {
                         await send(.chaptersFailed(error.localizedDescription))
+                    }
+                    // 🔴 本地读不到记录 = 这本书还没上架（搜索入口点进来的都是这种）：
+                    // 再走一次远端兜底，否则首屏只有搜索列表的回退字段（无简介）与空目录，
+                    // 连「开始阅读」都出不来。兜底**不落库**，书不会因此进书架。
+                    if local == nil, let preview = try? await loader.preview(bookPath) {
+                        await send(.previewLoaded(detail: preview.detail, chapters: preview.chapters))
                     }
                 }
 
@@ -216,6 +226,13 @@ public struct BookDetailFeature: Reducer {
             case let .chaptersFailed(message):
                 state.isLoadingChapters = false
                 state.chapterErrorMessage = message
+                return .none
+
+            case let .previewLoaded(detail, chapters):
+                state.detail = detail
+                state.chapters = chapters
+                // 兜底已经把目录给出来了，本地那条「目录读取失败」的提示就成了过期信息。
+                state.chapterErrorMessage = nil
                 return .none
 
             case let .chaptersDownloaded(paths):
@@ -533,57 +550,5 @@ public struct ChapterDownloadSelection {
     /// 面板打开期间某章下载完成时，它不能因为「刚才被勾过」再入队一次。
     public func selectedChapters(in chapters: [ChapterItem]) -> [ChapterItem] {
         chapters.filter { !$0.isDownloaded && selectedPaths.contains($0.path) }
-    }
-}
-
-// MARK: - 依赖
-
-struct BookDetailLoader: Sendable {
-    var load: @Sendable (String) async throws -> BookDetail?
-}
-
-extension DependencyValues {
-    var bookDetailLoader: BookDetailLoader {
-        get { self[BookDetailLoaderKey.self] }
-        set { self[BookDetailLoaderKey.self] = newValue }
-    }
-
-    private enum BookDetailLoaderKey: DependencyKey {
-        static let liveValue = BookDetailLoader { bookPath in
-            try await BookDetailLoaderLive.load(bookPath: bookPath)
-        }
-
-        static let testValue = BookDetailLoader { _ in nil }
-    }
-}
-
-@MainActor
-private enum BookDetailLoaderLive {
-    static func load(bookPath: String) throws -> BookDetail? {
-        let context = try ModelContext(NovelStore.makeContainer())
-        var descriptor = FetchDescriptor<BookRecord>(
-            predicate: #Predicate { $0.bookPath == bookPath }
-        )
-        descriptor.fetchLimit = 1
-        guard let record = try context.fetch(descriptor).first else { return nil }
-        return BookDetail(
-            bookPath: record.bookPath,
-            title: record.title,
-            author: record.author,
-            coverUrl: record.coverUrl,
-            intro: record.intro,
-            status: record.status,
-            category: record.category,
-            tags: record.tags
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty },
-            wordCount: record.wordCount,
-            lastChapter: record.latestChapterName ?? "",
-            lastUpdated: record.lastUpdated,
-            // 阅读位置只存在本地记录里 —— 「继续阅读」全靠这两个字段。
-            lastReadChapterPath: record.lastReadChapterPath,
-            lastReadChapterName: record.lastReadChapterName
-        )
     }
 }
