@@ -63,14 +63,13 @@ final class NetworkErrorTests: XCTestCase {
         XCTAssertTrue(NetworkError.decodeFailed.shouldRetry)
     }
 
-    // MARK: - 循环层入口（H4 收尾）
+    // MARK: - 收枘入口的分类（H4 收尾）
 
     /// `NetworkClient.wrap` 是重试循环的**唯一**收枘入口。
     ///
-    /// 这一组断言是 H4 第一次改歪之后补的：第一次只改了 `shouldRetry` 的属性分类，
-    /// 但循环里的通用 `catch` 收枘完就睡了、**从没查过它** —— 而 `URLSession` 抛的正是
-    /// `URLError`（走通用 catch），所以那次修复在运行时完全没生效。
-    /// 盯住这个入口，「循环真的会问」这件事才有测试守住。
+    /// ⚠️ 这一组**只**守「收枘后的分类对不对」，**不**证明循环会去问 `shouldRetry`：
+    /// 它们直接调 `wrap`，把循环的 `catch` 改回「收枘完直接睡」的旧写法照样全绿
+    /// （H4 第一次改歪就是这么漏掉的）。循环行为本身由 `RetryLoopTests` 驱动守。
     func test循环入口对URLError走同一套分类() {
         XCTAssertFalse(NetworkClient.wrap(URLError(.cannotFindHost)).shouldRetry)
         XCTAssertFalse(NetworkClient.wrap(URLError(.notConnectedToInternet)).shouldRetry)

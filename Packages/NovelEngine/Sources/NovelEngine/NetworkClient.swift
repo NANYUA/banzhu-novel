@@ -140,65 +140,53 @@ actor NetworkClient {
         try await request(url: url, body: body)
     }
 
-    private func request(url: URL, body: String?, retries: Int = 3) async throws -> String {
-        // 不预设「默认错误」：循环体每个 catch 都会覆写它，所以这里只需要「有没有失败过」。
-        var lastError: Error?
-        for attempt in 0...retries {
-            do {
-                var req = URLRequest(url: url)
-                req.setValue(SiteConfig.userAgent, forHTTPHeaderField: "User-Agent")
-                // 注意：不要手动设置 Accept-Encoding: gzip。
-                // URLSession 只有在"你没设该头"时才会自动解压 gzip；
-                // 一旦手动设置，它会把原始 gzip 字节交给你（GBK 解码即乱码）。
-                if let scheme = url.scheme, let host = url.host {
-                    req.setValue("\(scheme)://\(host)/", forHTTPHeaderField: "Referer")
-                }
-                if let body = body {
-                    req.httpMethod = "POST"
-                    req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-                    // body 已是 GBK 百分号编码的 ASCII 串
-                    req.httpBody = body.data(using: .ascii)
-                }
-                let tag = body == nil ? "GET" : "POST"
-                EngineLog.log(.info, tag, "\(url.absoluteString)\(body.map { " body=\($0)" } ?? "")")
-                let (data, response) = try await session.data(for: req)
-                guard let http = response as? HTTPURLResponse else {
-                    EngineLog.log(.error, tag, "非 HTTP 响应 \(url.absoluteString)")
-                    throw NetworkError.nonHTTPResponse(url.absoluteString)
-                }
-                guard (200..<400).contains(http.statusCode) else {
-                    EngineLog.log(.error, tag, "HTTP \(http.statusCode) \(url.absoluteString)")
-                    throw NetworkError.httpStatus(http.statusCode)
-                }
-                let html = GBK.decode(data)
-                if isGuarded(html) {
-                    EngineLog.log(.warning, tag, "遇到盾（\(html.count) 字节）\(url.absoluteString)")
-                    throw NetworkError.guarded
-                }
-                EngineLog.log(.info, tag, "HTTP \(http.statusCode) · \(html.count) 字节 · \(url.absoluteString)")
-                return html
-            } catch {
-                // H4 收尾：把「错误收枘」与「是否重试」合并成**唯一**决策点。
-                //
-                // 原先这里是两个 catch：只有 `catch let e as NetworkError` 会查 `shouldRetry`，
-                // 而通用 catch 只是 `lastError = .transport(error)` —— 收枘完**直接进退避休眠，
-                // 从不查 shouldRetry**。偏偏 `URLSession` 抛的是 `URLError`（不是 `NetworkError`），
-                // 必然走通用分支，于是 `shouldRetry` 里对 `.transport` 的分类**在运行时从未被调用**，
-                // DNS 查不到 / 证书不受信 / 压根没网照样白等约 9 秒。
-                // 现在两条路径合一：先收枘，再问一次 shouldRetry。
-                let wrapped = Self.wrap(error)
-                if !wrapped.shouldRetry { throw wrapped }
-                lastError = wrapped
-            }
-            if attempt < retries {
-                EngineLog.log(.warning, "retry", "第 \(attempt + 1) 次失败，重试中… \(url.absoluteString)")
-                try? await Task.sleep(nanoseconds: UInt64(1_500_000_000 * (attempt + 1)))
-            }
+    /// 一次尝试：建请求 → 发请求 → 校验响应 → 解码 → 检测盾。**不含**重试与退避。
+    private func attempt(url: URL, body: String?) async throws -> String {
+        var req = URLRequest(url: url)
+        req.setValue(SiteConfig.userAgent, forHTTPHeaderField: "User-Agent")
+        // 注意：不要手动设置 Accept-Encoding: gzip。
+        // URLSession 只有在"你没设该头"时才会自动解压 gzip；
+        // 一旦手动设置，它会把原始 gzip 字节交给你（GBK 解码即乱码）。
+        if let scheme = url.scheme, let host = url.host {
+            req.setValue("\(scheme)://\(host)/", forHTTPHeaderField: "Referer")
         }
-        // 走到这里必然失败过（成功即 return，不重试即 throw）；`??` 只是给类型收口。
-        let failure: any Error = lastError ?? NetworkError.nonHTTPResponse(url.absoluteString)
-        EngineLog.log(.error, "fail", "放弃：\((failure as? LocalizedError)?.errorDescription ?? failure.localizedDescription) \(url.absoluteString)")
-        throw failure
+        if let body = body {
+            req.httpMethod = "POST"
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            // body 已是 GBK 百分号编码的 ASCII 串
+            req.httpBody = body.data(using: .ascii)
+        }
+        let tag = body == nil ? "GET" : "POST"
+        EngineLog.log(.info, tag, "\(url.absoluteString)\(body.map { " body=\($0)" } ?? "")")
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            EngineLog.log(.error, tag, "非 HTTP 响应 \(url.absoluteString)")
+            throw NetworkError.nonHTTPResponse(url.absoluteString)
+        }
+        guard (200..<400).contains(http.statusCode) else {
+            EngineLog.log(.error, tag, "HTTP \(http.statusCode) \(url.absoluteString)")
+            throw NetworkError.httpStatus(http.statusCode)
+        }
+        let html = GBK.decode(data)
+        if isGuarded(html) {
+            EngineLog.log(.warning, tag, "遇到盾（\(html.count) 字节）\(url.absoluteString)")
+            throw NetworkError.guarded
+        }
+        EngineLog.log(.info, tag, "HTTP \(http.statusCode) · \(html.count) 字节 · \(url.absoluteString)")
+        return html
+    }
+
+    /// 重试入口。循环本体在 `RetryLoop` 里（抽出去只为可测），这里只提供
+    /// 「一次尝试」和日志上下文 —— 重试次数、退避曲线、放弃时的错误全部不变。
+    private func request(url: URL, body: String?, retries: Int = 3) async throws -> String {
+        try await RetryLoop.run(
+            retries: retries,
+            logContext: url.absoluteString,
+            // 与原实现一致：退避被取消时不中断循环（`try?` 吞掉 CancellationError）。
+            sleep: { try? await Task.sleep(nanoseconds: $0) }
+        ) { _ in
+            try await self.attempt(url: url, body: body)
+        }
     }
 
     /// 把任意抛出的错误收枘成 `NetworkError` —— 重试循环与单测**共用**的唯一入口（H4 收尾）。
