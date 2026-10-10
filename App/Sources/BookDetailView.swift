@@ -196,7 +196,10 @@ private extension BookDetailView {
 // MARK: - 详情级状态（加载中 / 读取失败）
 
 private extension BookDetailView {
-    /// 本地记录（详情 + 是否在书架）的读取状态。
+    /// 详情级状态：**本地记录**（详情 + 是否在书架）与**未上架时的远端兜底**共用这一条展示槽。
+    ///
+    /// 两个失败分开记（`errorMessage` / `previewErrorMessage`：原因与重试目标都不同），
+    /// 但同屏只可能有一个成立 —— 本地读不到记录才会去走远端兜底。
     ///
     /// 读库失败时页面只能继续显示搜索带来的回退字段，而 `isOnShelf` 会停在 false ——
     /// 已在书架的书看起来就像「没加入过」。所以失败必须说出来，并给一条重试。
@@ -205,11 +208,11 @@ private extension BookDetailView {
     func detailStatus(
         _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
     ) -> some View {
-        if viewStore.isLoading {
+        if viewStore.isLoading || viewStore.isPreviewLoading {
             HStack(spacing: DesignTokens.Spacing.xs) {
                 ProgressView()
 
-                Text("正在读取本地记录…")
+                Text(viewStore.isPreviewLoading ? "正在联网读取简介与目录…" : "正在读取本地记录…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -219,6 +222,14 @@ private extension BookDetailView {
                 title: "本地记录读取失败",
                 message: message,
                 onRetry: { viewStore.send(.reloadDetail) }
+            )
+        } else if let message = viewStore.previewErrorMessage {
+            // 未上架的书：兜底失败时首屏只剩列表页回退字段（列表页没有简介）与空目录，
+            // 连阅读按钮都不会出现 —— 必须给出原因与重试，不能安静地保持空白。
+            InlineErrorBanner(
+                title: "简介与目录读取失败",
+                message: message,
+                onRetry: { viewStore.send(.reloadPreview) }
             )
         }
     }

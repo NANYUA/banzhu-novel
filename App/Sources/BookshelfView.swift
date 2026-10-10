@@ -94,6 +94,11 @@ struct BookshelfView: View {
                 //   回到根时状态翻回 `.visible` ⇒ 底栏可靠恢复；
                 // · 若「最上层声明胜出」：被 push 的视图不再声明，最上层声明者就是根 ⇒ 同样按状态走。
                 .toolbar(isShowingDetail ? .hidden : .visible, for: .tabBar)
+                // 底栏**背景**同样由根视图声明为「始终可见」：iOS 15+ 的底栏有 scroll-edge 外观，
+                // 内容没滚动（空态 / 列表不够长）时背景本来就是透明的 —— 真机「底栏偶尔变透明」就是它。
+                // 与上面的可见性同一层声明（`.toolbar(_, for: .tabBar)` 在这层已被真机验证有效）；
+                // 阅读页整条底栏是 `.hidden`，背景可见与否都看不见，专注模式不受影响。
+                .toolbarBackground(.visible, for: .tabBar)
                 // 同屏两条导航栏：「本地」分组的内容是自带 `NavigationStack` 的 `DownloadQueueView`，
                 // 外层这层再画一条就成了两条。本地态隐藏**外层**导航栏，让内层（「下载」标题 + 齿轮）
                 // 占据顶部；分组胶囊栏在 `body` 里、不在导航栏里，所以仍然可见，用户随时能切回「全部」。

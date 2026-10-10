@@ -134,6 +134,12 @@ public struct BookDetailFeature: Reducer {
         case chaptersDownloaded([String])
         /// 目录加载失败后点「重试」：只重发目录请求，不重新读详情。
         case reloadChapters
+        /// 远端兜底失败。`String` 是**真实原因**（含「没配站点」这类前提说明）：
+        /// 失败时首屏只剩搜索列表的回退字段（列表页没有简介）与空目录，阅读按钮也不出现，
+        /// 不说出来，「没联网成功」与「这本书本来就是空的」长得一模一样。
+        case previewFailed(String)
+        /// 兜底失败后点「重试」：只重发远端兜底（本地记录与目录各自有自己的重试）。
+        case reloadPreview
         /// 未上架（本地读不到记录）时远端兜底回来的详情 + 目录。
         ///
         /// 不能复用 `loaded` / `chaptersLoaded`：`loaded` 的非 nil 直接等于「已在书架」，
@@ -177,7 +183,8 @@ public struct BookDetailFeature: Reducer {
                 return .run { send in
                     // host 现场读（不缓存、不硬编码）；读不到就是空串，界面自己决定隐藏入口。
                     let settings = await siteStore.load()
-                    await send(.hostLoaded(settings.currentHostValue ?? ""))
+                    let host = settings.currentHostValue ?? ""
+                    await send(.hostLoaded(host))
 
                     // 四段**串行**发送：顺序确定；并发 effect 的到达顺序不可断言，测试会变成掷骰子。
                     var local: BookDetail?
@@ -196,8 +203,11 @@ public struct BookDetailFeature: Reducer {
                     // 🔴 本地读不到记录 = 这本书还没上架（搜索入口点进来的都是这种）：
                     // 再走一次远端兜底，否则首屏只有搜索列表的回退字段（无简介）与空目录，
                     // 连「开始阅读」都出不来。兜底**不落库**，书不会因此进书架。
-                    if local == nil, let preview = try? await loader.preview(bookPath) {
-                        await send(.previewLoaded(detail: preview.detail, chapters: preview.chapters))
+                    //
+                    // ⚠️ 这里**不能**用 `try?` 吞掉失败：吞掉之后页面既不报错也没有重试，
+                    // 与「兜底压根没被调用」在界面上完全一样（上一版 3660b6b 的真机缺陷）。
+                    if local == nil {
+                        await loadPreview(bookPath: bookPath, host: host, loader: loader, send: send)
                     }
                 }
 
@@ -231,9 +241,32 @@ public struct BookDetailFeature: Reducer {
             case let .previewLoaded(detail, chapters):
                 state.detail = detail
                 state.chapters = chapters
+                state.isPreviewLoading = false
                 // 兜底已经把目录给出来了，本地那条「目录读取失败」的提示就成了过期信息。
                 state.chapterErrorMessage = nil
+                // 重试成功：失败提示必须跟着消失，否则用户以为还是坏的。
+                state.previewErrorMessage = nil
                 return .none
+
+            case let .previewFailed(message):
+                state.isPreviewLoading = false
+                // 兜底只服务「未上架且本地没有数据」的首屏。加载途中用户把这本书加进了书架时，
+                // 这条网络失败与他已经修好的页面无关，不该再挂在他面前。
+                guard !state.isOnShelf else { return .none }
+                state.previewErrorMessage = message
+                return .none
+
+            case .reloadPreview:
+                guard !state.isPreviewLoading else { return .none }
+                state.isPreviewLoading = true
+                // 失败提示**不在这里清**：它由 `previewLoaded` 清（成功才消失）；
+                // 重试期间由 `isPreviewLoading` 把它换成「正在联网读取…」，避免「点了没反应」。
+                let bookPath = state.detail.bookPath
+                let host = state.host
+                let loader = loader
+                return .run { send in
+                    await loadPreview(bookPath: bookPath, host: host, loader: loader, send: send)
+                }
 
             case let .chaptersDownloaded(paths):
                 markChaptersDownloaded(paths, in: &state.chapters)
@@ -405,6 +438,15 @@ public extension BookDetailFeature {
 
         /// 目录加载失败原因。与详情本身的 `errorMessage` **分开**：一个失败不该把另一个拖下水。
         public var chapterErrorMessage: String?
+
+        /// 远端兜底（未上架书的简介 + 目录）失败原因。
+        ///
+        /// 与 `errorMessage` 分开记：失败原因与重试目标都不同，而且兜底失败只可能发生在
+        /// 「未上架且本地没有数据」的首屏 —— 不能拿它去顶掉一本已上架的书。
+        public var previewErrorMessage: String?
+
+        /// 远端兜底的**重试**进行中。首屏那次兜底不置位（那段时间由 `isLoading` 表达）。
+        public var isPreviewLoading = false
 
         /// 目录是否已展开为全部章节。默认只渲染前 `chapterPreviewLimit` 条。
         public var isShowingAllChapters = false

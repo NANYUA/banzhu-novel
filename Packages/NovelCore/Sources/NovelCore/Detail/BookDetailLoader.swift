@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Dependencies
 import Foundation
 import NovelEngine
@@ -98,4 +99,37 @@ private enum BookDetailLoaderLive {
             }
         )
     }
+}
+
+// MARK: - 一次兜底尝试（reducer 的两条入口共用）
+
+/// 一次远端兜底尝试：成功发 `.previewLoaded`，失败发 `.previewFailed`（带真实原因）。
+///
+/// 首屏（`BookDetailFeature` 的 `onAppear` 串行链尾部）与「重试」（`reloadPreview`）共用这一段 ——
+/// 两条入口的动作序列与失败文案永远一致，不会改了一边忘了另一边。
+/// `preview` 返回 `nil` 表示这次不兜底（测试默认值即如此），此时**不发任何动作**。
+///
+/// ⚠️ 放在本文件而不是 `BookDetailFeature.swift`：后者已贴近 600 行上限
+/// （SwiftLint `file_length` 按全行计数），塞回去会超限；这里紧挨着 `preview` 的契约
+/// （含「返回 nil 表示不兜底」）也更好找。
+func loadPreview(
+    bookPath: String,
+    host: String,
+    loader: BookDetailLoader,
+    send: Send<BookDetailFeature.Action>
+) async {
+    do {
+        guard let preview = try await loader.preview(bookPath) else { return }
+        await send(.previewLoaded(detail: preview.detail, chapters: preview.chapters))
+    } catch {
+        await send(.previewFailed(previewFailureText(error: error, host: host)))
+    }
+}
+
+/// 兜底失败的原因文案：把真实错误带出来；**没配站点**时先点明这一点 ——
+/// 否则用户只会看到一条「服务器返回错误（HTTP 404）」，不知道是地址根本没填。
+func previewFailureText(error: any Error, host: String) -> String {
+    let reason = error.localizedDescription
+    guard host.isEmpty else { return reason }
+    return "还没有配置站点地址，无法联网读取这本书的简介与目录。\(reason)"
 }

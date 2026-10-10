@@ -62,6 +62,10 @@ public struct ExploreView: View {
                 // 翻回 `.visible` ⇒ 底栏可靠恢复。详情页自己不再声明底栏，所以「根视图声明胜出」
                 // 与「最上层声明胜出」两种偏好解析模型下行为一致。
                 .toolbar(isShowingDetail ? .hidden : .visible, for: .tabBar)
+                // 底栏**背景**同样由根视图声明为「始终可见」：iOS 15+ 的底栏有 scroll-edge 外观，
+                // 内容没滚动（空态 / 列表不够长）时背景本来就是透明的 —— 真机「底栏偶尔变透明」就是它。
+                // 与上面的可见性同一层声明；阅读页整条底栏是 `.hidden`，专注模式不受影响。
+                .toolbarBackground(.visible, for: .tabBar)
                 // 每次出现都发 `.task`：reducer 内部对「已在加载中」做了去重，
                 // 所以 pop 回来重复触发不会打两次首页（见 `ExploreFeature` 的 `.task` 分支）。
                 .onAppear { viewStore.send(.task) }
