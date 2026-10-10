@@ -144,6 +144,18 @@ public actor NovelEngine {
         return HTMLParser.parseBookList(html)
     }
 
+    /// 抽首页（`/`）里的分类入口：标题 + 含 `{{page}}` 的路径模板。
+    ///
+    /// 首页是整页 HTML，且 `NetworkClient` 已经把响应按 GBK 解成字符串
+    /// （见 `NetworkClient.attempt` 的 `GBK.decode(data)`），这里拿到的是**已解码文本**，
+    /// 无需也不应再解一次码。
+    /// 分类是「锦上添花」：解析不出就返回空数组（不抛错），由上层决定怎么兜底 ——
+    /// 首页改版或遇盾都不该让书城整页报错。错误语义沿用 `NetworkError`，不另造类型。
+    public func exploreCategories() async throws -> [ExploreCategory] {
+        let html = try await fetch(path: "/", body: nil)
+        return HTMLParser.parseExploreCategories(html)
+    }
+
     // MARK: - 详情
 
     public func bookInfo(path: String) async throws -> Book {

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=gbk">
+  <title>Example Library</title>
+</head>
+<body>
+  <!-- 合成 fixture：主机与路径都是编的，只保留「首页里带分类导航」这个形状。
+       分类锚点形状：href="/<一段字母数字下划线连字符>/<数字>_<数字>.html" -->
+  <div class="nav">
+    <a href="/">Home</a>
+    <a href="/collection/">All Books</a>
+    <a href="/catalog/1_1.html">Alpha&middot;Beta</a>
+    <a href="/genre/2_3.html">Gamma</a>
+    <a href="/shelf/3_5.html">Delta &amp; Epsilon</a>
+    <a href="/news/1-beta-2-3.html">Site News</a>
+  </div>
+
+  <div class="main">
+    <ul class="list">
+      <li class="column-2">
+        <a class="name" href="/42/42001/">Sample Book One</a>
+        <a class="author" href="/people/1/">Sample Author</a>
+      </li>
+      <li class="column-2">
+        <a class="name" href="/43/43002/">Sample Book Two</a>
+        <p>Latest: <a href="/43/43002/7.html">Chapter Seven</a></p>
+      </li>
+    </ul>
+  </div>
+
+  <div class="bottom">
+    <a href="/list/4_1.html">Zeta&nbsp;Eta</a>
+    <a href="/tag/5_2.html">Theta&#183;Iota</a>
+    <a href="/picks/6_1.html"><span>Kappa</span>&middot;<em>Lambda</em></a>
+    <a href="/catalog/1_7.html">Alpha&middot;Beta</a>
+  </div>
+</body>
+</html>
