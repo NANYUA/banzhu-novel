@@ -51,6 +51,8 @@ public struct BookshelfFeature: Reducer {
         case editModeChanged(Bool)
         /// 切换某本书的编辑选中状态
         case selectionToggled(String)
+        /// 全选 / 取消全选**当前可见行**（见 `State.visibleRows`）
+        case toggleSelectAllVisible
         /// 新建分组
         case createGroup(String)
         /// 新建分组成功
@@ -154,6 +156,18 @@ public struct BookshelfFeature: Reducer {
                     state.selectedBookPaths.remove(bookPath)
                 } else {
                     state.selectedBookPaths.insert(bookPath)
+                }
+                return .none
+
+            case .toggleSelectAllVisible:
+                // 🔴 作用域是 `visibleRows` 而**不是** `rows`：书架有分组过滤，
+                // 把被过滤掉的书写进选中集，等于让用户删掉他根本看不见的书。
+                let visiblePaths = Set(state.visibleRows.map(\.bookPath))
+                guard !visiblePaths.isEmpty else { return .none }
+                if state.areAllVisibleRowsSelected {
+                    state.selectedBookPaths.subtract(visiblePaths)
+                } else {
+                    state.selectedBookPaths.formUnion(visiblePaths)
                 }
                 return .none
 
@@ -332,6 +346,16 @@ public extension BookshelfFeature {
         public var visibleRows: [ShelfRow] {
             guard let selectedGroupID else { return rows }
             return rows.filter { $0.groupId == selectedGroupID }
+        }
+
+        /// 当前可见行是否**全部**已被选中 —— 「全选 / 取消全选」按钮的判据。
+        ///
+        /// 与 `toggleSelectAllVisible` 同源：reducer 就是拿这个值决定这一步是
+        /// 「选上」还是「取消」，所以按钮文案不会和实际行为说两套话。
+        /// 没有可见行时恒为 `false`（此时没有可全选的目标）。
+        public var areAllVisibleRowsSelected: Bool {
+            let visiblePaths = Set(visibleRows.map(\.bookPath))
+            return !visiblePaths.isEmpty && visiblePaths.isSubset(of: selectedBookPaths)
         }
     }
 }

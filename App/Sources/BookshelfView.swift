@@ -258,11 +258,14 @@ private extension BookshelfView {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    selectAllMenuItem(viewStore)
+
                     Button {
                         viewStore.send(.downloadSelectedBooks)
                     } label: {
                         Label("整本下载", systemImage: "arrow.down.circle")
                     }
+                    .disabled(viewStore.selectedBookPaths.isEmpty)
 
                     Menu("移入分组") {
                         Button("未分组") {
@@ -274,19 +277,44 @@ private extension BookshelfView {
                             }
                         }
                     }
+                    .disabled(viewStore.selectedBookPaths.isEmpty)
 
                     Button(role: .destructive) {
                         isConfirmingDelete = true
                     } label: {
                         Label("删除", systemImage: "trash")
                     }
+                    .disabled(viewStore.selectedBookPaths.isEmpty)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
-                .disabled(viewStore.selectedBookPaths.isEmpty)
+                // ⚠️ `.disabled` 从 Menu 挪到了各菜单项上：整本下载 / 移入分组 / 删除
+                // 依赖「有选中」，而「全选」恰恰是在**还没选中任何书**时才要点的。
+                // 留在 Menu 上会让全选在唯一需要它的状态下点不到。
                 .accessibilityLabel("批量操作")
             }
         }
+    }
+
+    /// 「全选 / 取消全选」菜单项。
+    ///
+    /// 单独成函数是为了压 `toolbarContent` 的 `function_body_length`
+    /// （SwiftLint warning 50 / error 60，判定严格 `>`）—— 那个函数已贴着上限。
+    ///
+    /// 按钮只负责发 `.toggleSelectAllVisible`，集合运算全在 reducer 里：
+    /// 全选范围 = `State.visibleRows`（分组过滤后用户真正看得到的行）。
+    func selectAllMenuItem(
+        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some View {
+        Button {
+            viewStore.send(.toggleSelectAllVisible)
+        } label: {
+            Label(
+                viewStore.areAllVisibleRowsSelected ? "取消全选" : "全选",
+                systemImage: viewStore.areAllVisibleRowsSelected ? "circle" : "checkmark.circle"
+            )
+        }
+        .disabled(viewStore.visibleRows.isEmpty)
     }
 }
 

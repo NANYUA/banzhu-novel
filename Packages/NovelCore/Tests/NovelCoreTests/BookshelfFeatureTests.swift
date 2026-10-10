@@ -457,6 +457,100 @@ final class BookshelfFeatureTests: XCTestCase {
     }
 }
 
+// MARK: - 全选 / 取消全选（作用域 = 可见行）
+
+/// 「全选」的作用域必须是 `State.visibleRows`（分组过滤后用户真正看得到的行），
+/// 不是 `state.rows`：否则下一步「删除选中的 N 本」会删掉用户根本没在看的书。
+@MainActor extension BookshelfFeatureTests {
+    func test全选选中当前可见行() async {
+        let rowA = Self.makeRow(bookPath: "/1/", title: "书一")
+        let rowB = Self.makeRow(bookPath: "/2/", title: "书二")
+        let store = makeStore(
+            initialState: BookshelfFeature.State(rows: [rowA, rowB], isEditing: true)
+        )
+
+        XCTAssertFalse(store.state.areAllVisibleRowsSelected)
+        await store.send(.toggleSelectAllVisible) {
+            $0.selectedBookPaths = ["/1/", "/2/"]
+        }
+        XCTAssertTrue(store.state.areAllVisibleRowsSelected)
+        await store.finish()
+    }
+
+    func test取消全选清空选中集() async {
+        let rowA = Self.makeRow(bookPath: "/1/", title: "书一")
+        let rowB = Self.makeRow(bookPath: "/2/", title: "书二")
+        let store = makeStore(
+            initialState: BookshelfFeature.State(
+                rows: [rowA, rowB],
+                isEditing: true,
+                selectedBookPaths: ["/1/", "/2/"]
+            )
+        )
+
+        // 可见行已全部选中 → 这一下是「取消全选」
+        XCTAssertTrue(store.state.areAllVisibleRowsSelected)
+        await store.send(.toggleSelectAllVisible) {
+            $0.selectedBookPaths = []
+        }
+        await store.finish()
+    }
+
+    func test分组过滤下全选只选可见行() async {
+        let groupID = UUID()
+        var grouped = Self.makeRow(bookPath: "/1/", title: "分组书")
+        grouped.groupId = groupID
+        let store = makeStore(
+            initialState: BookshelfFeature.State(
+                rows: [grouped, Self.makeRow(bookPath: "/2/", title: "未分组书")],
+                selectedGroupID: groupID,
+                isEditing: true
+            )
+        )
+
+        XCTAssertEqual(store.state.visibleRows.map(\.bookPath), ["/1/"])
+        await store.send(.toggleSelectAllVisible) {
+            $0.selectedBookPaths = ["/1/"]
+        }
+        // 🔴 被分组过滤掉的 /2/ 绝不能进选中集
+        XCTAssertFalse(store.state.selectedBookPaths.contains("/2/"), "全选把不可见的 /2/ 也选上了")
+        await store.finish()
+    }
+
+    /// 取消全选与全选**作用域对称**：只动可见行，不误伤别处已选中的书。
+    func test取消全选只清可见行() async {
+        let groupID = UUID()
+        var grouped = Self.makeRow(bookPath: "/1/", title: "分组书")
+        grouped.groupId = groupID
+        let store = makeStore(
+            initialState: BookshelfFeature.State(
+                rows: [grouped, Self.makeRow(bookPath: "/2/", title: "别的分组的书")],
+                selectedGroupID: groupID,
+                isEditing: true,
+                selectedBookPaths: ["/1/", "/2/"]
+            )
+        )
+
+        // 可见的 /1/ 已选中 → 取消它；看不见的 /2/ 原样保留
+        await store.send(.toggleSelectAllVisible) {
+            $0.selectedBookPaths = ["/2/"]
+        }
+        await store.finish()
+    }
+
+    func test空列表全选不改变状态() async {
+        let store = makeStore(initialState: BookshelfFeature.State(isEditing: true))
+
+        // 没有可见行 → 被守卫拦下，状态不变。
+        // ⚠️ 状态不变化时**不能**传尾随闭包：那等于断言「状态变了」，
+        // TestStore 会报 "Expected state to change, but no change occurred."
+        await store.send(.toggleSelectAllVisible)
+        XCTAssertTrue(store.state.selectedBookPaths.isEmpty)
+        XCTAssertFalse(store.state.areAllVisibleRowsSelected)
+        await store.finish()
+    }
+}
+
 /// 书架排序。
 ///
 /// 需求 docs/03 §2.1 只写了「按最近阅读时间倒序」，
