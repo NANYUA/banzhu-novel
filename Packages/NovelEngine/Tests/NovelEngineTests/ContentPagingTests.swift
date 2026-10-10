@@ -104,11 +104,14 @@ final class ContentPagingTests: XCTestCase {
         let transport = FakeTransport { url in
             let name = url.deletingPathExtension().lastPathComponent
             let parts = name.split(separator: "_").map { String($0) }
-            let index = (Int(parts.last ?? "1") ?? 1) + 1
+            // 页号取路径里的「_N」后缀：首段 `4001.html` 没有后缀 ⇒ 第 1 段。
+            // 不能写成「末段数字 + 1」—— 首段路径里的 `4001` 是章节号，不是页号，
+            // 那样首段就会自称第 4002 段（正是这条测试在 CI 上失败的原因）。
+            let page = parts.count > 1 ? (Int(parts.last ?? "1") ?? 1) : 1
             let base = parts.first ?? "4001"
             return """
-            <div class="page-content"><p>Endless segment \(index).</p></div>
-            <a href="\(base)_\(index).html">Next</a>
+            <div class="page-content"><p>Endless segment \(page).</p></div>
+            <a href="\(base)_\(page + 1).html">Next</a>
             """
         }
         let engine = await makeEngine(transport)
