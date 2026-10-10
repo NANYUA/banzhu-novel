@@ -34,6 +34,9 @@ struct BookshelfView: View {
     @State var renamingGroup: ShelfGroupSnapshot?
     @State var renameGroupName = ""
     @State private var isConfirmingDelete = false
+    /// U9-8：「下载设置」sheet 的开关。入口在本地分组（= 下载队列）下的工具栏里，
+    /// 所以这个状态与 `showsLocalGroup` 同生共死；`private` 足够（同文件的 extension 读得到）。
+    @State private var isShowingDownloadSettings = false
     /// 详情页目标。用显式 push 而不是 `NavigationLink`：见 `rowContent` 的注释。
     @State private var detailRow: ShelfRow?
     @State private var isShowingDetail = false
@@ -99,12 +102,19 @@ struct BookshelfView: View {
                 // 与上面的可见性同一层声明（`.toolbar(_, for: .tabBar)` 在这层已被真机验证有效）；
                 // 阅读页整条底栏是 `.hidden`，背景可见与否都看不见，专注模式不受影响。
                 .toolbarBackground(.visible, for: .tabBar)
-                // 同屏两条导航栏：「本地」分组的内容是自带 `NavigationStack` 的 `DownloadQueueView`，
-                // 外层这层再画一条就成了两条。本地态隐藏**外层**导航栏，让内层（「下载」标题 + 齿轮）
-                // 占据顶部；分组胶囊栏在 `body` 里、不在导航栏里，所以仍然可见，用户随时能切回「全部」。
-                // 批量操作工具栏在本地态被一起隐藏是对的 —— 本地态没有书目可多选。
-                // `.navigationBar` 与上面的 `.tabBar` 是两个独立的 `ToolbarPlacement`，可并存。
-                .toolbar(viewStore.showsLocalGroup ? .hidden : .visible, for: .navigationBar)
+                // U9-8：这里**原先**有一条 `.toolbar(showsLocalGroup ? .hidden : .visible, for: .navigationBar)`。
+                // 它的成因是「同屏两条导航栏」——「本地」分组的内容 `DownloadQueueView` 自带一层
+                // `NavigationStack`（「下载」标题 + 齿轮），外层这层再画一条就成了两条；
+                // 于是本地态把**外层**栏整条藏掉，让内层占据顶部（批量工具栏也被一起藏掉）。
+                // 那条已撤掉：`DownloadQueueView` 不再自带 `NavigationStack`，只剩这一层，
+                // 标题统一为下面的「书架」。owner 口径是「书架的本地页应该完全融入书架页面，
+                // 遵从书架的风格」—— 留一个「下载」大标题恰恰是"看起来像嵌进来的另一个 App"的来源。
+                // 分组胶囊栏在 `body` 里、不在导航栏里，所以不受这条改动影响，随时能切回「全部」。
+                // ⚠️ 撤掉它之后批量工具栏会在本地态露出来 —— 那由 `toolbarContent` 里
+                // `!viewStore.showsLocalGroup` 那条护栏挡住，**不要**把那条护栏一起删掉。
+                //
+                // `.navigationBar` 与上面的 `.tabBar` 是两个独立的 `ToolbarPlacement`；
+                // 这里不再对 `.navigationBar` 做可见性声明（默认可见即所要的效果）。
                 .onAppear { viewStore.send(.onAppear) }
                 .navigationDestination(isPresented: $isShowingDetail) {
                     if let row = detailRow {
@@ -123,6 +133,15 @@ struct BookshelfView: View {
                 }
                 .toolbar {
                     toolbarContent(viewStore)
+                }
+                // U9-8：「下载设置」的载体。它**自带一层 `NavigationStack`** ——
+                // 所以撤掉 `DownloadQueueView` 自己那层栈，不影响设置页的标题与「完成」按钮。
+                // sheet 挂在书架这一层而不是 `DownloadQueueView` 里：入口按钮现在归外层工具栏所有，
+                // 两者必须共用同一个开关（`isShowingDownloadSettings`）。
+                .sheet(isPresented: $isShowingDownloadSettings) {
+                    NavigationStack {
+                        DownloadSettingsView(store: downloadStore)
+                    }
                 }
                 .alert("新建分组", isPresented: $isShowingNewGroupAlert) {
                     TextField("分组名", text: $newGroupName)
@@ -188,7 +207,15 @@ private extension BookshelfView {
     func toolbarContent(
         _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
     ) -> some ToolbarContent {
-        if viewStore.isEditing {
+        // 🔴 `!viewStore.showsLocalGroup` 是 U9-8 的回归护栏，纯 View 层，**不要**改成动 reducer：
+        // `.groupSelected` / `.localGroupSelected` 都**不重置** `isEditing`（`BookshelfFeature.swift:147-162`），
+        // 而批量工具栏的唯一渲染条件就是 `isEditing`。U9-8 之前这里没暴露，只因
+        // `body` 里那条 `.toolbar(showsLocalGroup ? .hidden : .visible, for: .navigationBar)`
+        // 把整条导航栏连工具栏一起藏掉了；U9-8 撤掉那条之后，本地分组（= 下载队列）会
+        // 长出「全选 / 整本下载 / 移入分组 / 删除」——本地分组装的是下载任务、不是书目，
+        // 这些批量操作在语义上根本不成立，而且「全选」的判据 `visibleRows` 在本地态也拿不到书。
+        // 因此渲染条件补上 `!showsLocalGroup`：与 reducer 里「本地与书组互斥」的不变量同向。
+        if viewStore.isEditing, !viewStore.showsLocalGroup {
             ToolbarItem(placement: .topBarLeading) {
                 Button("完成") {
                     viewStore.send(.editModeChanged(false))
@@ -231,6 +258,31 @@ private extension BookshelfView {
                 // 依赖「有选中」，而「全选」恰恰是在**还没选中任何书**时才要点的。
                 // 留在 Menu 上会让全选在唯一需要它的状态下点不到。
                 .accessibilityLabel("批量操作")
+            }
+        }
+
+        downloadSettingsToolbarItem(viewStore)
+    }
+
+    /// U9-8：「下载设置」入口 —— **只在本地分组（= 下载队列）下出现**。
+    ///
+    /// 与上面的批量菜单**互斥**（后者要求 `!showsLocalGroup`），两者永不共存，
+    /// 所以都占 `.topBarTrailing` 也不会打架。
+    ///
+    /// 单独成函数是为了压 `toolbarContent` 的 `function_body_length`
+    /// （SwiftLint warning 50 / error 60，判定严格 `>`）：内联进去会把那个函数顶到 49 行，
+    /// 贴着 warning 门槛，日后任何小改都会把 CI 打红。
+    @ToolbarContentBuilder
+    func downloadSettingsToolbarItem(
+        _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
+    ) -> some ToolbarContent {
+        if viewStore.showsLocalGroup {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingDownloadSettings = true
+                } label: {
+                    Label("下载设置", systemImage: "gearshape")
+                }
             }
         }
     }

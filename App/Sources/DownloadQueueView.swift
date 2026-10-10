@@ -3,44 +3,52 @@ import NovelCore
 import SwiftUI
 
 /// 下载管理页：总进度、分书队列、暂停/重试与下载设置。
+///
+/// ## U9-8：从「自带导航栏的独立页」变成「书架『本地』分组的内容视图」
+/// 全仓唯一调用点是 `BookshelfView.swift:54`。本视图现在：
+/// - **不再自带 `NavigationStack`** —— 原先它与 `BookshelfView` 的栈叠成两层
+///   （屏幕上只剩内层那条，外层被 `BookshelfView` 的 `.toolbar(_, for: .navigationBar)` 藏掉）；
+///   现在只保留外层那一条；
+/// - **不再声明 `.navigationTitle("下载")`** —— 本地页标题统一为外层栏的「书架」。
+///   owner 口径是「书架的本地页应该完全融入书架页面，遵从书架的风格」，
+///   而留一个「下载」大标题恰恰是"看起来像嵌进来的另一个 App"的来源；
+/// - 「下载设置」入口搬到 `BookshelfView` 的外层工具栏（**仅 `showsLocalGroup` 时出现**），
+///   故 `DownloadSettingsView` 由 `private` 放宽到 `internal` 供其引用。
+///
+/// ## U9-8：视觉语言对齐书架（**对项目待办清单第 73 行登记的取舍做的一次显式翻转**）
+/// 原先 `.listStyle(.insetGrouped)`（系统分组行 + 系统卡片圆角）与书架的
+/// `.plain` + `scrollContentBackground(.hidden)` + 自绘卡（`Surface.card` + `Radius.sm`）并存，
+/// 该取舍在工作区根目录的待办清单第 73 行被登记为「结构性取舍，需产品决策」—— U9-8 就是那个决策：
+/// （那份清单的文件名刻意不写在这里：它含一个小写词，会被 SwiftLint 的「待办标记」规则盯上，
+/// 而本机没有 SwiftLint 二进制、无法验证那条规则的大小写敏感性 —— 不赌。）
+/// **翻转到 `.plain`**，与书架同源。层次 = 页面底（`Surface.page` 分组灰）
+/// → 卡（`Surface.card` 白）→ 卡内行。
+///
+/// **每个「书」= 一个 `Section` = 一张卡**：同一 `Section` 内的章节行共享同一张卡
+/// （首行只圆上两角、末行只圆下两角、中间行直角，且上下行内边距为 0 ⇒ 视觉上合并），
+/// 而**不是每章一张白卡** —— 书架的隐喻是「一本书一张卡」，
+/// 每章一张白卡会让下载页明显偏重、与"融入书架"相反。
 struct DownloadQueueView: View {
     let store: StoreOf<DownloadFeature>
 
-    @State private var isShowingSettings = false
-
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
-            NavigationStack {
-                Group {
-                    if viewStore.tasks.isEmpty {
-                        emptyState
-                    } else {
-                        queueList(viewStore)
-                    }
-                }
-                // 先显式撑满再铺底：`Group` 布局透明，`.background` 只覆盖被修饰视图的 frame，而空态是裸 CUV。
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // U1-1：空态与列表态共用同一张页面底（`AppTheme.Surface.page`）。
-                // 挂在 `Group` 上而不是只给 `emptyState` 单独刷一层：两条分支只有一处真相源，日后不会漂移。
-                .background(AppTheme.Surface.page)
-                .navigationTitle("下载")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            isShowingSettings = true
-                        } label: {
-                            Label("下载设置", systemImage: "gearshape")
-                        }
-                    }
-                }
-                .onAppear {
-                    viewStore.send(.task)
+            Group {
+                if viewStore.tasks.isEmpty {
+                    emptyState
+                } else {
+                    queueList(viewStore)
                 }
             }
-            .sheet(isPresented: $isShowingSettings) {
-                NavigationStack {
-                    DownloadSettingsView(store: store)
-                }
+            // 先显式撑满再铺底：`Group` 布局透明，`.background` 只覆盖被修饰视图的 frame，而空态是裸 CUV。
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // U1-1：空态与列表态共用同一张页面底（`AppTheme.Surface.page`）。
+            // 挂在 `Group` 上而不是只给 `emptyState` 单独刷一层：两条分支只有一处真相源，日后不会漂移。
+            .background(AppTheme.Surface.page)
+            // 原先挂在 `NavigationStack` 上；U9-8 去掉那层栈后改挂这里，行为不变：
+            // 切到「本地」分组时本视图出现 ⇒ 拉一次队列快照。
+            .onAppear {
+                viewStore.send(.task)
             }
         }
     }
@@ -62,6 +70,7 @@ struct DownloadQueueView: View {
                     DownloadNoticeRow(notice: notice) {
                         viewStore.send(.noticeDismissed)
                     }
+                    .downloadQueueCard()
                 }
             }
 
@@ -84,20 +93,93 @@ struct DownloadQueueView: View {
             )
 
             ForEach(bookSections(from: viewStore.tasks)) { section in
-                Section {
-                    ForEach(section.tasks) { task in
-                        DownloadTaskRow(task: task)
-                    }
-                } header: {
-                    DownloadBookHeader(section: section) {
-                        viewStore.send(.pauseBook(section.id))
-                    } onCancel: {
-                        viewStore.send(.cancelBook(section.id))
-                    }
-                }
+                bookSection(section, viewStore: viewStore)
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        // 让 List 自己的滚动背景透出页面分组灰（与书架 `shelfList` 同一手法）。
+        .scrollContentBackground(.hidden)
+    }
+
+    /// 一本书 = 一个 `Section` = 一张卡（章节行合并；header 自成一张卡压在它上面）。
+    ///
+    /// 单独成函数是为了压 `queueList` 的 `function_body_length`
+    /// （SwiftLint warning 50 / error 60，判定严格 `>`）。
+    private func bookSection(
+        _ section: BookDownloadSection,
+        viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> some View {
+        Section {
+            ForEach(section.tasks.indices, id: \.self) { index in
+                DownloadTaskRow(task: section.tasks[index])
+                    .downloadQueueCard(
+                        topRounded: index == 0,
+                        bottomRounded: index == section.tasks.count - 1
+                    )
+            }
+        } header: {
+            DownloadBookHeader(section: section) {
+                viewStore.send(.pauseBook(section.id))
+            } onCancel: {
+                viewStore.send(.cancelBook(section.id))
+            }
+            .downloadQueueSectionHeaderCard()
+        }
+    }
+}
+
+// MARK: - U9-8 卡片装饰（与书架同源）
+
+private extension View {
+    /// 不成卡的行（系统控件 / 提示条）：清行底 + 隐藏分隔线 + 书架同款左右 16pt 页边距。
+    func downloadQueueRow(
+        top: CGFloat = DesignTokens.Spacing.xs,
+        bottom: CGFloat = DesignTokens.Spacing.xs
+    ) -> some View {
+        listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .listRowInsets(
+                .init(
+                    top: top,
+                    leading: DesignTokens.Spacing.md,
+                    bottom: bottom,
+                    trailing: DesignTokens.Spacing.md
+                )
+            )
+    }
+
+    /// 卡面（`Surface.card` + `Radius.sm`），圆角按「是不是 Section 的首 / 末行」取舍。
+    ///
+    /// 上下行内边距取 0 ⇒ 同一 `Section` 内相邻章节行的卡面直接相接，合并成一张卡；
+    /// 只有首行圆上两角、末行圆下两角，中间行走直角
+    /// （`UnevenRoundedRectangle` 支持逐角指定，iOS 17 起可用）。
+    func downloadQueueCard(
+        topRounded: Bool = true,
+        bottomRounded: Bool = true
+    ) -> some View {
+        padding(.horizontal, DesignTokens.Spacing.sm)
+            .padding(.vertical, DesignTokens.Spacing.xs)
+            .background(
+                AppTheme.Surface.card,
+                in: UnevenRoundedRectangle(
+                    topLeadingRadius: topRounded ? DesignTokens.Radius.sm : 0,
+                    bottomLeadingRadius: bottomRounded ? DesignTokens.Radius.sm : 0,
+                    bottomTrailingRadius: bottomRounded ? DesignTokens.Radius.sm : 0,
+                    topTrailingRadius: topRounded ? DesignTokens.Radius.sm : 0
+                )
+            )
+            .downloadQueueRow(top: 0, bottom: 0)
+    }
+
+    /// 每本书的 header 自成一张卡（四角全圆），压在它自己那张章节行卡之上。
+    func downloadQueueSectionHeaderCard() -> some View {
+        padding(.horizontal, DesignTokens.Spacing.sm)
+            .padding(.vertical, DesignTokens.Spacing.xs)
+            .background(
+                AppTheme.Surface.card,
+                in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+            )
+            .downloadQueueRow(top: 0, bottom: DesignTokens.Spacing.xs)
     }
 }
 
@@ -157,6 +239,7 @@ private struct DownloadSummarySection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .downloadQueueCard()
 
             Button(action: onTogglePause) {
                 Label(
@@ -167,6 +250,7 @@ private struct DownloadSummarySection: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .downloadQueueRow()
 
             if failedCount > 0 {
                 Button(action: onRetryFailed) {
@@ -175,6 +259,7 @@ private struct DownloadSummarySection: View {
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
+                .downloadQueueRow()
             }
 
             if blockedCount > 0 {
@@ -184,6 +269,7 @@ private struct DownloadSummarySection: View {
                         .contentShape(Rectangle())
                 }
                 .tint(.orange)
+                .downloadQueueRow()
             }
         } header: {
             Text("下载队列")
@@ -316,7 +402,13 @@ private struct DownloadTaskRow: View {
     }
 }
 
-private struct DownloadSettingsView: View {
+/// 下载设置页。
+///
+/// ⚠️ 可见性是 `internal`（U9-8 起），**不是** `public`：入口已搬到
+/// `BookshelfView` 的外层工具栏（仅 `showsLocalGroup` 时出现），
+/// 而它就在本模块（`App` target）里，`internal` 已经够用 —— 不要为它加 `public`。
+/// 本页仍由 `BookshelfView` 的 `.sheet` 里那层 `NavigationStack` 提供标题与「完成」。
+struct DownloadSettingsView: View {
     let store: StoreOf<DownloadFeature>
 
     @Environment(\.dismiss) private var dismiss
