@@ -115,6 +115,37 @@ final class ReaderFeatureTests: XCTestCase {
         XCTAssertEqual(store.state.currentOffset, 0)
     }
 
+    /// 🔴 数据契约：`currentOffset` 落在**页中间**时，`nextPage` 仍推进到下一页起点。
+    ///
+    /// 页中间的 offset 在生产里由「改字号 / 行距 / 页边距后重新分页」产生：
+    /// `configChanged` 只重排 `pages`、不把 `currentOffset` 吸附到页首，
+    /// 原页首于是可能落进新页的中间（见 ReaderFeature.swift 的 configChanged 分支）。
+    /// 测试里已无改 offset 的 action（`jumpToOffset` 随滚动链路一起删除），
+    /// 所以按它原先的语义（纯赋值）在初始状态里给出 offset = 3。
+    func test页中间offset仍能翻到下一页() async {
+        var initial = ReaderFeature.State(
+            chapterPath: "/1/1.html",
+            text: Self.sampleText,
+            currentOffset: 3
+        )
+        // 与 loadSample 同一套确定性分页：10 字、每页 5 字
+        initial.pages = [
+            PageRange(location: 0, length: 5),
+            PageRange(location: 5, length: 5),
+        ]
+        XCTAssertFalse(initial.pages.contains { $0.location == 3 }, "前置条件：3 必须落在页中间")
+        let store = TestStore(initialState: initial) {
+            ReaderFeature()
+        }
+
+        // 3 在第 0 页（0..<5）的中间 → 下一页起点是第 1 页的 5，而不是 3 + 5 = 8
+        await store.send(.nextPage) {
+            $0.currentOffset = 5
+        }
+        await store.finish()
+        XCTAssertEqual(store.state.currentOffset, 5)
+    }
+
     /// 🔴 数据契约：改配置重新分页，但 currentOffset 不丢
     func test改配置重新分页且offset不丢() async {
         let store = makeStore(text: Self.sampleText) { _ in Self.sampleText }
