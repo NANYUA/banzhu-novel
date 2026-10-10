@@ -218,7 +218,11 @@ struct ReaderSettingsView: View {
                 .overlay(
                     Circle()
                         .strokeBorder(
-                            isSelected ? Color.accentColor : Color.secondary.opacity(0.3),
+                            // 选中环是**品牌强调色**（与同一面板里的分段控件 / 开关同色），
+                            // 不能用 `Color.accentColor` —— 它解析的是资源目录 / 系统 accent，
+                            // 本项目没有 asset catalog，于是它固定是系统默认蓝，**不跟随**
+                            // `RootView` 的 `.tint(AppTheme.accent)`，会跟品牌色错开一档。
+                            isSelected ? AppTheme.accent : Color.secondary.opacity(0.3),
                             lineWidth: isSelected ? 3 : 1
                         )
                 )
