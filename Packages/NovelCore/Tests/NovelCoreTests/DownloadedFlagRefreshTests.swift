@@ -94,7 +94,7 @@ final class BookDetailDownloadedFlagTests: XCTestCase {
 
 /// 「已完成章节」信号（`completedChapterPaths(forBook:)`）的派生行为与生命周期的测试。
 @MainActor
-final class DownloadFeatureCompletedChapterPathsTests: DownloadFeatureTestCase {
+final class DownloadFeatureChapterPathsTests: DownloadFeatureTestCase {
     /// 只收 `.done`：排队 / 下载中 / 暂停 / 失败都不算已完成。
     func test已完成章节只收已完成的任务() {
         var state = DownloadFeature.State(tasks: [
