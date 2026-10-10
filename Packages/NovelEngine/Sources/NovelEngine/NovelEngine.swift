@@ -181,8 +181,9 @@ public actor NovelEngine {
     static let maxContentPages = 8
 
     /// 取一章正文。站点把同一章切成多个 HTML 分段时（后续段地址形如
-    /// `<数字>_<数字>.html`，由 `HTMLParser.nextSegmentReference` 按形状识别），
-    /// 把后续段按序取回并拼接 —— 只取第一段就是「阅读页正文只能看到第一页」。
+    /// `<数字>_<数字>.html`，由 `HTMLParser.allSegmentReferences` 按形状收集、
+    /// 再按**页号**挑出下一页），把后续段按序取回并拼接 ——
+    /// 只取第一段就是「阅读页正文只能看到第一页」。
     ///
     /// 后续段取失败**不整章报错**：已取到的部分照常返回，少一段好过整章空白
     /// （含后续段撞验证盾、用户取消验证的情形）。错误语义沿用 `NetworkError`，
@@ -217,11 +218,42 @@ public actor NovelEngine {
         return text
     }
 
-    /// 把正文页里识别出的「下一段」相对文件名，解析成可请求的路径（与当前段同目录）。
+    /// 把正文页里识别出的分段引用，解析成**下一页**的可请求路径（与当前段同目录）。
+    ///
+    /// 站点把分页列表放在正文页里，且**当前页自己的链接排在列表第一个**（带当前页标记）。
+    /// 只取第一个命中会解析回当前页，`visited` 立刻判重 ⇒ 循环一次都不执行 ⇒
+    /// 用户看到的现象是「正文被截断，只有几屏」。
+    /// 因此这里按**页号**挑选：章节名相同、页号大于当前页号的**最小**者。
     private func nextSegmentPath(from html: String, currentPath: String) -> String? {
-        guard let reference = HTMLParser.nextSegmentReference(in: html),
+        guard let current = Self.segmentIdentity(of: currentPath),
               let base = config.url(currentPath) else { return nil }
-        return URL(string: reference, relativeTo: base)?.path
+        var next: (path: String, page: Int)?
+        for reference in HTMLParser.allSegmentReferences(in: html) {
+            guard let path = URL(string: reference, relativeTo: base)?.path,
+                  let candidate = Self.segmentIdentity(of: path),
+                  candidate.name == current.name,
+                  candidate.page > current.page else { continue }
+            if let next, next.page <= candidate.page { continue }
+            next = (path, candidate.page)
+        }
+        return next?.path
+    }
+
+    /// 从章节路径里取出「章节名 + 页号」，用来判断两个分段是否同章、谁在前谁在后。
+    ///
+    /// 文件名形如 `<名称>_<页码>.html` ⇒ name = 前段、page = 后段；
+    /// 形如 `<名称>.html`（没有 `_页码` 后缀）⇒ page 视为 1 ——
+    /// 这样无后缀的章节入口也会直接选中 `<名称>_2.html`，
+    /// 而**不会**把 `<名称>_1.html` 当成下一页、重复取到同一页正文。
+    /// 取不出文件名主干时返回 nil，调用方据此放弃推进。
+    private static func segmentIdentity(of path: String) -> (name: String, page: Int)? {
+        let stem = (path as NSString).lastPathComponent
+        let base = (stem as NSString).deletingPathExtension
+        guard !base.isEmpty else { return nil }
+        guard let separator = base.lastIndex(of: "_") else { return (base, 1) }
+        let pageText = String(base[base.index(after: separator)...])
+        guard let page = Int(pageText) else { return (base, 1) }
+        return (String(base[base.startIndex..<separator]), page)
     }
 
     /// 供测试使用。

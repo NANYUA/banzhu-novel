@@ -311,33 +311,52 @@ enum HTMLParser {
     /// 前导 `/` 的绝对路径（分类导航等同形链接）因此天然落选，不会被当成后续段。
     private static let segmentLinkPattern = "(?:^|[^/\\w.\\-])(\\d+)_(\\d+)\\.html"
 
-    /// 从正文页里取「下一段」的相对文件名（**只按形状**匹配，零站点字面量）。
+    /// 页面里**全部**同形引用（`<名称>_<页码>.html`），按**文档顺序**去重返回。
     ///
     /// 站点把同一章的正文切成多个 HTML 分页，后续段地址形如 `<数字>_<数字>.html`，
     /// 且**相对**当前章节页（没有前导 `/`）。页面里它有两种形状，两种都收：
-    /// 1. 内联脚本的四元引号数字调用 —— 取第 3、4 个数拼出地址（书源规则即此形状）；
-    /// 2. 直接的相对引用 `<数字>_<数字>.html`。
+    /// 1. 内联脚本的四元引号数字调用 —— `segmentCallPattern`，取第 3、4 个数拼出地址；
+    /// 2. 直接的相对引用 —— `segmentLinkPattern`，前导字符不能是 `/`、词字符、`.`、`-`
+    ///    （前导 `/` 的绝对路径因此天然落选）。
     ///
-    /// 两种都取不到返回 nil：**没有后续段是常态，不是错误**，调用方据此收尾。
-    static func nextSegmentReference(in html: String) -> String? {
-        if let filename = segmentFilename(pattern: segmentCallPattern, nameGroup: 3, pageGroup: 4, in: html) {
-            return filename
+    /// 一条都取不到返回空数组：**没有后续段是常态，不是错误**，调用方据此收尾。
+    ///
+    /// 之所以要「全部」而不只是「第一个」：站点把分页列表放在正文页里，
+    /// 且**当前页自己的链接排在列表第一个**，只取第一个命中会解析回当前页 ——
+    /// 调用方据此永远推不到第 2 页。
+    static func allSegmentReferences(in html: String) -> [String] {
+        let matches = segmentMatches(pattern: segmentCallPattern, nameGroup: 3, pageGroup: 4, in: html)
+            + segmentMatches(pattern: segmentLinkPattern, nameGroup: 1, pageGroup: 2, in: html)
+        var seen = Set<String>()
+        var references: [String] = []
+        for match in matches.sorted(by: { $0.location < $1.location }) {
+            guard seen.insert(match.filename).inserted else { continue }
+            references.append(match.filename)
         }
-        return segmentFilename(pattern: segmentLinkPattern, nameGroup: 1, pageGroup: 2, in: html)
+        return references
     }
 
-    /// 按给定正则取「名称数字 + 页码数字」，拼成 `<名称>_<页码>.html`。
-    private static func segmentFilename(pattern: String, nameGroup: Int, pageGroup: Int,
-                                        in html: String) -> String? {
+    /// 一次形状命中的结果：拼出的文件名 + 命中位置（用来把两种 pattern 的结果按文档顺序合并）。
+    private struct SegmentMatch {
+        let location: Int
+        let filename: String
+    }
+
+    /// 按给定正则取出页面里**全部**「名称数字 + 页码数字」，拼成 `<名称>_<页码>.html`。
+    private static func segmentMatches(pattern: String, nameGroup: Int, pageGroup: Int,
+                                       in html: String) -> [SegmentMatch] {
         guard let re = try? NSRegularExpression(
             pattern: pattern,
             options: [.caseInsensitive, .dotMatchesLineSeparators]
-        ) else { return nil }
+        ) else { return [] }
         let ns = html as NSString
-        guard let m = re.firstMatch(in: html, options: [], range: NSRange(location: 0, length: ns.length)),
-              m.numberOfRanges > max(nameGroup, pageGroup) else { return nil }
-        let name = ns.substring(with: m.range(at: nameGroup))
-        let page = ns.substring(with: m.range(at: pageGroup))
-        return "\(name)_\(page).html"
+        var matches: [SegmentMatch] = []
+        re.enumerateMatches(in: html, options: [], range: NSRange(location: 0, length: ns.length)) { result, _, _ in
+            guard let result, result.numberOfRanges > max(nameGroup, pageGroup) else { return }
+            let name = ns.substring(with: result.range(at: nameGroup))
+            let page = ns.substring(with: result.range(at: pageGroup))
+            matches.append(SegmentMatch(location: result.range.location, filename: "\(name)_\(page).html"))
+        }
+        return matches
     }
 }

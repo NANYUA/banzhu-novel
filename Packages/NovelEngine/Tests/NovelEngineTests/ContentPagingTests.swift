@@ -143,18 +143,18 @@ final class ContentPagingTests: XCTestCase {
 
     func test形状判断取内联脚本里的分段地址() throws {
         let html = try fixture("content_paged_1.html")
-        XCTAssertEqual(HTMLParser.nextSegmentReference(in: html), "1001_2.html")
+        XCTAssertEqual(HTMLParser.allSegmentReferences(in: html).first, "1001_2.html")
     }
 
     func test形状判断取相对引用形式的分段地址() throws {
         let html = try fixture("content_paged_2.html")
-        XCTAssertEqual(HTMLParser.nextSegmentReference(in: html), "1001_3.html")
+        XCTAssertEqual(HTMLParser.allSegmentReferences(in: html).first, "1001_3.html")
     }
 
     func test形状判断不误收绝对路径与粘前缀的同形链接() throws {
         let html = try fixture("content_links_only.html")
-        XCTAssertNil(HTMLParser.nextSegmentReference(in: html),
-                     "绝对路径 / 绝对地址 / 粘前缀的同形文件名都不得被当成后续段")
+        XCTAssertTrue(HTMLParser.allSegmentReferences(in: html).isEmpty,
+                      "绝对路径 / 绝对地址 / 粘前缀的同形文件名都不得被当成后续段")
     }
 
     func test只有其它形状链接的章节只请求一次() async throws {
@@ -170,6 +170,63 @@ final class ContentPagingTests: XCTestCase {
     }
 
     func test空页面返回无后续段() {
-        XCTAssertNil(HTMLParser.nextSegmentReference(in: ""))
+        XCTAssertTrue(HTMLParser.allSegmentReferences(in: "").isEmpty)
+    }
+
+    // MARK: - ⑥ 分页列表里「当前页自己的链接排在第一个」：必须推进到第 2 页
+
+    func test形状判断按文档顺序返回全部同形引用() throws {
+        let html = try fixture("content_curr_first_1.html")
+        XCTAssertEqual(HTMLParser.allSegmentReferences(in: html), ["2001_1.html", "2001_2.html"],
+                       "当前页自己的链接也要被收集到，且保持文档顺序")
+        XCTAssertEqual(HTMLParser.allSegmentReferences(in: html).first, "2001_1.html",
+                       "第一个命中是「当前页自己」，所以引擎必须按页号挑下一页")
+    }
+
+    func test当前页链接排在列表第一个时仍能取到第二页() async throws {
+        let pageOne = try fixture("content_curr_first_1.html")
+        let pageTwo = try fixture("content_curr_first_2.html")
+        let transport = makeTransport(pages: [
+            "/sample/2001_1.html": pageOne,
+            "/sample/2001_2.html": pageTwo,
+        ])
+        let engine = await makeEngine(transport)
+
+        let text = try await engine.content(chapterPath: "/sample/2001_1.html")
+
+        XCTAssertTrue(text.contains("Current first segment one."), "实际：\(text)")
+        XCTAssertTrue(text.contains("Current first segment two."), "第 2 页必须被取回：\(text)")
+        let head = try XCTUnwrap(text.range(of: "Current first segment one.")).lowerBound
+        let tail = try XCTUnwrap(text.range(of: "Current first segment two.")).lowerBound
+        XCTAssertLessThan(head, tail, "分段顺序错乱：\(text)")
+        let paths = await transport.requestedPaths()
+        XCTAssertEqual(paths, ["/sample/2001_1.html", "/sample/2001_2.html"],
+                       "当前页自己排在列表第一个时，第 2 页仍必须被请求")
+    }
+
+    func test无后缀入口不把第一页当成第二页重复取回() async throws {
+        let pageOne = try fixture("content_curr_first_1.html")
+        let pageTwo = try fixture("content_curr_first_2.html")
+        let transport = makeTransport(pages: [
+            "/sample/2001.html": pageOne,
+            "/sample/2001_2.html": pageTwo,
+        ])
+        let engine = await makeEngine(transport)
+
+        let text = try await engine.content(chapterPath: "/sample/2001.html")
+
+        let paths = await transport.requestedPaths()
+        XCTAssertEqual(paths, ["/sample/2001.html", "/sample/2001_2.html"],
+                       "无后缀入口视作第 1 页，不得把 2001_1.html 当成下一页")
+        XCTAssertFalse(paths.contains("/sample/2001_1.html"), "同一页正文不得被取两次")
+        XCTAssertEqual(occurrences(of: "Current first segment one.", in: text), 1,
+                       "第 1 页正文不得出现两次：\(text)")
+        XCTAssertTrue(text.contains("Current first segment two."), "实际：\(text)")
+    }
+
+    /// 子串在文本里出现的次数（用来断言「同一页正文没有被重复拼接」）。
+    private func occurrences(of needle: String, in text: String) -> Int {
+        guard !needle.isEmpty else { return 0 }
+        return text.components(separatedBy: needle).count - 1
     }
 }
