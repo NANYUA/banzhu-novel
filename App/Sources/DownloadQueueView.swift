@@ -40,14 +40,21 @@ struct DownloadQueueView: View {
     ///
     /// 两个参数是 `(bookPath, 书名)`：书名由本页的 `BookDownloadSummary.title` 提供，
     /// 供阅读页角落标签用（不按 `bookPath` 反查书库 —— 下载页可能有不带书架行的书）。
+    ///
+    /// ⚠️ 书名为 `nil`（书库与快照都没有）时传空串：阅读页角落标签对空书名的既有处理是
+    /// **回退只显示章节名**，且该书本来就不在书库、拿不到真名 —— 这是可接受的下限，不是回归。
+    /// 若用户在阅读页再点「下载本章」，入队的 `bookTitle` 也会是空串，同样源于取不到真名。
     let onOpenBook: (String, String) -> Void
 
-    /// 书封面的唯一来源：按 `bookPath` 从书库查（`BookCoverLoader`）。
-    @Dependency(\.bookCoverLoader) private var bookCoverLoader
+    /// 书卡的**书名 / 作者 / 封面**的唯一来源：按 `bookPath` 从书库查（`BookLibraryMetaLoader`）。
+    ///
+    /// 书名与作者优先取书库（`BookRecord`）、快照只当兜底，取值顺序见 `BookDownloadSummary`——
+    /// 这样历史脏数据（快照里 `bookTitle == ""`）在显示时自愈。
+    @Dependency(\.bookLibraryMetaLoader) private var bookLibraryMetaLoader
 
-    /// `bookPath → coverUrl`。**不在 `body` 里逐卡查库**：随 `bookPaths` 变化拉一次，
+    /// `bookPath → BookLibraryMeta`。**不在 `body` 里逐卡查库**：随 `bookPaths` 变化拉一次，
     /// 书卡只做内存查表 —— `List` 滚动时不再读库。
-    @State private var coverUrls: [String: String] = [:]
+    @State private var bookMetas: [String: BookLibraryMeta] = [:]
 
     /// 待确认「删除下载」的书（非空即弹确认框）。
     ///
@@ -74,14 +81,14 @@ struct DownloadQueueView: View {
             .onAppear {
                 viewStore.send(.task)
             }
-            // 封面：队列里的书目变了才拉一次（一次读库；查不到的书回退占位块）。
+            // 书名 / 作者 / 封面：队列里的书目变了才拉一次（一次读库；查不到的书回退快照与占位块）。
             .task(id: viewStore.bookPaths) {
                 let paths = viewStore.bookPaths
                 guard !paths.isEmpty else {
-                    coverUrls = [:]
+                    bookMetas = [:]
                     return
                 }
-                coverUrls = await (try? bookCoverLoader.load(paths)) ?? [:]
+                bookMetas = await (try? bookLibraryMetaLoader.load(paths)) ?? [:]
             }
             .confirmationDialog(
                 deleteDialogTitle,
@@ -124,13 +131,21 @@ struct DownloadQueueView: View {
         return "删除选中的 \(pendingDeletePaths.count) 本书的下载？"
     }
 
+    /// 本地页：**上栏（进度卡片 / 选择卡片，选择模式下另有一行「完成」）常驻**，只有书卡列表滚动。
+    ///
+    /// 卡片原先占 `List` 里那个 `Section` 的第一行 ⇒ 随列表滚走；owner 口径「进度卡片（选择卡片）
+    /// 向上滑动 … 作为上栏，下方已下载的书籍从这个上栏的下方走」⇒ 现在与 `List` **并列**放进
+    /// `VStack`，滚动内容从卡片下沿之下开始。⚠️ 不用「`List` 内的吸顶 Section header」：header 的
+    /// 横向内缩规则与行不同源、卡片会与书卡左右对不齐；放 `List` 外则由 `pinnedHeader` 的
+    /// `.padding(.horizontal, Spacing.md)` 显式给出，与书卡行 `.listRowInsets`（`.downloadQueueCard()`
+    /// → `.downloadQueueRow()`）**同一个令牌**。
     private func queueList(
         _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
     ) -> some View {
         VStack(spacing: 0) {
-            if viewStore.isSelecting {
-                selectionBar(viewStore)
-            }
+            pinnedHeader(viewStore)
+                // 补回卡片搬出 `List` 后失效的那条 bottom 内缩（`Spacing.xs`），间距不变。
+                .padding(.bottom, DesignTokens.Spacing.xs)
 
             List {
                 if let notice = viewStore.notice {
@@ -142,25 +157,19 @@ struct DownloadQueueView: View {
                     }
                 }
 
-                DownloadSummarySection(
-                    progress: viewStore.progress,
-                    finishedCount: viewStore.finishedCount,
-                    queuedCount: viewStore.queuedCount,
-                    failedCount: viewStore.failedCount,
-                    blockedCount: viewStore.blockedCount,
-                    isPaused: viewStore.isPaused,
-                    onTogglePause: {
-                        viewStore.send(viewStore.isPaused ? .resumeAll : .pauseAll)
-                    },
-                    onRetryFailed: {
-                        viewStore.send(.retryFailed)
-                    },
-                    onRetryBlocked: {
-                        viewStore.send(.retryBlocked)
+                // 「重试失败项（n）」「验证后重试（n）」仍留在 `List` 顶部（不属于上栏）；
+                // 顺序与出现条件逐字不变：只在**非选择模式**下出现。
+                if !viewStore.isSelecting {
+                    if viewStore.failedCount > 0 {
+                        retryFailedRow(viewStore)
                     }
-                )
 
-                ForEach(bookSummaries(from: viewStore.tasks, order: viewStore.bookPaths, covers: coverUrls)) { summary in
+                    if viewStore.blockedCount > 0 {
+                        retryBlockedRow(viewStore)
+                    }
+                }
+
+                ForEach(bookSummaries(from: viewStore.tasks, order: viewStore.bookPaths, metas: bookMetas)) { summary in
                     bookCard(summary, viewStore: viewStore)
                 }
             }
@@ -170,17 +179,84 @@ struct DownloadQueueView: View {
         }
     }
 
-    /// 选择模式下的批量操作栏（本地页自带；位置在分组栏下方、列表上方）。
+    /// 常驻上栏：进度卡片 / 选择卡片（`isSelecting` 二选一，**同位交替**，同尺寸）；
+    /// **仅在选择模式下**，其上方再加一行「完成」出口。
+    ///
+    /// 非选择模式**零高度**：那一行整行不渲染（不留空行占位，否则上栏会白白多出约 30pt）——
+    /// 卡片自己的「总进度」已说明它是队列总览，不需要一行文字再重复一遍。
+    private func pinnedHeader(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> some View {
+        VStack(spacing: 0) {
+            if viewStore.isSelecting {
+                selectionDoneRow(viewStore)
+                selectionCard(viewStore)
+            } else {
+                summaryCard(viewStore)
+            }
+        }
+        .padding(.horizontal, DesignTokens.Spacing.md)
+    }
+
+    /// 选择模式的**退出出口**：右端一个「完成」按钮，常驻在上栏里；**非选择模式不渲染**。
+    ///
+    /// 为什么需要它：选择操作卡片取代了总进度卡片，而原先那条自带「完成」的批量操作栏
+    /// （`DownloadSelectionBar`）已随本轮删除 —— 出口必须另找一处，且必须**在选择模式下依然存在**，
+    /// 故由 `pinnedHeader` 在选择模式分支内渲染（上栏常显，同 owner 对书架分组栏的要求）。
+    /// 语义与长按退出逐字相同：`.selectionModeChanged(false)`。
+    private func selectionDoneRow(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> some View {
+        HStack {
+            Spacer()
+
+            Button {
+                viewStore.send(.selectionModeChanged(false))
+            } label: {
+                Text("完成")
+                    .font(.body.weight(.semibold))
+                    // HIG §9：`.frame` 落在 label 上才真的撑开命中区。
+                    // `minHeight` 只管高度：「完成」二字在 `.body` 下约 34pt 宽，
+                    // 不补 `minWidth` 命中区只有约 34×44pt，低于 HIG 的 44×44 下限。
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            // 显式给强调色，与「可点的主操作」一致（原 `List` header 会把次级灰压给内容）。
+            .foregroundStyle(AppTheme.accent)
+        }
+    }
+
+    /// 非选择模式那一支：总进度卡片。
     ///
     /// 单独成函数是为了压 `queueList` 的 `function_body_length`
     /// （SwiftLint warning 50 / error 60，判定严格 `>`）。
-    private func selectionBar(
+    private func summaryCard(
         _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
     ) -> some View {
-        DownloadSelectionBar(
-            selectedCount: viewStore.selectedBookPaths.count,
+        DownloadSummaryCard(
+            progress: viewStore.progress,
+            finishedCount: viewStore.finishedCount,
+            queuedCount: viewStore.queuedCount,
+            failedCount: viewStore.failedCount,
+            blockedCount: viewStore.blockedCount,
+            isPaused: viewStore.isPaused,
+            onTogglePause: {
+                viewStore.send(viewStore.isPaused ? .resumeAll : .pauseAll)
+            }
+        )
+    }
+
+    /// 选择模式那一支：四项批量操作卡片（占用总进度卡片那一行）。
+    private func selectionCard(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> some View {
+        DownloadSelectionCard(
+            selectedBookCount: viewStore.selectedBookPaths.count,
+            totalBookCount: viewStore.bookPaths.count,
             isAllSelected: viewStore.areAllBooksSelected,
+            pausableBookCount: pausableBookCount(viewStore),
             canPause: viewStore.canPauseSelectedBooks,
+            retryableChapterCount: retryableChapterCount(viewStore),
             canRetryFailed: viewStore.canRetryFailedSelectedBooks,
             onToggleSelectAll: {
                 viewStore.send(.toggleSelectAllBooks)
@@ -193,11 +269,58 @@ struct DownloadQueueView: View {
             },
             onRetryFailed: {
                 viewStore.send(.retryFailedSelectedBooks)
-            },
-            onDone: {
-                viewStore.send(.selectionModeChanged(false))
             }
         )
+    }
+
+    /// 队列级「重试失败项（n）」。
+    private func retryFailedRow(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> some View {
+        Button {
+            viewStore.send(.retryFailed)
+        } label: {
+            Label("重试失败项（\(viewStore.failedCount)）", systemImage: "arrow.clockwise")
+                // HIG §9：`.frame` 必须落在 label 上才真的撑开命中区（套在 Button 外面无效）。
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .downloadQueueRow()
+    }
+
+    /// 队列级「验证后重试（n）」。
+    private func retryBlockedRow(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> some View {
+        Button {
+            viewStore.send(.retryBlocked)
+        } label: {
+            Label("验证后重试（\(viewStore.blockedCount)）", systemImage: "checkmark.shield")
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .tint(AppTheme.statusAttention)
+        .downloadQueueRow()
+    }
+
+    /// 选中书里**会被暂停**的书数。
+    ///
+    /// 与 reducer 的 `affected`（`pauseSelectedBooks` 分支）同一判据：选中 **且** 有进行中任务。
+    /// 只数选中的书会把已完成的书也算进去，卡面数字就与点下去实际发生的事对不上。
+    private func pausableBookCount(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> Int {
+        let selected = viewStore.selectedBookPaths
+        let active = viewStore.tasks.filter { selected.contains($0.bookPath) && $0.state.isActive }
+        return Set(active.map(\.bookPath)).count
+    }
+
+    /// 选中书里失败的任务数（「重试失败」实际会重排的章节数，单位是章）。
+    private func retryableChapterCount(
+        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
+    ) -> Int {
+        let selected = viewStore.selectedBookPaths
+        return viewStore.tasks.filter { selected.contains($0.bookPath) && $0.state == .failed }.count
     }
 
     /// 一本书一张卡（**不再渲染逐章任务行**）。
@@ -205,7 +328,7 @@ struct DownloadQueueView: View {
     /// 单独成函数同样是为了压 `queueList` 的 `function_body_length`。
     ///
     /// ⚠️ 卡上**不再有**「暂停 / 删除」入口（U11 删掉右上角「更多」菜单）：
-    /// 这两件事走长按进选择模式后的批量操作栏（`selectionBar` 的 `.pauseSelectedBooks`
+    /// 这两件事走长按进选择模式后的操作卡片（`selectionCard` 的 `.pauseSelectedBooks`
     /// / `pendingDeletePaths`），所以这里也不再接线。
     private func bookCard(
         _ summary: BookDownloadSummary,
@@ -219,7 +342,8 @@ struct DownloadQueueView: View {
                 viewStore.send(.selectionToggled(summary.id))
             },
             onOpenBook: {
-                onOpenBook(summary.id, summary.title)
+                // 书名为 `nil`（书库与快照都没有）时传空串 —— 后果见本视图 `onOpenBook` 属性的说明。
+                onOpenBook(summary.id, summary.title ?? "")
             },
             onLongPress: {
                 // 再长按一次退出选择模式（与「完成」同一语义：`selectionModeChanged(false)`）。
@@ -254,84 +378,6 @@ private struct DownloadNoticeRow: View {
             .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Circle().inset(by: DesignTokens.Spacing.sm))))
             .accessibilityLabel("关闭提示")
         }
-    }
-}
-
-private struct DownloadSummarySection: View {
-    let progress: Double
-    let finishedCount: Int
-    let queuedCount: Int
-    let failedCount: Int
-    let blockedCount: Int
-    let isPaused: Bool
-    let onTogglePause: () -> Void
-    let onRetryFailed: () -> Void
-    let onRetryBlocked: () -> Void
-
-    var body: some View {
-        Section {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-                HStack {
-                    Text("总进度")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text(progress.formatted(.percent.precision(.fractionLength(0))))
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                ProgressView(value: progress)
-
-                Text(summaryText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .downloadQueueCard()
-
-            Button(action: onTogglePause) {
-                Label(
-                    isPaused ? "继续全部" : "暂停全部",
-                    systemImage: isPaused ? "play.fill" : "pause.fill"
-                )
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .downloadQueueRow()
-
-            if failedCount > 0 {
-                Button(action: onRetryFailed) {
-                    Label("重试失败项（\(failedCount)）", systemImage: "arrow.clockwise")
-                        // HIG §9：`.frame` 必须落在 label 上才真的撑开命中区（套在 Button 外面无效）。
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .downloadQueueRow()
-            }
-
-            if blockedCount > 0 {
-                Button(action: onRetryBlocked) {
-                    Label("验证后重试（\(blockedCount)）", systemImage: "checkmark.shield")
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .tint(AppTheme.statusAttention)
-                .downloadQueueRow()
-            }
-        } header: {
-            Text("下载队列")
-        }
-    }
-
-    private var summaryText: String {
-        var parts = ["已完成 \(finishedCount)", "待处理 \(queuedCount)"]
-        if failedCount > 0 {
-            parts.append("失败 \(failedCount)")
-        }
-        if blockedCount > 0 {
-            parts.append("待验证 \(blockedCount)")
-        }
-        return parts.joined(separator: " · ")
     }
 }
 

@@ -35,6 +35,8 @@ struct ReaderView: View {
     @State private var isShowingSearch = false
     /// 「更多 → 书籍详情」的 sheet 开关（详情页**覆盖**在阅读页之上，见 `detailSheet`）。
     @State private var isShowingDetail = false
+    /// 「下载」按钮弹出的**章节选择面板**开关（口径：下载不再直接入队当前章，统一走面板）。
+    @State private var isShowingDownloadPicker = false
     @State private var isChromeVisible = false
     // 下面四个是滑动 / 平移的跟手状态。**刻意不加 `private`**：Swift 的 `private` 是本文件级的，
     // 而手势已搬到 `ReaderView+PageGesture.swift`，加 `private` 那边就取不到
@@ -148,7 +150,18 @@ struct ReaderView: View {
                             nextChapter: viewStore.nextChapter,
                             onBack: { dismiss() },
                             onContents: { isShowingDirectory = true },
-                            onDownload: { downloadCurrentChapter(viewStore) },
+                            // 下载：弹出**章节选择面板**（面板里默认勾上「当前章 + 后续预缓存章数」）。
+                            // 不再直接入队当前章 —— 统一走面板，而面板已默认勾当前章，
+                            // 所以「下载当前章」仍然只是再点一次确认。
+                            //
+                            // `downloadStore == nil` 时**不打开**：与下面 `onShowDetail` 同一条口径
+                            // （不给一个点了什么也不会发生的空壳）。nil 只出现在 `init(store:)`
+                            // 那条测试 / 预览路径上 —— 那里 `bookPath` 也是空串，本来就没有书可下。
+                            onDownload: {
+                                if downloadStore != nil {
+                                    isShowingDownloadPicker = true
+                                }
+                            },
                             onSearch: { isShowingSearch = true },
                             onSettings: { isShowingSettings = true },
                             onShowDetail: onShowDetail,
@@ -161,7 +174,16 @@ struct ReaderView: View {
                                 viewStore.send(
                                     .loadChapterWithName(chapter.path, chapter.name)
                                 )
-                            }
+                            },
+                            // 本章页码进度条（跳章条中间）：拖到哪一页就立刻翻到哪一页。
+                            // `.goToPage` 只迁移位置、**不落盘**（拖动中高频调用）；抬手时
+                            // `.pageJumpCommitted` 落盘一次 —— 为什么拆成两个 action 见 ReaderFeature。
+                            pageJump: ReaderPageJump(
+                                pageIndex: viewStore.currentPageIndex,
+                                pageCount: viewStore.pages.count,
+                                onJumpToPage: { viewStore.send(.goToPage($0)) },
+                                onCommitPageJump: { viewStore.send(.pageJumpCommitted) }
+                            )
                         )
                         .padding(.leading, geometry.safeAreaInsets.leading)
                         .padding(.trailing, geometry.safeAreaInsets.trailing)
@@ -231,6 +253,12 @@ struct ReaderView: View {
             // 这条隐藏 ⇒ 详情页既没有标题、也没有返回按钮；sheet 自带自己的导航栈，不受影响。
             .sheet(isPresented: $isShowingDetail) {
                 detailSheet(viewStore)
+            }
+            // 「下载」：章节选择面板（内容在 `ReaderView+DownloadPicker.swift`）。
+            // 与目录 / 搜索 / 设置同样是 sheet —— **不占正文布局**：弹出与关闭都不改
+            // 正文的分页与阅读位置（它只改面板自己那份现取的目录）。
+            .sheet(isPresented: $isShowingDownloadPicker) {
+                downloadPickerSheet(viewStore)
             }
             .preferredColorScheme(viewStore.config.appearanceMode.preferredColorScheme)
         }
@@ -430,26 +458,6 @@ private extension ReaderView {
         }
     }
 
-    private func downloadCurrentChapter(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) {
-        guard let downloadStore,
-              let chapter = chapters.first(where: { $0.path == viewStore.chapterPath })
-        else {
-            return
-        }
-        downloadStore.send(.enqueue([
-            DownloadChapterRequest(
-                bookPath: bookPath,
-                bookTitle: bookTitle,
-                chapterPath: chapter.path,
-                chapterName: chapter.name,
-                chapterNumber: chapter.number
-            ),
-        ]))
-        setChromeVisible(false)
-    }
-
     // MARK: - 书籍详情（更多菜单）
 
     /// 「更多 → 书籍详情」的落点。`nil` = 菜单里不出现这一项。
@@ -512,7 +520,7 @@ private extension ReaderView {
     ///
     /// 上栏与下栏都装在 `ReaderChromeOverlay` 里（`ReaderView+Chrome.swift`），
     /// 由 body 里同一个 `if isChromeVisible` 控制：两者在物理上无法分别隐藏，
-    /// 所以显隐的**时机与动画也必须只有一处决定**。中央点击 / 下载后自动隐藏全部走这里；
+    /// 所以显隐的**时机与动画也必须只有一处决定**。中央点击翻出 / 收起控制栏走这里；
     /// 动画曲线也只在 `ReaderView.chromeToggleAnimation(reduceMotion:)` 定义一次，杜绝分叉。
     private func setChromeVisible(_ visible: Bool) {
         guard isChromeVisible != visible else { return }

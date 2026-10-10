@@ -86,20 +86,52 @@ extension BookshelfView {
 
 // MARK: - 准备态 / 失败提示
 
-/// 取目录期间的反馈：**全页覆盖层**（挡住重复点击）+ 失败弹窗（不静默）。
+/// 取目录期间的反馈：**延迟出现的全页覆盖层** + 失败弹窗（不静默）。
+///
+/// 为什么要延迟：目录在本地已有快照时 `readingTargetLoader.load` 几十毫秒就返回，
+/// 覆盖层一进加载态就渲染 ⇒ 只存在一帧就被撤掉，看起来就是「界面闪了一下」——
+/// 闪一帧比「晚 150ms 才有反馈」更糟。延迟内加载已完成 ⇒ 覆盖层**从不渲染**。
+/// 防重入**不靠**覆盖层挡点击，靠 `prepareReader` 里 `preparingBookPath == nil` 那道闸门。
 private struct ReaderPreparationOverlay: ViewModifier {
     let isPreparing: Bool
     @Binding var failureMessage: String?
+
+    /// 覆盖层出现前的等待时长：**观感取值**（150ms 落在常用区间，真机可调）。
+    /// 放在本文件而不是 `DesignTokens` —— 那里只有 `Spacing` / `Radius`，没有时长段。
+    private static let overlayDelay: Duration = .milliseconds(150)
+
+    /// 出现时的淡入时长。极短：它只是「等得比预期久」的提示，不该自己变成一段动画。
+    /// Reduce Motion 下**照旧保留**：纯透明度变化没有前庭刺激，降级 ≠ 无反馈。
+    private static let overlayFadeDuration: TimeInterval = 0.13
+
+    /// 覆盖层是否真的显示。与 `isPreparing` 分开：延迟就是这两个状态之间的差。
+    @State private var showsOverlay = false
 
     func body(content: Content) -> some View {
         content
             // 用 `.regularMaterial` 而不是不透明底：内容仍透出来，用户知道自己在原地等。
             .overlay {
-                if isPreparing {
+                if showsOverlay {
                     ZStack {
                         Rectangle().fill(.regularMaterial)
                         ProgressView("正在打开…")
                     }
+                    .transition(.opacity)
+                }
+            }
+            // `.task(id:)` 在 `isPreparing` 变化时会**自动取消**上一个任务：
+            // · 快路径（延迟内就结束）⇒ 睡眠被取消 ⇒ `showsOverlay` 全程 `false`，覆盖层从不渲染；
+            // · 回到 `false` 时在这里复位，下一次准备才能重新走延迟（不残留 `true` 一进去就闪）。
+            // 刻意不用 `DispatchQueue.main.asyncAfter`：那不可取消，会留下「延迟到了才发现早就结束」的竞态。
+            .task(id: isPreparing) {
+                guard isPreparing else {
+                    showsOverlay = false
+                    return
+                }
+                try? await Task.sleep(for: Self.overlayDelay)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: Self.overlayFadeDuration)) {
+                    showsOverlay = true
                 }
             }
             .alert(

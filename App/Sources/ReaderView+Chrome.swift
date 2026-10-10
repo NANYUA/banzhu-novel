@@ -8,6 +8,11 @@ import UIKit
 // （拆前 586 行），而控制栏是其中最大、最独立的一块。与 `ReaderView+PageTurn.swift`
 // 同一处理：成员原本是 `private`（Swift 的 `private` 是本文件级的），拆文件后改为**模块内可见**。
 //
+// ⚠️ 本文件此后**又拆过一次**：章节跳转条 `ReaderChapterJumpBar` 连同它的文档注释搬到了
+// `ReaderView+ChromeJumpBar.swift`（新增「本章页码进度条」后本文件会越过 600 行）——
+// 同样是为 `file_length`；`ReaderChromeEdge` / `ReaderChromeMetrics` / `chromeIconLabel` /
+// `ReaderChromeGlass` 因此放开为模块内可见（各自声明处都写了一行理由）。
+//
 // 颜色从哪来（染色 / 边缘 / 阴影 / 前景的派生规则、亮度阈值为什么是 0.6）在
 // `ReaderView+ChromeStyle.swift`；本文件只管布局、玻璃叠法与转场。
 //
@@ -33,7 +38,10 @@ import UIKit
 // MARK: - 边
 
 /// 面板贴近正文的哪一侧：三条面板共用同一套玻璃 / 转场逻辑，只有方向不同。
-private enum ReaderChromeEdge {
+///
+/// ⚠️ 不是 `private`：跳章条已拆到 `ReaderView+ChromeJumpBar.swift`，而 `private` 是
+/// **文件级**的 —— 那边构造玻璃与转场时要传 `edge: .bottom`。
+enum ReaderChromeEdge {
     case top
     case bottom
 
@@ -60,7 +68,11 @@ private enum ReaderChromeEdge {
 ///
 /// 通用间距 / 圆角一律取 `DesignTokens`；这里只放「控制栏专有」的那些值 ——
 /// 它们要么来自 HIG 的栏高，要么从命中区几何推导出来。
-private enum ReaderChromeMetrics {
+///
+/// ⚠️ 不是 `private`：跳章条已拆到 `ReaderView+ChromeJumpBar.swift`，而 `private` 是
+/// **文件级**的 —— 那边要读 `buttonStyle` / `barInnerPadding` / `panelVerticalPadding` /
+/// `panelOuterMargin` / `disabledOpacity`，进度条还要读 `minTouchTarget`（44 的唯一来源）。
+enum ReaderChromeMetrics {
     /// 44 —— 触控目标下限（HIG §9）。图标本身远小于此，命中区必须补足，
     /// 否则「看得见点不着」。
     ///
@@ -179,7 +191,11 @@ private enum ReaderChromeMetrics {
 ///   自身 label 的无障碍信息，两种写法等效，写在 label 上才能做到「只有一处」。
 /// - `opticalScale`：抹平符号**墨迹大小**的先天差异，只给细箭头传非 1 值，
 ///   取值与推导见 `ReaderChromeMetrics.chevronOpticalScale`。默认 1 = 不补偿。
-private func chromeIconLabel(
+///
+/// ⚠️ 不是 `private`：跳章条已拆到 `ReaderView+ChromeJumpBar.swift`，而 `private` 是
+/// **文件级**的 —— 那边的「上一章 / 下一章」label 仍走这一处构建（字体 / 命中区 / 无障碍
+/// 的施加方式必须保持只有一处）。
+func chromeIconLabel(
     _ systemImage: String,
     a11yLabel: String,
     opticalScale: CGFloat = 1
@@ -202,7 +218,10 @@ private func chromeIconLabel(
 /// 形状与「上一版」的圆角面板同源（`RoundedRectangle(cornerRadius: Radius.lg)`）；
 /// 玻璃语言（材质 / 染色 / 边缘 / 投影）来自 `ReaderChromeStyle` 的派生 ——
 /// 三条面板共用这一个视图 ⇒ 材质 / 染色 / 边缘 / 投影 / 圆角在结构上无法分叉。
-private struct ReaderChromeGlass: View {
+///
+/// ⚠️ 不是 `private`：跳章条已拆到 `ReaderView+ChromeJumpBar.swift`，而 `private` 是
+/// **文件级**的 —— 那边的面板背景仍必须走这一处（玻璃语言不能出现第二份实现）。
+struct ReaderChromeGlass: View {
     let style: ReaderChromeStyle
     let edge: ReaderChromeEdge
 
@@ -340,81 +359,15 @@ private struct ReaderTopBar: View {
     }
 }
 
-// MARK: - 章节跳转条
-
-/// 下栏**正上方**的章节跳转条：左端「上一章」、右端「下一章」，中间留空。
-///
-/// ## 几何
-/// - **宽度**：与上栏 / 下栏同宽 —— 三者都在 `ReaderChromeOverlay` 的同一个 `VStack` 里，
-///   共用同一份左右安全区内缩与 `ReaderChromeMetrics.panelOuterMargin`。
-/// - **高度**：与上下栏同高（内容行 44 + 上下各 12 内边距 = 68pt），因为它走的是**同一套**
-///   面板内边距；Dynamic Type 长大时三条一起长。
-/// - **位置**：紧贴下栏上方，中间留 `DesignTokens.Spacing.xs`(8pt) 的空隙 ——
-///   两条面板**各自独立**（各有自己的 0.5pt 边缘线与柔影），8pt 间隙让「这是另一条」一眼可辨。
-///
-/// ## 为什么用 `edge: .bottom`
-/// 本条的内容（图标）在条**上方**，与下栏同侧 ⇒ 用同一条边语义：边缘线朝上、
-/// 柔影向上扩散、羽化朝上淡出。
-///
-/// ## 显隐
-/// 本视图**没有**自己的显隐开关：它装在 `ReaderChromeOverlay` 里，由 `ReaderView.body` 那一个
-/// `if isChromeVisible` 与上下栏一起进出 ⇒ 「跟控制栏一起显隐」在结构上无法分叉。
-/// 它是叠加层的一部分，**不占正文布局**：显隐不改变正文分页与阅读位置。
-///
-/// ## 符号选择
-/// `backward.end` / `forward.end`（上一首 / 下一首的通用字形）而不是 `chevron.left/right`：
-/// 一是上栏的「返回」已经占用 `chevron.left`，重复会让两个不同动作长得一样；
-/// 二是这两个符号的墨迹铺满字身（实心三角 + 竖条），不会重演上栏「细箭头看着小」的问题，
-/// 左右互为镜像 ⇒ 两者之间**不需要**光学补偿。
-private struct ReaderChapterJumpBar: View {
-    let style: ReaderChromeStyle
-    /// 相邻章节；`nil` = 到边界（首章的上一章 / 末章的下一章），对应按钮置灰。
-    let previousChapter: ChapterItem?
-    let nextChapter: ChapterItem?
-    var onJumpToChapter: (ChapterItem) -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            jumpButton("上一章", systemImage: "backward.end", chapter: previousChapter)
-            Spacer(minLength: 0)
-            jumpButton("下一章", systemImage: "forward.end", chapter: nextChapter)
-        }
-        .buttonStyle(ReaderChromeMetrics.buttonStyle)
-        .foregroundStyle(style.foreground)
-        .padding(.horizontal, ReaderChromeMetrics.barInnerPadding)
-        .padding(.vertical, ReaderChromeMetrics.panelVerticalPadding)
-        .background {
-            ReaderChromeGlass(style: style, edge: .bottom)
-        }
-        .padding(.horizontal, ReaderChromeMetrics.panelOuterMargin)
-    }
-
-    /// 单侧跳章按钮。`chapter == nil` ⇒ 到边界：`.disabled(true)` + 置灰（见 `disabledOpacity`）。
-    ///
-    /// `.disabled` 同时做三件事：命中测试关掉（不会「看着灰还能点」）、
-    /// VoiceOver 播报「不可用」、自定义 `ButtonStyle` 不再收到按下事件 ⇒ 不会有按下反馈。
-    private func jumpButton(
-        _ label: String,
-        systemImage: String,
-        chapter: ChapterItem?
-    ) -> some View {
-        Button {
-            guard let chapter else { return }
-            onJumpToChapter(chapter)
-        } label: {
-            chromeIconLabel(systemImage, a11yLabel: label)
-        }
-        .disabled(chapter == nil)
-        .opacity(chapter == nil ? ReaderChromeMetrics.disabledOpacity : 1)
-    }
-}
+// 章节跳转条（`ReaderChapterJumpBar`）已搬到 `ReaderView+ChromeJumpBar.swift`：
+// 本文件已 580 行、距 `file_length` 600 只剩 20 行，装不下新增的页码进度条。
 
 // MARK: - 下栏
 
 /// 下栏：目录 · 下载 · 搜索 · 设置（图标 + 11pt 文字标签，等分栏宽）。
 ///
 /// 条目以**项目既有能力**为准（owner：「依照原样，项目代码只是参考，下栏依次为目录，下载搜索设置」）：
-/// 目录 / 搜索 / 设置各打开既有 sheet，下载调既有 `downloadCurrentChapter`。
+/// 目录 / 搜索 / 设置各打开既有 sheet；下载打开**章节选择面板**（实现在 `ReaderView+DownloadPicker.swift`）。
 /// 设计稿的「主题 / 字号 / 书签」不采用：「主题」「字号」都已收在设置 sheet 里，
 /// 「书签」项目**没有数据模型**（要做需先加 Bookmark 模型与存储，本任务不做）。
 private struct ReaderBottomBar: View {
@@ -495,6 +448,11 @@ struct ReaderChromeOverlay: View {
     var onShowDetail: (() -> Void)?
     /// 跳章：上一章 / 下一章**共用**一个闭包（两侧都走既有的 `loadChapterWithName` 正常加载路径）。
     var onJumpToChapter: (ChapterItem) -> Void
+    /// 本章页码 + 跳页回调（原样透传给跳章条中间的进度条，见 `ReaderPageJump`）。
+    ///
+    /// 收成一个值类型而不是 4 个参数：`ReaderChapterJumpBar` 的参数个数会越过
+    /// `function_parameter_count` 的 warning 5（理由见 `ReaderPageJump` 的类型注释）。
+    var pageJump: ReaderPageJump
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -517,7 +475,8 @@ struct ReaderChromeOverlay: View {
                 style: style,
                 previousChapter: previousChapter,
                 nextChapter: nextChapter,
-                onJumpToChapter: onJumpToChapter
+                onJumpToChapter: onJumpToChapter,
+                pageJump: pageJump
             )
             .padding(.bottom, DesignTokens.Spacing.xs)
             .transition(.chromeBar(edge: .bottom, reduceMotion: reduceMotion))

@@ -127,6 +127,23 @@ public struct ReaderFeature: Reducer {
         case nextPage
         /// 上一页
         case prevPage
+        /// 跳到本章第 N 页（拖动进度条时**高频**调用 ⇒ 刻意不落盘）。
+        ///
+        /// ## 为什么与 `.pageJumpCommitted` 拆成两个 action
+        /// 「实时跳页」意味着一次拖动会连续跨越很多页（长章可达上百页）：若每次迁移都对
+        /// `ReadingProgressStore` 落盘，**一次拖动就是上百次 SwiftData 写**
+        /// （每次 `markRead` 都要读改写一条 `ReadingProgress`）。故把两件事拆开 ——
+        /// 本 action **只迁移状态、不落盘**；落盘交给抬手时的 `.pageJumpCommitted` 一次完成。
+        ///
+        /// ## 方向
+        /// 刻意**不设** `pageTurnDirection`：拖动不是「上一页 / 下一页」，一次拖动里方向会来回变；
+        /// 且全仓没有任何视图读它（`pageAnimation()` 也不接受方向参数）⇒ 设了是死写。
+        case goToPage(Int)
+        /// 拖动结束（抬手）：把当前位置落盘一次（配合 `.goToPage` 使用）。
+        ///
+        /// 口径与 `nextPage` / `prevPage` 结尾**逐字相同**：`offset: state.progressOffset`
+        /// （已扣掉章名前缀，与 `ReadingProgressStore` 的落盘口径一致）。
+        case pageJumpCommitted
         /// 到章尾再往前：切到下一章。
         /// 下一章第 1 页此刻就摆在全景图的 `+1` 格上，所以这里只做状态迁移、不重新加载。
         case advanceChapter
@@ -262,6 +279,24 @@ public struct ReaderFeature: Reducer {
                     store: readingProgressStore
                 )
 
+            case let .goToPage(index):
+                // 只迁移位置、**不落盘**（拖动中高频调用）；落盘见 `.pageJumpCommitted`。
+                // ⚠️ 返回值（是否真的跳了）在这里**有意忽略**：越界与原地不动都只需 `.none`，
+                // 故不在 `applyPageJump` 上挂 `@discardableResult`（那会永久豁免未来所有调用点）。
+                // ⚠️ 已知取舍（不是缺陷）：拖动每跨一页都会让 `currentPageIndex` 变一次，而正文层
+                // 挂了 `.animation(pageAnimation(), value: currentPageIndex)`；Reduce Motion 下
+                // `pageAnimation()` 是 0.2s easeInOut ⇒ 连续拖动会看到叠化的淡入淡出。
+                // 默认（未开 Reduce Motion）它是 `nil`，拖动是瞬时的。
+                _ = applyPageJump(&state, to: index)
+                return .none
+
+            case .pageJumpCommitted:
+                return saveProgress(
+                    chapterPath: state.chapterPath,
+                    offset: state.progressOffset,
+                    store: readingProgressStore
+                )
+
             case .advanceChapter:
                 return advanceToNextChapter(
                     &state,
@@ -367,6 +402,28 @@ func saveProgress(
     .run { _ in
         try? await store.markRead(chapterPath, offset, Date())
     }
+}
+
+/// 跳到本章第 `index` 页：**只迁移位置、不落盘**（返回是否真的跳了）。
+///
+/// ## 为什么与落盘拆开（配合 `.goToPage` / `.pageJumpCommitted`）
+/// 「实时跳页」意味着一次拖动会连续跨越很多页：若每次迁移都写 `ReadingProgressStore`，
+/// 一次拖动可能触发**上百次 SwiftData 写**（长章更甚）⇒ 迁移（本函数，高频、只改状态）
+/// 与落盘（`.pageJumpCommitted`，抬手时一次）必须是两件事。
+///
+/// ## 🔴 数据契约③：落到 `location`（字符偏移），不存页码
+/// 与 `nextPage` / `prevPage` 同一口径 —— `pages[index].location` 就是该页首字符的偏移，
+/// 改字号 / 行距 / 页边距后重新分页仍能唯一定位到同一处文字。
+///
+/// ## 边界
+/// - `index` 越界（`pages` 为空、或超出末页）⇒ 不动状态、返回 `false`（**不许越界**）；
+/// - 已经正好落在该页页首 ⇒ 同样返回 `false`（状态没变，调用方不必重算视图）。
+func applyPageJump(_ state: inout ReaderFeature.State, to index: Int) -> Bool {
+    guard state.pages.indices.contains(index) else { return false }
+    let location = state.pages[index].location
+    guard state.currentOffset != location else { return false }
+    state.currentOffset = location
+    return true
 }
 
 /// `ReaderFeature.State` 的派生值（只读投影，没有自己的存储）。

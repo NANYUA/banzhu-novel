@@ -77,7 +77,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（29 文件）
+│   └── Sources/                     # SwiftUI 视图层（33 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -86,11 +86,15 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       ├── Reader*.swift            # 阅读器：View / PageGesture / PageTurn /
 │       │                            #   SlideTracking / PageTextView / Appearance /
 │       │                            #   Chrome / ChromeStyle / SettingsView / SearchView /
-│       │                            #   CornerHUD（角落标签：书名·章节名 / 电量 / 页码）
+│       │                            #   CornerHUD（角落标签：书名·章节名 / 电量 / 页码）/
+│       │                            #   ChromeJumpBar（跳章条 + 可拖页码进度条）/
+│       │                            #   DownloadPicker（阅读页「下载」弹的章节选择面板）
 │       ├── SearchView.swift         # 搜索
 │       ├── ExploreView.swift        # 发现/分类
-│       ├── DownloadQueueView.swift  # 下载队列 + 下载设置
-│       ├── DownloadBookCard.swift   # 下载队列的书卡 + 选择模式批量操作栏
+│       ├── DownloadQueueView.swift  # 下载队列 + 下载设置（卡片常驻上栏）
+│       ├── DownloadBookCard.swift   # 下载书卡 + 卡片装饰（downloadQueueCard/Row）+ 共享尺度
+│       ├── DownloadSummaryCard.swift # 总进度卡片（与选择卡片**同位交替**）
+│       ├── DownloadSelectionCard.swift # 选择模式四项操作卡片（横排一行）
 │       ├── SiteSettingsView.swift   # 站点设置
 │       ├── GuardView.swift          # 盾页/人机校验覆盖层
 │       └── AppTheme / DesignTokens / PressableCardButtonStyle.swift
@@ -98,7 +102,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   ├── NovelEngine/                 # 纯逻辑层（9 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（48 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（49 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
@@ -107,7 +111,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   │   │   │                        #   ReadingTargetLoader（单点书卡 → 阅读落点）/ BookCoverLoader
 │   │   │   ├── Search/ Detail/ Explore/
 │   │   │   ├── Download/            # DownloadFeature（+State / +Selection）/ DownloadQueueStore /
-│   │   │   │                        #   DownloadNetworkMonitor
+│   │   │   │                        #   DownloadSettingsStore（下载设置持久化）/ DownloadNetworkMonitor
 │   │   │   ├── Reader/              # ReaderFeature（+ChapterTransition 相邻章切换）/ ReaderLoader /
 │   │   │   │                        #   ChapterCacheStore / ReadingSettingsStore /
 │   │   │   │                        #   ReadingProgressStore / PagePanTracking / SlideTracking …

@@ -7,7 +7,7 @@ import NovelEngine
 ///
 /// 两档都是串行（一次只下一章），区别只在请求之间是否加入人工间隔。
 /// 默认保守档，避免批量下载时撞上站方防护。
-public enum DownloadSpeed: String, CaseIterable, Equatable, Sendable {
+public enum DownloadSpeed: String, CaseIterable, Equatable, Sendable, Codable {
     /// 保守档：串行 + 请求间隔（默认）
     case conservative
     /// 快速档：串行 + 无间隔
@@ -105,6 +105,8 @@ public struct DownloadFeature: Reducer {
         case retryBlocked
         /// 重新读取持久化队列（跨重启 / 外部变更后）。
         case reload
+        /// 已保存的下载设置读取完成（队列页出现时恢复）。
+        case settingsLoaded(DownloadSettings)
         /// 手动踢一脚调度（App 回到前台等）。
         case next
         /// 正文已下载成功。
@@ -137,12 +139,13 @@ public struct DownloadFeature: Reducer {
     @Dependency(\.downloadQueueStore) var queue
     @Dependency(\.chapterDownloader) var downloader
     @Dependency(\.downloadNetworkMonitor) var networkMonitor
+    @Dependency(\.downloadSettingsStore) var settingsStore
 
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
             case .task:
-                let loadEffect = loadQueue(queue)
+                let loadEffect = loadQueueThenSettings(queue, settings: settingsStore)
                 guard !state.isObservingNetwork else { return loadEffect }
                 state.isObservingNetwork = true
                 let monitor = networkMonitor
@@ -273,7 +276,10 @@ public struct DownloadFeature: Reducer {
                 if enabled == false, state.networkKind == .cellular, state.hasAutoWork {
                     state.notice = "当前仅在 WiFi 下下载。"
                 }
-                return startNextTask(state: &state, queue: queue, downloader: downloader)
+                return .merge(
+                    saveSettings(state, with: settingsStore),
+                    startNextTask(state: &state, queue: queue, downloader: downloader)
+                )
 
             case let .networkChanged(kind):
                 state.networkKind = kind
@@ -282,7 +288,12 @@ public struct DownloadFeature: Reducer {
 
             case let .setSpeed(speed):
                 state.speed = speed
-                return .none
+                return saveSettings(state, with: settingsStore)
+
+            case let .settingsLoaded(settings):
+                state.allowsCellular = settings.allowsCellular
+                state.speed = settings.speed
+                return startNextTask(state: &state, queue: queue, downloader: downloader)
 
             case .retryFailed:
                 let ids = state.tasks.filter { $0.state == .failed }.map(\.id)
@@ -404,6 +415,37 @@ private func loadQueue(_ store: DownloadQueueStore) -> Effect<DownloadFeature.Ac
         } catch {
             await send(.storeFailed(error.localizedDescription))
         }
+    }
+}
+
+/// 队列页出现时：先读持久化队列，再恢复已保存的下载设置。
+///
+/// 两条读取**串在同一条 Effect 里**（而不是 `.merge` 成两条）：`.loaded` 必然先于
+/// `.settingsLoaded`，测试不必依赖两条 Effect 的调度先后。
+/// 队列读失败也照样恢复设置 —— 设置与队列互不依赖。
+private func loadQueueThenSettings(
+    _ store: DownloadQueueStore,
+    settings: DownloadSettingsStore
+) -> Effect<DownloadFeature.Action> {
+    .run { send in
+        do {
+            try await send(.loaded(store.load()))
+        } catch {
+            await send(.storeFailed(error.localizedDescription))
+        }
+        guard let saved = settings.load() else { return }
+        await send(.settingsLoaded(saved))
+    }
+}
+
+/// 把当前下载设置落盘（reducer 不直接碰 `UserDefaults`，走依赖）。
+private func saveSettings(
+    _ state: DownloadFeature.State,
+    with store: DownloadSettingsStore
+) -> Effect<DownloadFeature.Action> {
+    let settings = DownloadSettings(allowsCellular: state.allowsCellular, speed: state.speed)
+    return .run { _ in
+        store.save(settings)
     }
 }
 

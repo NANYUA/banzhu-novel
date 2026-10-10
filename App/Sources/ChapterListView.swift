@@ -229,8 +229,10 @@ struct ChapterDirectoryData {
 ///
 /// 勾选逻辑（谁可被勾、全选选谁）全部在 `ChapterDownloadSelection` 这个值类型里，
 /// 本视图只渲染它、并把结果回传给 `onConfirm`。
-/// 「已下载 / 可下载」两个计数由 `BookDetailFeature.State` 派生后**作为入参**传进来，
-/// 面板不再自己 `filter().count` —— 同一口径只有一处。
+/// 「已下载 / 可下载」两个计数由调用方**作为入参**传进来，面板不自己 `filter().count`：
+/// 详情页的计数来自 `BookDetailFeature.State` 的派生值（目录 header 与面板 header 同源）；
+/// 阅读页没有对应的派生值，按**同一份** `chapters` 现算（见 `ReaderDownloadPickerSheet`）
+/// —— 数据源是同一个数组，口径不会分叉。
 ///
 /// 这里用 `List` 是安全的：它长在 sheet 自己的滚动上下文里，没有嵌进详情页的 `ScrollView`。
 struct ChapterDownloadPicker: View {
@@ -241,8 +243,33 @@ struct ChapterDownloadPicker: View {
     let downloadableCount: Int
     let onConfirm: ([ChapterItem]) -> Void
 
-    @State private var selection = ChapterDownloadSelection()
+    @State private var selection: ChapterDownloadSelection
     @Environment(\.dismiss) private var dismiss
+
+    /// `preselected` = 打开面板时就勾上的章节；默认空 ⇒ 详情页那条调用点
+    /// **一行都不用改**，行为与之前逐值相同。
+    ///
+    /// 预选**不自己判「能不能勾」**：逐章走 `ChapterDownloadSelection.toggle(_:)`，
+    /// 而它自己就拒绝已下载的章 —— 预选与用户手点共用同一条路径，
+    /// 不变量（已下载的永不被勾选）只有一处，不会出现「勾了一个不可勾的项」。
+    /// 传进来的章节必须取自 `chapters`（面板只认这个数组里的行）。
+    init(
+        chapters: [ChapterItem],
+        downloadedCount: Int,
+        downloadableCount: Int,
+        preselected: [ChapterItem] = [],
+        onConfirm: @escaping ([ChapterItem]) -> Void
+    ) {
+        self.chapters = chapters
+        self.downloadedCount = downloadedCount
+        self.downloadableCount = downloadableCount
+        self.onConfirm = onConfirm
+        var selection = ChapterDownloadSelection()
+        for chapter in preselected {
+            selection.toggle(chapter)
+        }
+        _selection = State(initialValue: selection)
+    }
 
     var body: some View {
         NavigationStack {

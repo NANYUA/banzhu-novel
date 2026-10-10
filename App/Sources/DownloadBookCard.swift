@@ -9,7 +9,7 @@ import SwiftUI
 /// 收成一张卡，进度与状态**聚合到书一级**（`BookDownloadSummary`）。
 ///
 /// ## 视觉语言与书架同源
-/// 封面块 60×80 + 书名（`.headline`）+ 次要信息（`.caption` / `.caption2`），
+/// 封面块 60×80 + 书名（`.headline`）+ 作者（`.caption`）+ 次要信息（`.caption` / `.caption2`），
 /// 卡面 `AppTheme.Surface.card` + `Radius.sm`，按下反馈复用 `PressableCardButtonStyle`
 /// —— 与 `BookshelfView` 的 `BookRow` 是同一套观感。
 ///
@@ -106,16 +106,34 @@ private extension DownloadBookCard {
             .padding(.vertical, DesignTokens.Spacing.sm)
     }
 
-    /// 封面 + 书名 / 进度 / 状态（两种模式共用的内容本体）。
+    /// 封面 + 书名 / 作者 / 进度 / 状态（两种模式共用的内容本体）。
+    ///
+    /// ## 书名 / 作者：有值才渲染
+    /// 取值顺序（书库优先、快照兜底、都没有就不显示）见 `BookDownloadSummary` 的说明；
+    /// 这里只负责「`nil` 就整行不渲染」—— 不留空行、不编造「未知书名 / 未知作者」。
+    ///
+    /// ## 内容区高度
+    /// 整块 `.frame(minHeight: DownloadCardMetrics.contentHeight)`，与总进度卡片、
+    /// 选择操作卡片**引用同一个高度**：书卡文字列比封面高（多一行作者）时三张卡仍同高
+    /// （封面 60×80 只决定封面块本身，不再决定卡高）。
     var content: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             cover
 
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                Text(summary.title)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                if let title = summary.title {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+
+                if let author = summary.author {
+                    Text(author)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 Text("已下载 \(summary.finishedCount)/\(summary.tasks.count) 章")
                     .font(.caption)
@@ -132,6 +150,7 @@ private extension DownloadBookCard {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minHeight: DownloadCardMetrics.contentHeight)
         .padding(.horizontal, DesignTokens.Spacing.sm)
         .padding(.vertical, DesignTokens.Spacing.sm)
         .contentShape(Rectangle())
@@ -141,6 +160,9 @@ private extension DownloadBookCard {
     /// 地址为空 / 还没加载出来 / 加载失败 ⇒ 回退占位块。
     ///
     /// 尺寸与圆角沿用书架书卡那一套（`BookRow` 的 60×80 + `Radius.sm`），不另造一套观感。
+    /// 高度引用 `DownloadCardMetrics.coverHeight`（= 80，与 `BookRow` 同值）：
+    /// 补上作者行后书卡文字列比封面高，封面若跟着长高，真封面（3:4）会在上下各留一条底色带。
+    /// 三张卡片的高度对齐改由 `contentHeight` 负责（见 `content`）。
     var cover: some View {
         AsyncImage(url: coverURL) { phase in
             switch phase {
@@ -154,7 +176,7 @@ private extension DownloadBookCard {
                 coverPlaceholder
             }
         }
-        .frame(width: 60, height: 80)
+        .frame(width: 60, height: DownloadCardMetrics.coverHeight)
         .background(AppTheme.Surface.inset)
         .cornerRadius(DesignTokens.Radius.sm)
     }
@@ -221,9 +243,24 @@ private extension DownloadBookCard {
 }
 
 /// 一本书在下载队列里的聚合（书卡只读它 —— 逐章任务行已不再渲染）。
+///
+/// ## 🔴 书名 / 作者的取值顺序（单一真相，改之前先想清楚）
+/// 1. **书库**（`BookRecord`，经 `BookLibraryMetaLoader` 带回来的 `BookLibraryMeta`）：
+///    用户能看到的真值，非空即用；
+/// 2. **任务快照**（`DownloadTaskSnapshot.bookTitle`）：书库里没有这本书时兜底
+///    （可以下载一本没加入书架的书 ⇒ 没有 `BookRecord`）；
+/// 3. **`nil`**：两处都拿不到（历史脏数据 `bookTitle == ""`）⇒ 卡上**不渲染那一行**。
+///    ⛔ 不编造「未知书名 / 未知作者」—— 编出来的名字比空更误导。
+///
+/// 作者只有第 1 步有值（`DownloadTaskSnapshot` 里没有 author 字段），取不到即 `nil`。
+/// 这条顺序让存量脏数据（`bookTitle == ""`）在**显示时自愈**：只要书还在书架里，
+/// 书名与作者就照常显示，不必等重新下载。
 struct BookDownloadSummary: Identifiable {
     let id: String
-    let title: String
+    /// 书名。`nil` = 没有可显示的书名（见上）。阅读页角落标签用 `title ?? ""`。
+    let title: String?
+    /// 作者。`nil` = 没有可显示的作者（书库没有这本书，或书库里的作者是空串）。
+    let author: String?
     /// 封面地址（来自书库 `BookRecord.coverUrl`）；库里没有这本书、或地址为空时是 `nil`
     /// ⇒ 书卡回退占位块。`DownloadTaskSnapshot` 里没有这个字段，由 `bookSummaries` 并进来。
     let coverUrl: String?
@@ -326,152 +363,102 @@ enum BookDownloadStatus {
 /// 顺序由调用方传入（`DownloadFeature.State.bookPaths`）—— 「队列里有哪些书、按什么顺序」
 /// 只有那一处定义，「全选」判据与书卡分组共用它，视图不自己再算一遍。
 ///
-/// `covers` 是 `bookPath → coverUrl`（`BookCoverLoader` 一次读库的产物）：
-/// 任务快照里没有封面地址，封面真值在 `BookRecord` 上，故由调用方**一次性**查好传进来 ——
-/// 书卡自己不去查库（`List` 滚动时逐卡查库是重活）。
+/// `metas` 是 `bookPath → BookLibraryMeta`（`BookLibraryMetaLoader` 一次读库的产物）：
+/// 任务快照里既没有封面也没有作者，书名还可能被历史脏数据写成空串，
+/// 故由调用方**一次性**查好传进来 —— 书卡自己不去查库（`List` 滚动时逐卡查库是重活）。
+/// 书名 / 作者的取值顺序见 `BookDownloadSummary`。
 func bookSummaries(
     from tasks: [DownloadTaskSnapshot],
     order: [String],
-    covers: [String: String] = [:]
+    metas: [String: BookLibraryMeta] = [:]
 ) -> [BookDownloadSummary] {
     order.compactMap { bookPath in
         let bookTasks = tasks.filter { $0.bookPath == bookPath }
         guard let first = bookTasks.first else { return nil }
+        let meta = metas[bookPath]
         return BookDownloadSummary(
             id: bookPath,
-            title: first.bookTitle,
-            coverUrl: covers[bookPath],
+            title: firstNonEmpty(meta?.title, first.bookTitle),
+            author: firstNonEmpty(meta?.author),
+            coverUrl: firstNonEmpty(meta?.coverUrl),
             tasks: bookTasks
         )
     }
 }
 
-/// 选择模式的批量操作栏（**本地页自带**，不复用书架那套批量工具栏）。
+/// 按顺序取第一个**非空**值；全空（或都没值）⇒ `nil`（调用方据此不渲染那一行）。
 ///
-/// ## 为什么必须自带一条
-/// 书架那套批量工具栏（全选 / 整本下载 / 移入分组 / 删除）在 `BookshelfView.toolbarContent`
-/// 里被 `!showsLocalGroup` 明确屏蔽 —— 那里的注释写着「本地分组装的是下载任务、不是书目，
-/// 这些批量操作在语义上根本不成立」。所以本地页的选择模式自带一条，操作是**下载语义**的四项：
-/// 全选 / 暂停下载 / 删除下载 / 重试失败。
-///
-/// ## 位置与材质
-/// 放在分组栏下方、列表上方（书架把批量操作放在顶部工具栏，位置习惯一致），
-/// 用 `.regularMaterial` 与列表分层（同 `ChapterDownloadPicker.confirmBar` 的手法）。
-struct DownloadSelectionBar: View {
-    let selectedCount: Int
-    let isAllSelected: Bool
-    let canPause: Bool
-    let canRetryFailed: Bool
-    let onToggleSelectAll: () -> Void
-    let onPause: () -> Void
-    let onDelete: () -> Void
-    let onRetryFailed: () -> Void
-    let onDone: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: DesignTokens.Spacing.xs) {
-                headerRow
-                actionRow
-            }
-            .padding(.vertical, DesignTokens.Spacing.xs)
-
-            Divider()
+/// `BookRecord` 的字段是非可选 `String`（可能为空串），而 `BookDownloadSummary` 用 `nil`
+/// 表示「不显示」—— 这个函数是两者之间**唯一**的换算处（不要在别处再写一次 `?? ""`）。
+private func firstNonEmpty(_ values: String?...) -> String? {
+    for value in values {
+        if let value, !value.isEmpty {
+            return value
         }
-        .background(.regularMaterial)
     }
+    return nil
 }
 
-private extension DownloadSelectionBar {
-    /// 标题行：「已选 N 本」+ 退出选择模式的「完成」（与书架编辑态的「完成」同名同义）。
-    var headerRow: some View {
-        HStack {
-            Text(selectedCount == 0 ? "选择要操作的书" : "已选 \(selectedCount) 本")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+/// 下载卡片族的共享尺度（书卡 / 总进度卡片 / 选择操作卡片）。
+///
+/// ## 为什么需要它
+/// owner 口径：「操作卡片、总进度卡片都和书卡一样的尺寸」。三张卡片必须引用**同一个**
+/// 「内容区高度」：出现第二份高度值就会各自漂移，而选择卡片与总进度卡片还要在
+/// **同一个位置交替展示**，高度不一致会直接看到跳变。
+///
+/// ## 高度是怎么算出来的（U12：书卡补上作者行之后）
+/// 卡片高 = 内容区高度 + 内边距 `Spacing.sm`(12) × 2，列表里再套一层
+/// `.downloadQueueCard()` 的 8×2 ⇒ 可见卡高再加 16pt。
+/// 内容区高度取三张卡里最高的那个（书卡文字列），封面 60×80 只是书卡里的一个内容块。
+///
+/// ## 为什么放这里而不是 `DesignTokens`
+/// `DesignTokens` 是**通用**尺度刻度（间距 / 圆角），不含任何业务尺寸；本枚举是
+/// **下载卡片族专有**的尺寸，与 `ReaderView+Chrome.swift` 的 `ReaderChromeMetrics` 同一先例
+/// （通用值进令牌、模块专有值收在模块自己的 metrics 里）。而且 `DesignTokens.swift` 只声明了
+/// `Spacing` / `Radius` 两段，为它新开一段尺寸段会把通用令牌表变成业务尺寸的堆场。
+enum DownloadCardMetrics {
+    /// 书卡**封面块**高度（宽 60）—— 与书架 `BookRow` 的封面同尺寸，`Radius.sm` 圆角。
+    ///
+    /// ⚠️ 它**不等于**卡片内容区高度（见 `contentHeight`）：补上作者行后书卡文字列比封面高，
+    /// 封面若跟着长高，真封面（3:4 = 60×80）会在上下各留一条 `Surface.inset` 底色带。
+    static let coverHeight: CGFloat = 80
 
-            Spacer()
+    /// 卡片**内容区最小高度**（书卡 / 总进度卡片 / 选择操作卡片三处共用）。
+    ///
+    /// 加上卡片内边距 `Spacing.sm`(12) × 2 后，三张白卡的高度都是 **112pt**
+    /// （列表里再套 `.downloadQueueCard()` 的 8×2 ⇒ 可见卡高 128pt）。
+    ///
+    /// ## 为什么是 88（算式）
+    /// 书卡文字列 = 书名 `.headline`(17pt，行高 ≈20.3) + `Spacing.xxs`(4)
+    /// + 作者 `.caption`(12pt，≈14.3) + 4 + 「已下载 N/M 章」`.caption`(≈14.3) + 4
+    /// + 进度条(≈4) + 4 + 状态 `.caption2`(11pt，≈13.1) ≈ **82pt**。
+    /// 原先这里写 80（照封面高写的，那时文字列只有 ≈64pt，封面才是高度来源）——
+    /// 补一行作者会顶破 80 ⇒ 书卡比另两张高 ≈2pt。取 **88**（= 80 + `Spacing.xs`(8)）
+    /// 留 ≈6pt 余量，并让这个值与间距刻度同源。
+    ///
+    /// ⚠️ 同高的判据是「三处内容都 `.frame(minHeight: contentHeight)`」——
+    /// 书卡文字列一旦长过它（超大 Dynamic Type 等）就会重新把书卡顶高，这是刻意的
+    /// （宁可让内容不被裁掉，也不钉死高度把字切掉）。
+    static let contentHeight: CGFloat = 88
 
-            Button(action: onDone) {
-                Text("完成")
-                    .font(.body.weight(.semibold))
-                    // HIG §9：`.frame` 落在 label 上才真的撑开命中区。
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-        }
-        .padding(.horizontal, DesignTokens.Spacing.md)
-    }
+    /// 总进度卡片右列（百分比 + 「暂停全部」）的固定宽度。
+    ///
+    /// 固定宽度是为了让「进度条右端左移缩短、给右侧按钮让位」这条口径可复现：
+    /// 左列 `maxWidth: .infinity` 吃掉剩余宽度，进度条自然缩短，且不随百分比文字长短抖动。
+    /// 取 106 的依据：`.subheadline`(15pt) 下「暂停全部」= 图标约 13 + 标签间距约 6
+    /// + 4 个中文字约 60 ≈ 79pt，再加 `.borderedProminent` 自身左右内边距约 12×2 ⇒ 约 103pt，
+    /// 106 是覆盖它的整数。
+    static let progressColumnWidth: CGFloat = 106
 
-    var actionRow: some View {
-        HStack(spacing: DesignTokens.Spacing.xs) {
-            action(
-                isAllSelected ? "取消全选" : "全选",
-                isAllSelected ? "checkmark.circle.fill" : "checkmark.circle",
-                tint: AppTheme.accent,
-                enabled: true,
-                perform: onToggleSelectAll
-            )
-            action(
-                "暂停下载",
-                "pause.circle",
-                tint: AppTheme.accent,
-                enabled: canPause,
-                perform: onPause
-            )
-            action(
-                "删除下载",
-                "trash",
-                tint: AppTheme.statusDanger,
-                enabled: selectedCount > 0,
-                perform: onDelete
-            )
-            action(
-                "重试失败",
-                "arrow.clockwise",
-                tint: AppTheme.accent,
-                enabled: canRetryFailed,
-                perform: onRetryFailed
-            )
-        }
-        .padding(.horizontal, DesignTokens.Spacing.xs)
-    }
-
-    /// 一个批量操作：图标在上、文字在下（字号走 Dynamic Type，不写死高度）。
-    func action(
-        _ title: String,
-        _ systemImage: String,
-        tint: Color,
-        enabled: Bool,
-        perform: @escaping () -> Void
-    ) -> some View {
-        Button(action: perform) {
-            VStack(spacing: DesignTokens.Spacing.xxs) {
-                Image(systemName: systemImage)
-                    .font(.title3)
-                Text(title)
-                    .font(.caption2)
-            }
-            // 自定义 ButtonStyle 不吃 `.tint`，颜色在这里显式给；
-            // 不可用时换次级色（自定义 ButtonStyle 不会自己变灰，不显式给就成了「看着能点却没反应」）。
-            .foregroundStyle(enabled ? tint : Color.secondary)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableCardButtonStyle(
-            pressedScale: 0.96,
-            shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
-        ))
-        .disabled(!enabled)
-        .accessibilityLabel(title)
-    }
+    /// 选择操作卡片里图标块的边长（38×38）。
+    static let actionIconSize: CGFloat = 38
 }
 
 // MARK: - 卡片装饰（与书架同源）
 
-/// 卡片装饰**刻意不是 `private`**：书卡在本文件、提示条与汇总卡在 `DownloadQueueView.swift`，
-/// 两处必须共用同一套卡面（`Surface.card` + `Radius.sm`），否则「同一页两种卡片」。
+/// 卡片装饰**刻意不是 `private`**：书卡在本文件、提示条在 `DownloadQueueView.swift`、
+/// 总进度卡片在 `DownloadSummaryCard.swift` —— 三处必须共用同一套卡面
+/// （`Surface.card` + `Radius.sm`），否则「同一页两种卡片」。
 extension View {
     /// 不成卡的行（系统控件 / 提示条）：清行底 + 隐藏分隔线 + 书架同款左右 16pt 页边距。
     func downloadQueueRow(

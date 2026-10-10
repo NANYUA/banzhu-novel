@@ -28,6 +28,11 @@ struct SiteSettingsView: View {
                 // H5：离开本页时把编辑中的导航地址落盘（返回上一页 / 切 Tab 都会走这里）。
                 .onDisappear { viewStore.send(.commitNavigationURL) }
             }
+            // 底栏**背景**声明为「始终可见」：iOS 15+ 的底栏有 scroll-edge 外观，
+            // 内容没滚动（本页 Form 通常不够长、不可滚动）时背景本来就是透明的 ——
+            // 真机「底栏毛玻璃消失」就是它。与另外三个 tab 根视图同一口径
+            // （BookshelfView / ExploreView / SearchView 各有一条同样的声明）。
+            .toolbarBackground(.visible, for: .tabBar)
         }
     }
 
