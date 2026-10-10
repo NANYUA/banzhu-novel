@@ -11,15 +11,16 @@ import SwiftUI
 ///
 /// ## 下载（U1-7）
 /// - 每行右侧是**单章**下载按钮（已下载则置灰）；
-/// - 区块头部给一句「共 N 章 · 已下载 M 章」，并给「下载章节…」入口；
-/// - 入口点开的是多选面板 `ChapterDownloadPicker`（全选 / 多选，已下载的不可勾选）。
+/// - 区块头部只给一句「共 N 章 · 已下载 M 章」；
+/// - 多章 / 整本下载的入口**不在这里**：U1-8 起它在详情页按钮组
+///   （`BookDetailView+Actions.swift` 的「下载章节」），同页不再摆第二个相同入口。
+///   面板本身仍是 `ChapterDownloadPicker`（全选 / 多选，已下载的不可勾选）。
 struct ChapterListView: View {
     let data: ChapterDirectoryData
     let onToggleShowAll: () -> Void
     let onRetry: () -> Void
     let onSelect: (ChapterItem) -> Void
     let onDownloadChapter: (ChapterItem) -> Void
-    let onDownloadRequested: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
@@ -59,26 +60,10 @@ struct ChapterListView: View {
 private extension ChapterListView {
     var header: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-            HStack(alignment: .firstTextBaseline, spacing: DesignTokens.Spacing.sm) {
-                Text("目录")
-                    .font(.headline)
-
-                Spacer(minLength: DesignTokens.Spacing.xs)
-
-                // 0 章时不摆一个恒不可用的下载入口（下面紧接着就是空态卡片）。
-                if data.totalCount > 0 {
-                    Button {
-                        onDownloadRequested()
-                    } label: {
-                        Label("下载章节…", systemImage: "arrow.down.circle")
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .font(.subheadline)
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("下载章节，选择要下载的章节")
-                }
-            }
+            // 标题右侧原先摆着「下载章节…」按钮（U1-8 移到详情页按钮组），
+            // 那个只为把它推到右边而存在的 `HStack` + `Spacer` 已一并清掉。
+            Text("目录")
+                .font(.headline)
 
             // U1-7：入口就给「已下载 N 章」，点进去之前就知道这本下过多少。
             // 措辞与选择面板 header 保持一致（同一口径、同一句式）。
@@ -449,8 +434,7 @@ extension DownloadChapterRequest {
             onToggleShowAll: {},
             onRetry: {},
             onSelect: { _ in },
-            onDownloadChapter: { _ in },
-            onDownloadRequested: {}
+            onDownloadChapter: { _ in }
         )
         .padding(DesignTokens.Spacing.md)
     }

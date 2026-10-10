@@ -79,10 +79,11 @@ struct BookDetailView: View {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
                     header(viewStore.detail)
                     detailStatus(viewStore)
-                    shelfSection(viewStore)
+                    // 按钮组在「简介」之前（U1-8）：加入 / 移出书架 + 下载章节同一行，
+                    // 主行动（开始 / 继续阅读）独占下一行 —— 定义见 `BookDetailView+Actions.swift`。
+                    actionSection(viewStore)
                     introSection(viewStore.detail.intro)
                     infoSection(viewStore.detail)
-                    primaryActions(viewStore)
                     directorySection(viewStore)
                 }
                 .padding(.horizontal, DesignTokens.Spacing.md)
@@ -235,71 +236,6 @@ private extension BookDetailView {
     }
 }
 
-// MARK: - 加入 / 移出书架
-
-private extension BookDetailView {
-    /// 书架开关。按 `isOnShelf` 切换，两条分支都用 `controlSize(.large)` 拿到 44pt 触控目标。
-    ///
-    /// 视觉分工（§9 主次分明）：未加入时它是页面上一眼可见的**主按钮**；
-    /// 已加入时退成次级按钮并把图标换成绿色 checkmark —— 状态一眼可辨，
-    /// 文字仍写动作（§11：按钮标签用动词），避免「已加入」当按钮却看不出点了会怎样。
-    func shelfSection(
-        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
-    ) -> some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            if viewStore.isOnShelf {
-                Button {
-                    removeFromShelf(viewStore)
-                } label: {
-                    shelfLabel(viewStore, title: "移出书架", systemImage: "checkmark.circle.fill")
-                }
-                .buttonStyle(.bordered)
-                .tint(AppTheme.statusAdded)
-            } else {
-                Button {
-                    viewStore.send(.addRequested)
-                } label: {
-                    shelfLabel(viewStore, title: "加入书架", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            if let notice = viewStore.shelfNotice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.statusDanger)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .controlSize(.large)
-        .disabled(viewStore.isShelfBusy)
-    }
-
-    @ViewBuilder
-    func shelfLabel(
-        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>,
-        title: String,
-        systemImage: String
-    ) -> some View {
-        if viewStore.isShelfBusy {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-        } else {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
-        }
-    }
-
-    func removeFromShelf(
-        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
-    ) {
-        // 与书架编辑态的删除保持一致：先把这本书在下载队列里的任务取消掉，
-        // 再删本地记录与已下载正文。
-        downloadStore.send(.cancelBook(viewStore.detail.bookPath))
-        viewStore.send(.removeRequested)
-    }
-}
-
 // MARK: - 简介（U1-5）
 
 private extension BookDetailView {
@@ -397,71 +333,12 @@ private extension BookDetailView {
 
 // MARK: - 阅读入口（U1-6）
 
-private extension BookDetailView {
-    /// 主行动入口：有上次阅读记录就是「继续阅读」（+「从第一章开始」），否则是「开始阅读」。
-    ///
-    /// 目录还没加载出来时**什么都不摆** —— 点了没反应的死按钮比没有按钮更糟，
-    /// 而「加载中 / 失败 / 为空」由下面的目录区块统一表达（只在那里出一个 ProgressView，
-    /// 首屏不会出现两条「目录加载中…」）。
-    @ViewBuilder
-    func primaryActions(
-        _ viewStore: ViewStore<BookDetailFeature.State, BookDetailFeature.Action>
-    ) -> some View {
-        if let continueChapter = viewStore.continueChapter {
-            VStack(spacing: DesignTokens.Spacing.xs) {
-                readButton(
-                    "继续阅读",
-                    systemImage: "book.pages",
-                    chapter: continueChapter,
-                    isProminent: true
-                )
-                if let first = viewStore.chapters.first, first.path != continueChapter.path {
-                    readButton(
-                        "从第一章开始",
-                        systemImage: "text.book.closed",
-                        chapter: first,
-                        isProminent: false
-                    )
-                }
-            }
-        } else if let first = viewStore.chapters.first {
-            readButton("开始阅读", systemImage: "book.pages", chapter: first, isProminent: true)
-        }
-    }
-
-    @ViewBuilder
-    func readButton(
-        _ title: String,
-        systemImage: String,
-        chapter: ChapterItem,
-        isProminent: Bool
-    ) -> some View {
-        if isProminent {
-            Button {
-                openReader(chapter)
-            } label: {
-                readLabel(title, systemImage: systemImage)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-        } else {
-            Button {
-                openReader(chapter)
-            } label: {
-                readLabel(title, systemImage: systemImage)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-        }
-    }
-
-    func readLabel(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-    }
-
+/// 阅读按钮组（开始 / 继续阅读）已整体拆到 `BookDetailView+Actions.swift`（U1-8），
+/// 本文件只留它按下之后的落点动作。
+///
+/// 可见性：`readButton` 现在定义在另一个文件里，而跨文件的 extension 读不到 file-private
+/// 成员，所以本 extension 与 `openReader` 都放开为模块内可见（拆法同 `BookshelfView+GroupBar`）。
+extension BookDetailView {
     func openReader(_ chapter: ChapterItem) {
         // 防重入：连点两下时第一次已经 push 了阅读页，第二次不该再压一层。
         guard !isShowingReader else { return }
@@ -496,16 +373,8 @@ private extension BookDetailView {
                     bookPath: viewStore.detail.bookPath,
                     bookTitle: viewStore.detail.title
                 )
-            },
-            onDownloadRequested: presentChapterPicker
+            }
         )
-    }
-
-    /// 打开章节选择面板。防重入：面板已经在展示时不再重复置位
-    /// （面板内容取自 `viewStore.chapters` 的当前值，不会拿到旧快照）。
-    func presentChapterPicker() {
-        guard !isShowingChapterPicker else { return }
-        isShowingChapterPicker = true
     }
 
     /// 章节 → 下载队列。整本下载就是展开成 N 条按章请求（下载器一次只下一章）。
@@ -514,6 +383,19 @@ private extension BookDetailView {
         downloadStore.send(.enqueue(chapters.map {
             DownloadChapterRequest(chapter: $0, bookPath: bookPath, bookTitle: bookTitle)
         }))
+    }
+}
+
+/// 打开章节选择面板。
+///
+/// 可见性：「下载章节」按钮已拆到 `BookDetailView+Actions.swift`（U1-8），
+/// 而跨文件的 extension 读不到 file-private 成员，所以本方法放开为模块内可见。
+extension BookDetailView {
+    /// 防重入：面板已经在展示时不再重复置位
+    /// （面板内容取自 `viewStore.chapters` 的当前值，不会拿到旧快照）。
+    func presentChapterPicker() {
+        guard !isShowingChapterPicker else { return }
+        isShowingChapterPicker = true
     }
 }
 
@@ -532,7 +414,7 @@ private extension BookDetailView {
         if let url = viewStore.sourceURL {
             ToolbarItem(placement: .topBarTrailing) {
                 Link(destination: url) {
-                    Image(systemName: "arrow.up.right.square")
+                    Image(systemName: "link")
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
