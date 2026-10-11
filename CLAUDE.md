@@ -13,6 +13,18 @@
 缓存后触发 LRU 淘汰。淘汰**只清「已读章号 + 预缓存章数」之外的陈旧预取** ——
 已读章节与当前预取窗口内的章节都保留（否则「点下一章 / 返回上一章」会重新联网加载）。
 
+阅读页排版有三条长期口径（改分页 / 正文样式前先读）：
+1. **任何一页都不得以换行开头** —— `Paginator` 会把紧随页末的连续换行并入本页
+   （第 4 条守恒律）。否则页首空行会让各页正文首行的纵向位置不一致，
+   章尾多余的换行还会撑出一个整页空白的末页。
+2. **从段落中间开始的那一页，首行不加首行缩进** —— 判据唯一来源是
+   `ParagraphBoundary.isParagraphStart`，度量侧（`TextKitMeasuring`）与渲染侧
+   （`PageTextView`）**必须都调它**，否则度量盒与渲染盒错位、每页多塞或少塞正文。
+3. 设置里的「正文边框标识」在阅读页画出正文盒边界（红色虚线），几何与正文层
+   **同一份来源**（不另算 padding）。
+
+阅读设置里的数值项一律用 `NumberInputRow`（`− 数字框 +`，可键入），不再用 `Slider`。
+
 ## 技术栈
 
 | 项 | 值 |
@@ -78,7 +90,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（35 文件）
+│   └── Sources/                     # SwiftUI 视图层（37 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -90,6 +102,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       │                            #   MoreMenu（右上「更多」自绘下拉面板）/ SettingsView / SearchView /
 │       │                            #   CornerHUD（角落标签：书名·章节名 / 电量 / 页码）/
 │       │                            #   ChromeJumpBar（跳章条 + 可拖页码进度条）/
+│       │                            #   TextAreaBorder（正文盒红线标尺，设置里开关）/
 │       │                            #   DownloadPicker（阅读页「下载」弹的章节选择面板）
 │       ├── SearchView.swift         # 搜索
 │       ├── ExploreView.swift        # 发现/分类
@@ -99,12 +112,13 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       ├── DownloadSelectionCard.swift # 选择模式四项操作卡片（横排一行）
 │       ├── SiteSettingsView.swift   # 站点设置
 │       ├── GuardView.swift          # 盾页/人机校验覆盖层
-│       └── AppTheme / DesignTokens / PressableCardButtonStyle.swift
+│       └── AppTheme / DesignTokens / PressableCardButtonStyle / NumberInputRow.swift
+│                                    # NumberInputRow = 设置页「− 数字框 +」输入行（替代 Slider）
 ├── Packages/
 │   ├── NovelEngine/                 # 纯逻辑层（9 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（49 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（50 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
@@ -117,7 +131,8 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   │   │   ├── Reader/              # ReaderFeature（+ChapterTransition 相邻章切换）/ ReaderLoader /
 │   │   │   │                        #   ChapterCacheStore / ReadingSettingsStore /
 │   │   │   │                        #   ReadingProgressStore / PagePanTracking / SlideTracking …
-│   │   │   ├── Pagination/          # Paginator / TextCursor / TextMeasuring / PageRange
+│   │   │   ├── Pagination/          # Paginator / TextCursor / TextMeasuring / PageRange /
+│   │   │   │                        #   ParagraphBoundary（段落边界判据，度量与渲染共用）
 │   │   │   ├── Site/                # SiteFeature / SiteStore / NavigationRenderer
 │   │   │   └── Guard/               # GuardFeature / GuardCoordinator
 │   │   └── Tests/

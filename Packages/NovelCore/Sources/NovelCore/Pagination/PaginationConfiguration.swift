@@ -126,7 +126,8 @@ public struct PageInset: Equatable, Sendable, Codable {
 ///
 /// ## 影响分页与只影响渲染的字段
 /// 影响分页：字体、字号、行距、段间距、字间距、加粗/倾斜、页边距、首行缩进开关。
-/// 只影响渲染：背景色、文字颜色、亮度跟随、翻页方式、翻页动画、夜间模式、角落标签边距。
+/// 只影响渲染：背景色、文字颜色、亮度跟随、翻页方式、翻页动画、夜间模式、角落标签边距、
+/// 正文边框标识开关。
 ///
 /// `affectsPagination(comparedTo:)` 用来区分这两类，避免改背景色也重排整章。
 public struct PaginationConfiguration: Equatable, Sendable {
@@ -233,6 +234,17 @@ public struct PaginationConfiguration: Equatable, Sendable {
     /// **只影响渲染**：不进 `affectsPagination`（理由同上）。
     public var bottomBarInset: CGFloat
 
+    /// 是否在**阅读页**上叠一层「书籍正文边框标识」（正文盒四周的红色虚线）。
+    ///
+    /// 标尺的语义是**当前边距下的文字区边界** —— 边框随 `inset` 的
+    /// `top` / `bottom` / `leading` / `trailing` 实时移动，标的就是正文真正能排到的范围。
+    /// 几何由 App 层复用**同一份**正文盒 padding 与**同一份** `inset` 得到，
+    /// 不另算一份（见 `App/Sources/ReaderTextAreaBorder.swift`）。
+    ///
+    /// **只影响渲染**：不进 `affectsPagination` —— 边框是叠加层，不占正文布局、
+    /// 不改任何排版输入；进了就会让「每次开关边框都重排整章、按 offset 重新定位」。
+    public var showsTextAreaBorder: Bool
+
     // MARK: - init
 
     /// 全字段初始化（结构体一次定型）。
@@ -261,7 +273,8 @@ public struct PaginationConfiguration: Equatable, Sendable {
         appearanceMode: ReadingAppearanceMode = .system,
         hudHorizontalInset: CGFloat = 16,
         topBarInset: CGFloat? = nil,
-        bottomBarInset: CGFloat = 8
+        bottomBarInset: CGFloat = 8,
+        showsTextAreaBorder: Bool = false
     ) {
         self.containerSize = containerSize
         self.fontSize = fontSize
@@ -285,6 +298,7 @@ public struct PaginationConfiguration: Equatable, Sendable {
         self.hudHorizontalInset = hudHorizontalInset
         self.topBarInset = topBarInset
         self.bottomBarInset = bottomBarInset
+        self.showsTextAreaBorder = showsTextAreaBorder
     }
 
     /// 判断这次配置变化是否需要重新分页。

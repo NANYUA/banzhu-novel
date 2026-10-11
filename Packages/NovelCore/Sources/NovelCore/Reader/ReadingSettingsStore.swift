@@ -34,6 +34,9 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     public var topBarInset: CGFloat?
     /// 下栏面板下边缘距屏幕底的距离（绝对值语义）。`nil` = 老数据里没有这个 key ⇒ 按 `8`（= `Spacing.xs`）。
     public var bottomBarInset: CGFloat?
+    /// 是否在阅读页上叠一层「书籍正文边框标识」（正文盒四周的红色虚线）。
+    /// `nil` = 老数据里没有这个 key（**不是**「关掉」）⇒ 按新默认 `false`（默认不显示）。
+    public var showsTextAreaBorder: Bool?
     public var backgroundStyle: ReadingBackgroundStyle
     public var customBackgroundColor: ReadingColor
     public var customBackgroundColorDark: ReadingColor
@@ -58,6 +61,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         hudHorizontalInset: CGFloat? = 16,
         topBarInset: CGFloat? = nil,
         bottomBarInset: CGFloat? = 8,
+        showsTextAreaBorder: Bool? = false,
         backgroundStyle: ReadingBackgroundStyle = .white,
         customBackgroundColor: ReadingColor = .defaultCustomBackground,
         customBackgroundColorDark: ReadingColor = .defaultCustomBackground,
@@ -81,6 +85,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         self.hudHorizontalInset = hudHorizontalInset
         self.topBarInset = topBarInset
         self.bottomBarInset = bottomBarInset
+        self.showsTextAreaBorder = showsTextAreaBorder
         self.backgroundStyle = backgroundStyle
         self.customBackgroundColor = customBackgroundColor
         self.customBackgroundColorDark = customBackgroundColorDark
@@ -107,6 +112,7 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             hudHorizontalInset: configuration.hudHorizontalInset,
             topBarInset: configuration.topBarInset,
             bottomBarInset: configuration.bottomBarInset,
+            showsTextAreaBorder: configuration.showsTextAreaBorder,
             backgroundStyle: configuration.backgroundStyle,
             customBackgroundColor: configuration.customBackgroundColor,
             customBackgroundColorDark: configuration.customBackgroundColorDark,
@@ -122,8 +128,8 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
 
     /// 用当前页面容器尺寸合并出完整分页配置。
     ///
-    /// 新增的两个 `Optional` 字段在这里按新默认兜底（老数据里没有它们的 key，见类型注释）：
-    /// 首行缩进 `nil` ⇒ **打开**（owner 口径），标签边距 `nil` ⇒ `16`。
+    /// 新增的 `Optional` 字段在这里按新默认兜底（老数据里没有它们的 key，见类型注释）：
+    /// 首行缩进 `nil` ⇒ **打开**（owner 口径），标签边距 `nil` ⇒ `16`，边框开关 `nil` ⇒ **关**。
     public func mergedConfiguration(containerSize: CGSize) -> PaginationConfiguration {
         PaginationConfiguration(
             containerSize: containerSize,
@@ -151,7 +157,9 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             // `nil` = 老数据里没有这个 key，**也** = 用户选了「自动」⇒ 原样传 nil，由 App 层按安全区解析。
             topBarInset: topBarInset,
             // `nil` = 老数据里没有这个 key ⇒ 8（= `DesignTokens.Spacing.xs`，与改造前的固定值同值）。
-            bottomBarInset: bottomBarInset ?? 8
+            bottomBarInset: bottomBarInset ?? 8,
+            // `nil` = 老数据里没有这个 key ⇒ `false`（默认不显示边框；老版本本来就没有这个功能）。
+            showsTextAreaBorder: showsTextAreaBorder ?? false
         )
     }
 }
@@ -224,9 +232,9 @@ private enum ReadingSettingsLive {
 /// 本机**没有**已存设置时也写标记：那种情况新默认本来就生效，标记只是防止
 /// 「首次安装 → 用户当轮把滑杆调回正值 → 下次启动被当成旧默认覆盖掉」。
 ///
-/// ⚠️ 新增的 `isFirstLineIndentOn` / `hudHorizontalInset` **不在这里迁移**：它们是新字段，
-/// 老数据里没有 key ⇒ 解码成 `nil` ⇒ 由 `mergedConfiguration(containerSize:)` 按新默认兜底
-/// （缩进打开、标签边距 16）。
+/// ⚠️ 新增的 `isFirstLineIndentOn` / `hudHorizontalInset` / `showsTextAreaBorder` **不在这里迁移**：
+/// 它们是新字段，老数据里没有 key ⇒ 解码成 `nil` ⇒ 由 `mergedConfiguration(containerSize:)`
+/// 按新默认兜底（缩进打开、标签边距 16、边框开关关）。
 enum VerticalInsetDefaultMigration {
     /// `UserDefaults` key，沿用本项目「`<域>.<用途>.v<版本>`」的既有命名习惯。
     ///

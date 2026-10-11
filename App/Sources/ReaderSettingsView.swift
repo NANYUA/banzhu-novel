@@ -81,41 +81,13 @@ struct ReaderSettingsView: View {
                 }
             }
 
-            HStack {
-                Text("字号")
-                Slider(value: binding(\.fontSize), in: 12 ... 30, step: 1)
-                Text("\(Int(configuration.fontSize))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 32, alignment: .trailing)
-            }
-
-            HStack {
-                Text("行距")
-                Slider(value: binding(\.lineSpacing), in: 0 ... 20, step: 1)
-                Text("\(Int(configuration.lineSpacing))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 32, alignment: .trailing)
-            }
-
-            HStack {
-                Text("段间距")
-                Slider(value: binding(\.paragraphSpacing), in: 0 ... 30, step: 2)
-                Text("\(Int(configuration.paragraphSpacing))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 32, alignment: .trailing)
-            }
-
-            HStack {
-                Text("字间距")
-                Slider(value: binding(\.characterSpacing), in: -1 ... 5, step: 0.5)
-                Text(String(format: "%.1f", configuration.characterSpacing))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 32, alignment: .trailing)
-            }
+            // 四条数值项改输入式控件（`NumberInputRow`）：可点 `−` / `+` 微调、也可直接键入。
+            // 「字间距」步长 0.5 ⇒ 该控件按**带小数**处理：`.decimalPad` 键盘 + 保留一位小数
+            // （旧写法 `Int(...)` 会把小数截断，显示与设置值不符）。
+            NumberInputRow(title: "字号", value: binding(\.fontSize), range: 12 ... 30, step: 1)
+            NumberInputRow(title: "行距", value: binding(\.lineSpacing), range: 0 ... 20, step: 1)
+            NumberInputRow(title: "段间距", value: binding(\.paragraphSpacing), range: 0 ... 30, step: 2)
+            NumberInputRow(title: "字间距", value: binding(\.characterSpacing), range: -1 ... 5, step: 0.5)
 
             Toggle("字体加粗", isOn: binding(\.isBold))
             Toggle("字体倾斜", isOn: binding(\.isItalic))
@@ -164,31 +136,38 @@ struct ReaderSettingsView: View {
         }
     }
 
-    /// 「外观」里的 6 条边距滑杆（正文上 / 下 / 左右 + 标签边距 + 上标签上 / 下标签下边距）。
+    /// 「外观」里的 6 条边距输入行（正文上 / 下 / 左右 + 标签边距 + 上标签上 / 下标签下边距）。
     ///
     /// 抽出来只为 `function_body_length`：内联在 `appearanceSection` 里会顶穿 50 行门槛
     /// （warning 即 CI 红）。`@ViewBuilder` 展开成 `TupleView` ⇒ 每一行仍是 `Section` 的
     /// **直接子视图**，`Form` 里逐行渲染的版式与内联写法逐值相同（没有多套一层容器）。
     @ViewBuilder
     private var insetSliders: some View {
-        // 上下边距**拆成两个滑杆**（owner 2026-10-11）：语义是「距**屏幕边缘**的绝对距离」，
+        // 上下边距**拆成两个控件**（owner 2026-10-11）：语义是「距**屏幕边缘**的绝对距离」，
         // `0` = 正文贴到屏幕最边缘（**不自己适配刘海**），上 `0…200`、下 `0…120`。
-        // 两个滑杆**各改各的**（旧实现那一个滑杆同时写 `top` 与 `bottom`，已删）。
+        // 两个控件**各改各的**（旧实现那一个滑杆同时写 `top` 与 `bottom`，已删）。
         // 步长 2：默认 78 / 30 与两端都能精确取到（`0/30/78/120/200` 全是偶数）。
-        insetSlider("上边距", value: topInsetBinding, range: 0 ... 200, step: 2)
-        insetSlider("下边距", value: bottomInsetBinding, range: 0 ... 120, step: 2)
+        NumberInputRow(title: "上边距", value: topInsetBinding, range: 0 ... 200, step: 2)
+        NumberInputRow(title: "下边距", value: bottomInsetBinding, range: 0 ... 120, step: 2)
         // 左右边距（U1-8）：下限仍守 8pt、默认 24pt 由 `PageInset` 的默认值给 —— 本次未改。
-        insetSlider("左右边距", value: horizontalInsetBinding, range: 8 ... 48, step: 4)
+        NumberInputRow(title: "左右边距", value: horizontalInsetBinding, range: 8 ... 48, step: 4)
+        // 正文边框标识（owner 2026-10-11）：打开后**阅读页**的正文盒四周出现红色虚线，
+        // 标的就是「当前这三条边距下正文真正能排到的范围」。
+        // 放在三条正文边距（上 / 下 / 左右）的**紧后面**：它是同一个「正文盒」主题的
+        // 观测手段 —— 调完边距立刻开关一下就能看到正文盒被推到哪；离得远（比如放进「阅读」段）
+        // 就要来回翻两段才能对照，失去「边调边看」的意义。
+        // ⚠️ 刻意**不做**设置页内的迷你预览：正文盒的真实极限要对着刘海 / 上下栏看才有意义（owner 口径）。
+        Toggle("正文边框标识", isOn: binding(\.showsTextAreaBorder))
         // 标签边距（owner 2026-10-11）：三个角落标签（左上书名 / 章节名、左下电量、右下页码）
         // **共用**这一个值，只调它们距屏幕左 / 右边缘的距离 —— 垂直位置不受它影响。
-        insetSlider("标签边距", value: hudInsetBinding, range: 0 ... 64, step: 2)
+        NumberInputRow(title: "标签边距", value: hudInsetBinding, range: 0 ... 64, step: 2)
         // 上标签 / 下标签边距（owner 2026-10-11）：控制栏三条面板**贴屏幕上下边**的程度。
         // 语义与正文边距一致 ——「距**屏幕边缘**的绝对距离」，`0` = 面板贴到屏幕最上 / 最下边
         // （**不避让灵动岛 / Home Indicator**，面板可以被缺口盖住 —— owner 明确要这个）。
         // 范围 `0 ... 90`、步长 2：两条面板各 68pt 高、再往上就要与正文抢位置了。
         // 「上标签上边距」的**自动**档值来自本机安全区（见 `autoTopBarInset`）。
-        insetSlider("上标签上边距", value: topBarInsetBinding, range: 0 ... 90, step: 2)
-        insetSlider("下标签下边距", value: bottomBarInsetBinding, range: 0 ... 90, step: 2)
+        NumberInputRow(title: "上标签上边距", value: topBarInsetBinding, range: 0 ... 90, step: 2)
+        NumberInputRow(title: "下标签下边距", value: bottomBarInsetBinding, range: 0 ... 90, step: 2)
     }
 
     // MARK: - 阅读
@@ -341,34 +320,6 @@ private extension ReaderSettingsView {
             custom: configuration.customBackgroundColor,
             customDark: configuration.customBackgroundColorDark
         )
-    }
-
-    /// 一条「标题 + 滑杆 + 右侧数值」的边距行。
-    ///
-    /// 四行（上 / 下 / 左右 / 标签边距）共用同一套版式与数值显示，逐值沿用既有写法
-    /// （`Int(...)` 截断 + `.monospacedDigit()` + 32pt 右对齐）。
-    /// 抽成函数是因为 `appearanceSection` 本就接近 SwiftLint `function_body_length`
-    /// 的 50 行门槛（warning 即 CI 红），四段内联 HStack 会直接顶穿。
-    ///
-    /// 数值直接读 `value.wrappedValue`，不再单独传一份 `current`：
-    /// 少一个参数，也就少一处「显示值与实际值不同源」的机会。
-    ///
-    /// ⚠️ 范围 / 步长是**业务常量**，仍就地写在调用处（与文件里其它滑杆一致）：
-    /// 上下边距的范围见 `PageInset` 的文档。
-    private func insetSlider(
-        _ title: String,
-        value: Binding<CGFloat>,
-        range: ClosedRange<CGFloat>,
-        step: CGFloat
-    ) -> some View {
-        HStack {
-            Text(title)
-            Slider(value: value, in: range, step: step)
-            Text("\(Int(value.wrappedValue))")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 32, alignment: .trailing)
-        }
     }
 
     func binding<Value>(

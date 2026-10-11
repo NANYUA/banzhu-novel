@@ -56,6 +56,7 @@ final class ReadingSettingsStoreTests: XCTestCase {
             hudHorizontalInset: 40,
             topBarInset: 40,
             bottomBarInset: 0,
+            showsTextAreaBorder: true,
             backgroundStyle: .custom,
             customBackgroundColor: ReadingColor(red: 0.1, green: 0.2, blue: 0.3),
             customBackgroundColorDark: ReadingColor(red: 0.4, green: 0.5, blue: 0.6),
@@ -95,6 +96,8 @@ final class ReadingSettingsStoreTests: XCTestCase {
         // 新增的两个字段同样逐值保留（显式关掉的缩进不能被强行打开）。
         XCTAssertEqual(migrated.isFirstLineIndentOn, false)
         XCTAssertEqual(migrated.hudHorizontalInset, 40)
+        // 边框开关（用户显式打开过）同样不能被迁移顺手改掉。
+        XCTAssertEqual(migrated.showsTextAreaBorder, true)
         // 标记必须写入，否则下次启动会再迁移一次（把用户随后的调整又冲掉）。
         XCTAssertTrue(defaults.bool(forKey: VerticalInsetDefaultMigration.storageKey))
     }
@@ -155,7 +158,7 @@ final class ReadingSettingsStoreTests: XCTestCase {
 
     // MARK: - 2026-10-11：竖向边距语义变更 + 两个新字段
 
-    /// ⑤ 老版本存下的 JSON（**没有**新增的两个 key）必须仍能解出来。
+    /// ⑤ 老版本存下的 JSON（**没有**新增的几个 key）必须仍能解出来。
     ///
     /// 锁的失效模式：给 `ReadingSettings` 加一个**非 Optional** 字段 ⇒ 合成 `Decodable`
     /// 对缺失的 key 抛错 ⇒ `ReadingSettingsLive.load()` 的 `try?` 把它吞成 `nil`
@@ -168,6 +171,7 @@ final class ReadingSettingsStoreTests: XCTestCase {
         object["hudHorizontalInset"] = nil
         object["topBarInset"] = nil
         object["bottomBarInset"] = nil
+        object["showsTextAreaBorder"] = nil
         let legacy = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(ReadingSettings.self, from: legacy)
@@ -176,21 +180,24 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertNil(decoded.hudHorizontalInset)
         XCTAssertNil(decoded.topBarInset)
         XCTAssertNil(decoded.bottomBarInset)
+        XCTAssertNil(decoded.showsTextAreaBorder)
         // 老数据的其它字段逐值保留（解码本身不得动它们）。
         XCTAssertEqual(decoded.fontSize, 21)
         XCTAssertEqual(decoded.inset, PageInset(top: 12, leading: 8, bottom: 0, trailing: 40))
         XCTAssertEqual(decoded.backgroundStyle, .custom)
     }
 
-    /// ⑥ 老数据（四个新字段都是 `nil`）经 `mergedConfiguration` 兜底：
+    /// ⑥ 老数据（几个新字段都是 `nil`）经 `mergedConfiguration` 兜底：
     /// 首行缩进**打开**（owner 口径「默认打开」）、标签边距 `16`（= `Spacing.md`）、
-    /// 上栏边距**保持 `nil`**（= 自动，由 App 层按安全区解析）、下栏边距 `8`（= `Spacing.xs`）。
+    /// 上栏边距**保持 `nil`**（= 自动，由 App 层按安全区解析）、下栏边距 `8`（= `Spacing.xs`）、
+    /// 正文边框标识**关**（老版本没有这个功能，默认不显示）。
     func test老数据的新字段按新默认兜底() {
         var legacy = ReadingSettings()
         legacy.isFirstLineIndentOn = nil
         legacy.hudHorizontalInset = nil
         legacy.topBarInset = nil
         legacy.bottomBarInset = nil
+        legacy.showsTextAreaBorder = nil
 
         let merged = legacy.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
 
@@ -200,16 +207,19 @@ final class ReadingSettingsStoreTests: XCTestCase {
         // ⚠️ `nil` 不等于「0」：它是「自动」，所以这里**必须**仍是 nil。
         XCTAssertNil(merged.topBarInset)
         XCTAssertEqual(merged.bottomBarInset, 8)
+        // 边框开关 `nil` ⇒ `false`（**不是**「打开」）：老用户不该突然看到一圈红线。
+        XCTAssertFalse(merged.showsTextAreaBorder)
     }
 
-    /// ⑦ 用户主动关掉缩进 / 改过标签边距 / 拖过上下栏边距之后，合并结果必须是**存下来的值**
-    /// （不能被默认兜底盖掉 —— 那会让「设置改不动」）。
+    /// ⑦ 用户主动关掉缩进 / 改过标签边距 / 拖过上下栏边距 / **打开过正文边框标识**之后，
+    /// 合并结果必须是**存下来的值**（不能被默认兜底盖掉 —— 那会让「设置改不动」）。
     func test已存的新字段优先于默认兜底() {
         var stored = ReadingSettings()
         stored.isFirstLineIndentOn = false
         stored.hudHorizontalInset = 48
         stored.topBarInset = 40
         stored.bottomBarInset = 0
+        stored.showsTextAreaBorder = true
 
         let merged = stored.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
 
@@ -219,6 +229,8 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertEqual(merged.topBarInset, 40)
         // `0` 是**有效值**（贴屏幕最边缘），不能被 `?? 8` 兜底吃掉。
         XCTAssertEqual(merged.bottomBarInset, 0)
+        // `true` 同样不能被 `?? false` 兜底吃掉（否则「开了又自己关」）。
+        XCTAssertTrue(merged.showsTextAreaBorder)
     }
 
     /// ⑧ 两处默认值同源（写法沿用 `PaginatorTests` ⑰）：`ReadingSettings()` 与
@@ -232,11 +244,14 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings.isFirstLineIndentOn, configuration.isFirstLineIndentOn)
         XCTAssertEqual(settings.topBarInset, configuration.topBarInset)
         XCTAssertEqual(settings.bottomBarInset, configuration.bottomBarInset)
+        XCTAssertEqual(settings.showsTextAreaBorder, configuration.showsTextAreaBorder)
         XCTAssertEqual(configuration.hudHorizontalInset, 16)
         XCTAssertTrue(configuration.isFirstLineIndentOn)
         // ⚠️ 上栏默认是 `nil`（自动）—— 不是某个具体数字；下栏默认 8。
         XCTAssertNil(configuration.topBarInset)
         XCTAssertEqual(configuration.bottomBarInset, 8)
+        // 边框标识默认**关**（`ReadingSettings()` 的 `false` 与配置的同源，见上一行断言）。
+        XCTAssertFalse(configuration.showsTextAreaBorder)
         // 缩进宽度由开关与字号派生（不单独落盘）。
         XCTAssertEqual(configuration.firstLineHeadIndent, configuration.fontSize * 2)
     }
@@ -248,5 +263,34 @@ final class ReadingSettingsStoreTests: XCTestCase {
     /// **永远不会生效**，owner 真机上只会看到「没变化」。
     func test迁移标记为第三版() {
         XCTAssertEqual(VerticalInsetDefaultMigration.storageKey, "reader.insetDefaultMigrated.v3")
+    }
+
+    /// ⑩ 正文边框标识开关：**打开**的显式值经「落盘 → 解码 → 合并」往返后仍是**打开**。
+    ///
+    /// 锁的失效模式：`ReadingSettings.showsTextAreaBorder` 是 `Bool?`，一旦
+    /// `mergedConfiguration` 里写成 `?? true`（或把默认值当成「老数据 = 打开」），
+    /// 用户就会「明明关掉了，下次进来又出现」；反过来把 `true` 兜成 `false` 则是
+    /// 「开了又自己关」。两端都在这条用例里锁住（⑪ 用 `false` 锁另一端）。
+    func test正文边框开关往返后仍为打开() throws {
+        var settings = ReadingSettings()
+        settings.showsTextAreaBorder = true
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(ReadingSettings.self, from: data)
+        XCTAssertEqual(decoded.showsTextAreaBorder, true)
+
+        let merged = decoded.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
+        XCTAssertTrue(merged.showsTextAreaBorder)
+        // 往返不该动别的字段（整结构比对，与 ① 同一手法）。
+        XCTAssertEqual(decoded, settings)
+    }
+
+    /// ⑪ 显式**关掉**的边框开关在合并后仍是关（`false` 是有效值，不是「缺字段」）。
+    func test正文边框开关显式关闭后仍为关() {
+        var settings = ReadingSettings()
+        settings.showsTextAreaBorder = false
+
+        let merged = settings.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
+        XCTAssertFalse(merged.showsTextAreaBorder)
     }
 }
