@@ -17,6 +17,12 @@ import SwiftUI
 // ## 内容做成「数组 → 逐项渲染」
 // 现在只有一项（「书籍详情」），但渲染路径是 `[ReaderMoreMenuItem]` 的遍历 ⇒
 // **以后加项只改数组**（`ReaderMoreMenuItem.readerMoreMenu(onShowDetail:)`），不动视图。
+//
+// ## 几何（2026-10-11 owner 看过几何对比稿后定的**最终**口径）
+// 面板宽 = `clamp(内容理想宽, 150, 240)`、高 = 4 + 行高 44 + 4 = **52**
+// ⇒ 单项时 **150 × 52 ≈ 2.9:1**（改前是 100 × 68 = 1.47:1 的「方块」）。
+// 行内是**纯文字、单独水平居中**（`.frame(maxWidth: .infinity)` + 默认 `.center` 对齐）。
+// 推导与实测留白见 `ReaderMoreMenuMetrics` 与 `row(_:)`。
 
 // MARK: - 条目模型
 
@@ -28,8 +34,8 @@ import SwiftUI
 /// 否则 sheet 关掉后面板还杵在那儿。⇒ 执行路径只有一条，加项时不必各自重复这段逻辑。
 struct ReaderMoreMenuItem: Identifiable {
     let id: String
+    /// 菜单项文字（**纯文字项**）。
     let title: String
-    let systemImage: String
     /// `false` ⇒ 渲染成置灰项且**不可点**：`.disabled(true)` 会让 `ButtonStyle` 收不到按下事件
     /// ⇒ 连按下反馈都没有（与跳章条到边界时的处置同源）。
     let isEnabled: Bool
@@ -44,15 +50,12 @@ extension ReaderMoreMenuItem {
     /// - `onShowDetail == nil` ⇒ 一项**置灰**的「更多选项待添加」：那条路径是测试 / 预览
     ///   （没有 `bookPath`），保留占位项与改造前**逐字相同** —— 空面板会让人以为控件坏了
     ///   （§11：别给一个点了没反应的入口，也别给一个空壳）。
-    ///   图标取「更多」自己的 `ellipsis.circle`：占位项没有专属图标，用打开它的那个入口的图标
-    ///   最不突兀，也让图标列不至于空一格（多行时文字左边缘才能对齐）。
     static func readerMoreMenu(onShowDetail: (() -> Void)?) -> [ReaderMoreMenuItem] {
         if let onShowDetail {
             return [
                 ReaderMoreMenuItem(
                     id: "detail",
                     title: "书籍详情",
-                    systemImage: "info.circle",
                     isEnabled: true,
                     action: onShowDetail
                 ),
@@ -62,7 +65,6 @@ extension ReaderMoreMenuItem {
             ReaderMoreMenuItem(
                 id: "placeholder",
                 title: "更多选项待添加",
-                systemImage: "ellipsis.circle",
                 isEnabled: false,
                 action: {}
             ),
@@ -73,28 +75,50 @@ extension ReaderMoreMenuItem {
 // MARK: - 尺度
 
 /// 下拉面板专有的尺度（**有名字、带推导**，不散落成魔数）。
+///
+/// ⚠️ 面板的内边距在这里**自己开常量**（`panelPadding`），**不**复用
+/// `ReaderChromeMetrics.panelVerticalPadding`(12) / `barInnerPadding`(12)：
+/// 那两条是**上下栏与跳章条**的内边距（三者同高 68pt 靠的就是它），
+/// 菜单面板要的是更紧凑的一档（4）—— 复用共享常量会把三条面板一起压扁或撑高。
 private enum ReaderMoreMenuMetrics {
-    /// 20 —— 图标列宽。`.body`(17pt) 下 SF Symbol 的方形图标位（17 × 1.2 ≈ 20）。
+    /// 4 —— 面板的**内边距**（上下左右**同一个值**）。
     ///
-    /// 固定成**列宽**是为了多项时文字左边缘能对齐：SF Symbols 的墨迹宽窄不一
-    /// （`info.circle` 铺满字身、`bookmark` 很窄），不固定列宽每项文字起点都会参差。
-    static let iconColumnWidth: CGFloat = 20
-
-    /// 184 —— 标题文字的最大宽度（= `maxPanelWidth` − 24 − 20 − 12）。
+    /// owner 口径：**选项左右内边距与上下内边距一致** ⇒ 横竖共用这一个常量，不拆成两个。
     ///
-    /// 它是**面板宽度的实际决定项**：面板宽 = min(内容宽, 240)，而内容宽 = 24 + 20 + 12 + 文字宽，
-    /// 所以「最长 184 的文字」正好把面板顶到 240 —— 两项互相印证，改一个必须改另一个。
-    /// 文字短时面板就窄（贴合内容），文字长时先缩到这里、再 `lineLimit(1)` 截断。
-    static let maxTitleWidth: CGFloat = 184
+    /// ## 面板几何
+    /// 单项「书籍详情」的内容理想宽 = 4 × 2 + 文字 68 = **76**（< `minPanelWidth` 150 ⇒ 被它托住）；
+    /// 面板高 = 4 × 2 + 行高 44 = **52pt**。
+    ///
+    /// ## ⚠️ 按下强调层与面板圆角的几何（owner 已知悉，本次刻意保持强调层圆角不变）
+    /// 强调层是画在**行的 frame** 上的 `Radius.xs`(6) 圆角矩形，面板圆角是 `Radius.lg`(18)。
+    /// 内边距 4 ⇒ 强调层左右各只内缩 4pt。四角是否落在面板圆角**之内**，判据是
+    /// `|内边距 + 强调层圆角 − 面板圆角| × √2 + 强调层圆角 ≤ 面板圆角`
+    /// ⇒ `|4 + 6 − 18| × 1.414 + 6 ≈ 17.31 ≤ 18` ✓ **仍在内、按下不会露方角**。
+    /// ⚠️ 但**余量只有约 0.7pt**：同心解是 `内边距 + 强调层圆角 = 面板圆角`
+    /// ⇒ 内边距 4 时强调层圆角应取 **14**（本项目 `Radius.xs`(6) 的推导本来就是 `18 − 12`）。
+    /// 本次**不改**强调层圆角（保持 6），这个取舍留给 owner。
+    static let panelPadding: CGFloat = 4
 
-    /// 240 —— 面板的最大宽度。算式：
-    /// 横向内边距 `ReaderChromeMetrics.barInnerPadding`(12) × 2 = **24**
-    /// + 图标列 **20** + 图标与文字的间距 `Spacing.sm`(12) + 标题上限 **184** = **240**。
+    /// 150 —— 面板的**最小宽度**。
+    ///
+    /// ## 推导（⚠️ **观感值，需真机复核**）
+    /// 单项「书籍详情」的文字宽 ≈ 4 字 × `.body`(17pt) = **68**；
+    /// 加面板内边距 4 × 2 = 8 ⇒ 内容理想宽 **76 < 150** ⇒ 面板被这条下限托到 **150**。
+    /// 面板高 = 4 × 2 + 44 = **52** ⇒ **150 × 52 ≈ 2.9 : 1**，一眼是「一条菜单」而不是「一个方块」。
+    /// 行内容宽 = 150 − 8 = **142** ⇒ 文字 68 居中后**左右各约 37pt 留白**。
+    ///
+    /// ## 为什么需要它（owner 真机反馈「选项长宽太接近导致太臃肿」）
+    /// 改前是 **100 × 68（1.47:1）**：面板**完全没有横向内边距**（旧注释写着「横向内边距取 12」，
+    /// 代码里并不存在），内容贴着左右边缘 ⇒ 又方又挤。⇒ 补内边距 + 加这条下限，
+    /// 比例从 1.47:1 变成 2.9:1。
+    static let minPanelWidth: CGFloat = 150
+
+    /// 240 —— 面板的最大宽度。超长词条时行内容宽 = 240 − 内边距 4 × 2 = **232**，
+    /// 文字在这一段内由 `lineLimit(1)` 截断。
     ///
     /// ⚠️ 为什么 240 结构上**不可能溢出屏幕**：面板左右各留
     /// `ReaderChromeMetrics.panelOuterMargin`(16) ⇒ 需要 240 + 32 = **272pt**，
-    /// 而可运行 iOS 17 的最窄机型是 **320pt** ⇒ 余量 **48pt**
-    /// （Dynamic Type 下超长词条由 `maxTitleWidth` 截断，而不是把面板顶出屏幕）。
+    /// 而可运行 iOS 17 的最窄机型是 **320pt** ⇒ 余量 **48pt**。
     static let maxPanelWidth: CGFloat = 240
 }
 
@@ -160,17 +184,27 @@ struct ReaderMoreMenuPanel: View {
                 row(item)
             }
         }
-        .padding(.vertical, ReaderChromeMetrics.panelVerticalPadding)
-        // ## 宽度 = min(内容宽, 240)：先封顶、再**强制贴合内容**
-        // `.frame(maxWidth:)` 单独用**不足以保证贴合**（它是「夹取提案」的语义，遇到弹性提案
-        // 会跟着提案走）⇒ 在它**之后**加 `.fixedSize(horizontal: true, vertical: false)`：
-        // 这一层向下提案「未指定宽度」，内层 frame 于是按内容的**理想宽**定尺寸，
-        // 面板宽因此 = 内容宽（短词条得到一个小面板，像系统菜单）。
-        // 封顶仍由内层 frame 的 240 保证；超长词条由每一行自己的 `maxTitleWidth`(184) 截断
-        // ⇒ 内容宽**结构上不可能**超过 240。
+        // 上下左右**同一个**内边距（owner 口径：选项左右内边距与上下一致）。
+        // ⚠️ 它必须加在**面板**上，不能加在行**内部**：
+        // 按下强调层（`ReaderChromeMetrics.buttonStyle`）画在**行的 frame** 上、是 `Radius.xs`(6)
+        // 圆角矩形；加在行内部则行的 frame 从面板边缘 x=0 起 ⇒ 强调层贴着面板边缘、
+        // 且四角落到面板 `Radius.lg`(18) 圆角的**弧外**，按下时在圆角外露方角。
+        // 加在面板上则强调层四边各内缩 4pt ⇒ `|4 + 6 − 18| × √2 + 6 ≈ 17.31 ≤ 18`
+        // ⇒ **仍在圆角之内、不会露方角**（余量约 0.7pt；完整算式与「同心解」见 `panelPadding`）。
+        .padding(ReaderMoreMenuMetrics.panelPadding)
+        // ## 宽度 = clamp(内容理想宽, 150, 240)：先抬下限 / 封顶、再**强制贴合内容**
+        // `.frame(minWidth:maxWidth:)` 单独用**不足以保证贴合**（它是「夹取提案」的语义，
+        // 遇到弹性提案会跟着提案走）⇒ 在它**之后**加 `.fixedSize(horizontal: true, vertical: false)`：
+        // 这一层向下提案「未指定宽度」，内层 frame 于是按内容的**理想宽**定尺寸。
+        // ⇒ 单项「书籍详情」：内容理想宽 = 4 + 68 + 4 = **76** ⇒ 被 `minPanelWidth`(150) 托到 **150**；
+        // 长词条先顶到 240、再由 `lineLimit(1)` 截断 ⇒ 宽度**结构上不可能**超过 240。
         // ⚠️ 顺序不可换：`.fixedSize` 必须在 `.background { ReaderChromeGlass }` **之前**，
         // 否则玻璃会按外层提案拉伸，面板右侧留出一条没有内容的空玻璃。
-        .frame(maxWidth: ReaderMoreMenuMetrics.maxPanelWidth, alignment: .leading)
+        .frame(
+            minWidth: ReaderMoreMenuMetrics.minPanelWidth,
+            maxWidth: ReaderMoreMenuMetrics.maxPanelWidth,
+            alignment: .leading
+        )
         .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(style.foreground)
         .background {
@@ -178,34 +212,38 @@ struct ReaderMoreMenuPanel: View {
         }
     }
 
-    /// 一行：图标 + 文字。
+    /// 一行：**纯文字，且在选项里单独水平居中**（owner 2026-10-11 的最终口径）。
     ///
     /// ## 命中区与按下反馈
     /// 行高 ≥ `ReaderChromeMetrics.minTouchTarget`(44)（HIG §9），整块 `contentShape` 可点；
     /// 按下反馈**复用控制栏那一个** `buttonStyle`（`PressableCardButtonStyle`）——
     /// 面板与上下栏的按钮因此是同一种反馈，不另造第二个按下样式。
     ///
-    /// ## 为什么横向内边距取 12 而不是上栏的 16
-    /// 那个 12 是 `buttonStyle` 强调层圆角 `Radius.xs`(6) 的**几何前提**
-    /// （`6 = Radius.lg`(18) `−` 12，见 `DesignTokens.Radius.xs`）⇒
-    /// 强调层完全落在面板圆角之内，按下时四角不会露出方角。
-    /// 竖向内边距同样是 12（`panelVerticalPadding`），首尾两行上下也内缩 12pt。
+    /// ## 居中怎么来的
+    /// `Text` 外面套一层 `.frame(maxWidth: .infinity)`（**默认 `.center` 对齐**）⇒
+    /// 文字块撑满行的可用宽、文字中心 = 行中心 = 面板中心。
+    ///
+    /// ## ⚠️ 刻意**不**给 `Text` 加任何 `maxWidth`
+    /// 加了就成了「有上限的弹性宽」，算式变复杂、也没必要：超长词条由
+    /// 「面板上限 240 + `.lineLimit(1)`」自然截断（长词条时行内容宽 = 240 − 4 × 2 = **232pt**，
+    /// 文字就在这一段里截断）。
+    ///
+    /// ## 当前唯一一项的实测几何（「书籍详情」）
+    /// 行内容宽 = 面板 150 − 内边距 4 × 2 = **142**；文字 ≈ 68 居中 ⇒ **左右各约 37pt 留白**。
+    ///
+    /// ## 内边距在**面板**上（`panelPadding` 4），不在行里
+    /// 见面板那一层的注释：加在行内部会让强调层贴着面板边缘、并在圆角外露方角。
     private func row(_ item: ReaderMoreMenuItem) -> some View {
         Button {
             onSelect(item)
         } label: {
-            HStack(spacing: DesignTokens.Spacing.sm) {
-                Image(systemName: item.systemImage)
-                    .font(ReaderChromeMetrics.iconFont)
-                    .frame(width: ReaderMoreMenuMetrics.iconColumnWidth)
-
-                Text(item.title)
-                    .font(.body)
-                    .lineLimit(1)
-                    .frame(maxWidth: ReaderMoreMenuMetrics.maxTitleWidth, alignment: .leading)
-            }
-            .frame(minHeight: ReaderChromeMetrics.minTouchTarget)
-            .contentShape(Rectangle())
+            Text(item.title)
+                .font(.body)
+                .lineLimit(1)
+                // 撑满行的可用宽 ⇒ 文字中心 = 行中心 = 面板中心。
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: ReaderChromeMetrics.minTouchTarget)
+                .contentShape(Rectangle())
         }
         .buttonStyle(ReaderChromeMetrics.buttonStyle)
         .disabled(!item.isEnabled)
