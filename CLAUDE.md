@@ -10,7 +10,8 @@
 站点设置、阅读设置持久化均已落地；章节级 LRU 缓存淘汰规则与执行器已实现。
 
 缓存闭环已接通：阅读成功后写入 `lastReadAt`；阅读时自动缓存后续章节，
-缓存后触发 LRU 淘汰。
+缓存后触发 LRU 淘汰。淘汰**只清「已读章号 + 预缓存章数」之外的陈旧预取** ——
+已读章节与当前预取窗口内的章节都保留（否则「点下一章 / 返回上一章」会重新联网加载）。
 
 ## 技术栈
 
@@ -157,9 +158,13 @@ swift test --package-path Packages/NovelEngine
    **不得**用 `hasLocalText` 或本地文件名反推 —— 阅读时的自动缓存同样会让
    `hasLocalText` 为 true，但那**可被 LRU 淘汰**，不是用户下载的内容。
 
-2. **缓存淘汰不能删用户下载的章节**
+2. **缓存淘汰不能删用户下载的章节，也不能删「已读章节 + 当前预取窗口」**
    `ChapterSource.isEvictable` 是闸门，且必须**按章不按书**淘汰。
    缓存上限只统计含自动缓存章节的书；用户下载的章节既不计入上限，也永不被淘汰。
+   自动缓存里**可淘汰**的只有：`.cached` 且 `number > 已读章号 + precacheCount`
+   （已读章号 = `BookRecord.lastReadChapterPath` 指向章节的 `number`，查不到按 0 算；
+   `precacheCount` = 阅读设置里的「预缓存 N 章」，由 `ChapterCacheStore` 的 `followingCount` 传入）。
+   ⇒ 正在读的那一本天然全保，被清的只有「窗口外的陈旧预取」。
 
 3. **阅读位置存 `characterOffset`，不存页码**
    字号/行距/页边距等设置都会改变分页。

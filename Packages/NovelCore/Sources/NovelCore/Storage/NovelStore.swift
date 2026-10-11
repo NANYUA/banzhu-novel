@@ -96,20 +96,27 @@ public enum NovelStore {
         try? FileManager.default.removeItem(at: chapterFile(bookPath: bookPath, number: number))
     }
 
-    /// 按书执行 LRU 缓存淘汰，只清除可淘汰的 `.cached` 章节。
+    /// 按书执行 LRU 缓存淘汰，只清除**可淘汰**的 `.cached` 章节。
+    ///
+    /// 「可淘汰」由 `CacheEvictionPlanner` 判定：用户下载的章节永不淘汰（契约 ②），
+    /// **已读章节与当前预取窗口内的章节同样不淘汰**（owner 2026-10-11 口径）。
     ///
     /// 返回实际规划被淘汰的书与章节，便于调用方测试和后续汇报。
+    /// - Parameter precacheCount: 阅读设置里的「预缓存 N 章」；
+    ///   默认取 `ReaderFeature.defaultPrecacheCount`，生产调用方应传入用户当前设置值。
     @discardableResult
     static func evictCachedChapters(
         in context: ModelContext,
-        maxCachedBooks: Int = NovelStore.defaultMaxCachedBooks
+        maxCachedBooks: Int = NovelStore.defaultMaxCachedBooks,
+        precacheCount: Int = ReaderFeature.defaultPrecacheCount
     ) throws -> [CacheEvictionPlan] {
         let books = try context.fetch(FetchDescriptor<BookRecord>())
         let chapters = try context.fetch(FetchDescriptor<ChapterRecord>())
         let plans = CacheEvictionPlanner.plan(
             books: books,
             chapters: chapters,
-            maxCachedBooks: maxCachedBooks
+            maxCachedBooks: maxCachedBooks,
+            precacheCount: precacheCount
         )
         guard !plans.isEmpty else { return [] }
 

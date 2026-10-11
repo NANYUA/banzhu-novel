@@ -7,6 +7,10 @@ import XCTest
 ///
 /// 核心约束：可以按书选择，但只能删 `.cached` 章节；
 /// `.downloaded` 和 `.notDownloaded` 都不参与淘汰。
+///
+/// ⚠️ 本文件只管**上限 / 计数 / 排序 / 来源**这几条；
+/// 「已读章节与预取窗口不被淘汰」那条新规则在 `CacheEvictionPolicyTests.swift`。
+/// 写用例时注意：**章号必须大于「已读章号 + 预缓存章数」**才可能被淘汰。
 final class CacheEvictionTests: XCTestCase {
     private var container: ModelContainer!
     private var context: ModelContext!
@@ -93,9 +97,11 @@ final class CacheEvictionTests: XCTestCase {
         let third = BookRecord(bookPath: "/cache/lru/exit/third/", title: "第三本")
         third.lastReadAt = Date(timeIntervalSince1970: 3000)
         context.insert(first); context.insert(second); context.insert(third)
-        context.insert(cachedChapter(bookPath: first.bookPath, number: 1))
-        context.insert(cachedChapter(bookPath: second.bookPath, number: 1))
-        context.insert(cachedChapter(bookPath: third.bookPath, number: 1))
+        // ⚠️ 章号必须落在「已读章号 + 预缓存章数」之外才可淘汰（见 CacheEvictionPlanner）：
+        // 这几本书都没有 lastReadChapterPath ⇒ 已读章号按 0 算，默认预取 3 章 ⇒ 1...3 受保护。
+        context.insert(cachedChapter(bookPath: first.bookPath, number: 51))
+        context.insert(cachedChapter(bookPath: second.bookPath, number: 51))
+        context.insert(cachedChapter(bookPath: third.bookPath, number: 51))
         try context.save()
 
         let firstPlans = try NovelStore.evictCachedChapters(in: context, maxCachedBooks: 2)
@@ -150,13 +156,14 @@ final class CacheEvictionTests: XCTestCase {
         let neverRead = BookRecord(bookPath: "/cache/lru/never/", title: "没读过")
         let read = BookRecord(bookPath: "/cache/lru/read/", title: "读过")
         read.lastReadAt = Date(timeIntervalSince1970: 1000)
-        let neverChapter = cachedChapter(bookPath: neverRead.bookPath, number: 1)
-        let readChapter = cachedChapter(bookPath: read.bookPath, number: 1)
+        let neverChapter = cachedChapter(bookPath: neverRead.bookPath, number: 51)
+        let readChapter = cachedChapter(bookPath: read.bookPath, number: 51)
 
         let plans = CacheEvictionPlanner.plan(
             books: [read, neverRead],
             chapters: [neverChapter, readChapter],
-            maxCachedBooks: 1
+            maxCachedBooks: 1,
+            precacheCount: 3
         )
 
         XCTAssertEqual(plans.map(\.bookPath), [neverRead.bookPath])

@@ -112,7 +112,11 @@ enum ChapterCacheStoreLive {
         // 淘汰照旧执行、失败不中断；返回值只供测试断言。
         // 这里必须显式 `_ =` 丢弃：`try?` 会把结果包成 Optional，且**不继承**被调方已有的
         // `@discardableResult`（`NovelStore.evictCachedChapters`）⇒ 不丢就报「result of 'try?' is unused」。
-        _ = try? NovelStore.evictCachedChapters(in: context)
+        //
+        // 🔴 `precacheCount` 必须传：`followingCount` 就是阅读设置里的「预缓存 N 章」
+        // （同一个值一路传到这里），淘汰要靠它保护「已读章节 + 当前预取窗口」不被删。
+        // 漏传会退回默认值 3 —— 用户把预缓存调到 > 3 时，刚预取还没读的章节会被自己删掉。
+        _ = try? NovelStore.evictCachedChapters(in: context, precacheCount: followingCount)
     }
 
     /// 落盘一章正文。
