@@ -136,6 +136,20 @@ final class PaginatorTests: XCTestCase {
         XCTAssertFalse(appearance.affectsPagination(comparedTo: base))
     }
 
+    /// 正文边框标识**不影响分页**：开关它不许重排整章、不许动阅读位置。
+    ///
+    /// 锁的失效模式：把它写进 `affectsPagination` ⇒ 用户在设置里开关一次边框，
+    /// 就会触发整章重排（长章明显卡一下）并按 offset 重新定位 —— 而边框只是叠加层。
+    /// （编号沿用 ⑬ 的「只影响渲染」一族，不参与本文件已乱的 ⑪–⑳ 序号。）
+    func test正文边框标识开关不影响分页() {
+        let base = config()
+        var withBorder = base
+        withBorder.showsTextAreaBorder = true
+        XCTAssertFalse(withBorder.affectsPagination(comparedTo: base))
+        // 反向同样成立（关掉边框也不重排）。
+        XCTAssertFalse(base.affectsPagination(comparedTo: withBorder))
+    }
+
     /// ⑭ 防死循环：度量返回 0 时强制推进
     func test度量返回零时强制推进防死循环() {
         let text = String(repeating: "字", count: 5)
@@ -152,6 +166,122 @@ final class PaginatorTests: XCTestCase {
         XCTAssertEqual(pages.count, 1)
         XCTAssertEqual(pages[0].location, 0)
         XCTAssertEqual(pages[0].length, 1)
+    }
+
+    // MARK: - 不变量 ④：页面不得以换行开头
+
+    /// ⑳ 页边界正好落在 `\n` 前 ⇒ 该换行并入上一页，下一页以文字开头。
+    ///
+    /// 修复前：第 1 页正好排满 5 个中文 ⇒ `\n` 被推到第 2 页 ⇒ 第 2 页首行是空行。
+    func test页边界落在换行前时换行并入上一页() {
+        let text = "一二三四五\n六七八九十"
+        let pages = paginator(width: 10).paginate(text: text, configuration: config())
+        let chars = Array(text)
+
+        XCTAssertEqual(pages.count, 2, "换行不另起一页")
+        XCTAssertEqual(pages.map { chars[$0.location] }, ["一", "六"], "每页都必须以正文开头")
+    }
+
+    /// ㉑ 连续多个换行（`\n\n`）一并并入上一页。
+    func test连续多个换行一并并入上一页() {
+        let text = "一二三四五\n\n六七八九十"
+        let pages = paginator(width: 10).paginate(text: text, configuration: config())
+        let chars = Array(text)
+
+        // 只并一个的话，第 2 页会以第二个 `\n` 开头（页首仍是空行）。
+        XCTAssertEqual(pages.count, 2, "两个换行也必须一起收走")
+        XCTAssertEqual(pages.map { chars[$0.location] }, ["一", "六"], "每页都必须以正文开头")
+    }
+
+    /// ㉒ 章尾多余换行 ⇒ 不产生「整页只有换行」的末页（整页空白）。
+    func test章尾多余换行不产生只有换行的末页() {
+        let text = "一二三四五六七八九十\n\n"
+        let pages = paginator(width: 10).paginate(text: text, configuration: config())
+        let chars = Array(text)
+
+        // 修复前：第 2 页正好排满 5 个中文 ⇒ 章尾那两个 `\n` 单独撑出第 3 页。
+        XCTAssertEqual(pages.count, 2, "章尾换行不另起一页")
+        XCTAssertTrue(
+            pages.allSatisfy { page in
+                (0 ..< page.length).contains { !chars[page.location + $0].isNewline }
+            },
+            "每一页都必须含正文"
+        )
+        XCTAssertEqual(pages.map { chars[$0.location] }, ["一", "六"])
+    }
+
+    /// ㉓ 守恒律在带换行的文本上仍成立（① 不丢字符 ② 页首尾相接 ④ 不以换行开头）。
+    func test带换行的文本仍守住守恒律() {
+        let text = "第一章\n\n一二三四五\n\n六七八九十\n\n\n甲乙丙"
+        let pages = paginator(width: 10).paginate(text: text, configuration: config())
+        let chars = Array(text)
+
+        XCTAssertEqual(pages.reduce(0) { $0 + $1.length }, text.count, "① 每个字符恰好落在一页")
+        XCTAssertEqual(pages.first?.location, 0)
+        for index in 1 ..< pages.count {
+            XCTAssertEqual(
+                pages[index].location,
+                pages[index - 1].location + pages[index - 1].length,
+                "② 页首尾相接"
+            )
+        }
+        XCTAssertTrue(pages.allSatisfy { $0.length > 0 }, "每页非空")
+        XCTAssertTrue(
+            pages.allSatisfy { !chars[$0.location].isNewline },
+            "④ 任何一页都不得以换行开头"
+        )
+    }
+
+    /// ㉔ 回归保护：**不含换行**的文本，分页结果与改动前逐值相同。
+    ///
+    /// 这里钉的是旧口径的逐值结果（纯按度量整块切分），防止换行合并逻辑误伤无换行文本。
+    func test不含换行的文本分页逐值不变() {
+        let ascii = "abcdefghijklmnopqrstuvwxyz0123456789"
+        XCTAssertEqual(
+            paginator(width: 6).paginate(text: ascii, configuration: config()),
+            [
+                PageRange(location: 0, length: 6),
+                PageRange(location: 6, length: 6),
+                PageRange(location: 12, length: 6),
+                PageRange(location: 18, length: 6),
+                PageRange(location: 24, length: 6),
+                PageRange(location: 30, length: 6),
+            ]
+        )
+
+        let mixed = "Hello世界ab中文cd测试xyz"
+        XCTAssertEqual(
+            paginator(width: 6).paginate(text: mixed, configuration: config()),
+            [
+                PageRange(location: 0, length: 5),
+                PageRange(location: 5, length: 4),
+                PageRange(location: 9, length: 4),
+                PageRange(location: 13, length: 4),
+                PageRange(location: 17, length: 1),
+            ]
+        )
+    }
+
+    /// ㉕ 防死循环那条路（度量返回 0 ⇒ 强制 1 个字符）首字符恰好是换行：
+    /// 仍然每页至少推进 1 个字符，连续换行一并并入本页。
+    ///
+    /// 文本开头的换行属于**已知限制**（第一页没有上一页可并，见 `Paginator` 类型注释）。
+    func test度量返回零且文本以换行开头时不死循环() {
+        let text = "\n\n一二三"
+        let pages = paginator(width: 0).paginate(text: text, configuration: config())
+        let chars = Array(text)
+
+        XCTAssertEqual(pages.reduce(0) { $0 + $1.length }, text.count, "不丢字符")
+        XCTAssertEqual(pages.map { chars[$0.location] }, ["\n", "一", "二", "三"], "换行只留在文本开头那一页")
+    }
+
+    /// ㉖ 极端输入：整段全是换行 —— 不死循环、不丢字符（生产里不会出现，算法不能崩）。
+    func test全是换行的文本不死循环() {
+        let text = "\n\n\n"
+        let pages = paginator(width: 10).paginate(text: text, configuration: config())
+
+        XCTAssertEqual(pages.reduce(0) { $0 + $1.length }, text.count)
+        XCTAssertEqual(pages.count, 1, "一页放得下的换行不该撑出多页")
     }
 
     // MARK: - 默认页边距（U1-8 → U9-3b → U9-7）

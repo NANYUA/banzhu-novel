@@ -10,6 +10,12 @@ struct PageTextView: UIViewRepresentable {
     let text: String
     let configuration: PaginationConfiguration
 
+    /// 本页是否**从段落开头**开始（由切片函数调 NovelCore 的 `ParagraphBoundary` 判定后传入）。
+    ///
+    /// 为 `false` 时本页第一行是**续行**（本页从段落中间开始），不加首行缩进；
+    /// 只影响本页**第一个段落**，本页后续段落照旧加缩进。
+    let startsAtParagraphStart: Bool
+
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
@@ -32,10 +38,14 @@ struct PageTextView: UIViewRepresentable {
 
         let contentChanged = context.coordinator.appliedText != text
             || context.coordinator.appliedConfiguration != configuration
+            // 它由 `text` + 分页决定，正常不会单独变；但它是**渲染输出**的一个输入，
+            // 漏比就会出现「正文没变、缩进却是上一页口径」的陈旧渲染。
+            || context.coordinator.appliedStartsAtParagraphStart != startsAtParagraphStart
         guard contentChanged else { return }
 
         context.coordinator.appliedText = text
         context.coordinator.appliedConfiguration = configuration
+        context.coordinator.appliedStartsAtParagraphStart = startsAtParagraphStart
 
         // `PageTurnMode` 只剩 `.slide`：永远是单页渲染，滚动恒关闭。
         uiView.isScrollEnabled = false
@@ -77,32 +87,63 @@ struct PageTextView: UIViewRepresentable {
         proposal.replacingUnspecifiedDimensions(by: configuration.containerSize)
     }
 
+    /// 本页正文的 attributed string。
+    ///
+    /// ⚠️ 与度量侧 `Packages/NovelPagination/Sources/NovelPagination/TextKitMeasuring.swift`
+    /// 是**同一条口径**（段落样式逐字段同值 + 首行缩进的抑制规则同源，都调 `ParagraphBoundary`）：
+    /// 改一处必须改另一处，否则度量盒与渲染盒错位 —— 每页多塞 / 少塞正文，正文被裁
+    /// （B0-2 几何契约）。
     private func makeAttributedString() -> NSAttributedString {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = configuration.lineSpacing
-        paragraphStyle.paragraphSpacing = configuration.paragraphSpacing
-        paragraphStyle.firstLineHeadIndent = configuration.firstLineHeadIndent
-
         let backgroundColor = configuration.backgroundStyle.uiColor(
             custom: configuration.customBackgroundColor,
             customDark: configuration.customBackgroundColorDark
         )
         let attributes: [NSAttributedString.Key: Any] = [
             .font: ReadingFontFactory.makeFont(configuration: configuration),
-            .paragraphStyle: paragraphStyle,
+            .paragraphStyle: makeParagraphStyle(
+                firstLineHeadIndent: configuration.firstLineHeadIndent
+            ),
             .kern: configuration.characterSpacing,
             .foregroundColor: configuration.textColorMode.uiColor(
                 on: backgroundColor,
                 custom: configuration.customTextColor
             ),
         ]
-        return NSAttributedString(string: text, attributes: attributes)
+        let attributed = NSMutableAttributedString(string: text, attributes: attributes)
+
+        // 本页从**段落中间**开始时，第一行是续行，不该有首行缩进。
+        // ⚠️ 只换掉切片**第一个段落**那一份样式；本页后续段落照旧带缩进。
+        if !startsAtParagraphStart {
+            attributed.addAttribute(
+                .paragraphStyle,
+                value: makeParagraphStyle(firstLineHeadIndent: 0),
+                range: NSRange(
+                    location: 0,
+                    length: ParagraphBoundary.firstParagraphUTF16Length(in: text)
+                )
+            )
+        }
+        return attributed
+    }
+
+    /// 段落样式：`firstLineHeadIndent` 单独作参数，**其余字段与度量侧逐值一致**
+    /// （`TextKitMeasuring.swift` 的 `makeParagraphStyle`）—— 两处必须同时改。
+    ///
+    /// `firstLineHeadIndent` 传 `0` 就是「本行不加首行缩进」：缩进宽度本身仍只有
+    /// `PaginationConfiguration.firstLineHeadIndent` 一个来源，这里不引入第二个宽度。
+    private func makeParagraphStyle(firstLineHeadIndent: CGFloat) -> NSMutableParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = configuration.lineSpacing
+        style.paragraphSpacing = configuration.paragraphSpacing
+        style.firstLineHeadIndent = firstLineHeadIndent
+        return style
     }
 
     final class Coordinator: NSObject {
         var parent: PageTextView
         var appliedText: String?
         var appliedConfiguration: PaginationConfiguration?
+        var appliedStartsAtParagraphStart: Bool?
 
         init(parent: PageTextView) {
             self.parent = parent

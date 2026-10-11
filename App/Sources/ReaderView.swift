@@ -133,6 +133,18 @@ struct ReaderView: View {
                     .padding(.trailing, geometry.safeAreaInsets.trailing)
                     .padding(.top, contentPaddings.top)
                     .padding(.bottom, contentPaddings.bottom)
+                    // 正文边框标识（阅读设置里的开关）：叠加层挂在上面四条 padding **之后**
+                    // ⇒ 它的 frame 是**整屏**，所以这里补「**从屏幕边缘到正文盒**」的**全量**内缩
+                    // （横向 = 安全区 + `inset` 左右；竖向 = `contentPaddings`，见 `ReaderTextAreaBorder`）。
+                    .readerTextAreaBorder(
+                        isOn: viewStore.config.showsTextAreaBorder,
+                        insets: EdgeInsets(
+                            top: contentPaddings.top,
+                            leading: geometry.safeAreaInsets.leading + viewStore.config.inset.leading,
+                            bottom: contentPaddings.bottom,
+                            trailing: geometry.safeAreaInsets.trailing + viewStore.config.inset.trailing
+                        )
+                    )
 
                     // 角落状态标签（HUD）：与正文层 / 控制栏层**并列**的独立叠加层 ——
                     // 不参与正文布局、不占正文空间、不改任何 padding / frame / 分页参数。
@@ -403,9 +415,11 @@ private extension ReaderView {
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         configuration: PaginationConfiguration
     ) -> some View {
+        let slice = currentPageSlice(viewStore)
         PageTextView(
-            text: currentPageText(viewStore),
-            configuration: configuration
+            text: slice.text,
+            configuration: configuration,
+            startsAtParagraphStart: slice.startsAtParagraphStart
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 正文永远不接受命中测试：手势统一挂在外层（`slideGesture`），
@@ -555,22 +569,25 @@ private extension ReaderView {
 
     // MARK: - 分页定位
 
-    /// 取当前页对应的文本片段。
-    private func currentPageText(
+    /// 取当前页对应的文本片段 + 「本页是否从段落开头开始」（首行缩进的判据）。
+    ///
+    /// 判据只此一处：调 NovelCore 的 `ParagraphBoundary`，度量侧 `TextKitMeasuring` 用的是同一条。
+    private func currentPageSlice(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) -> String {
+    ) -> (text: String, startsAtParagraphStart: Bool) {
         let pages = viewStore.pages
         let offset = viewStore.currentOffset
         let text = viewStore.displayText
 
-        guard !pages.isEmpty, !text.isEmpty else { return text }
+        // 兜底（还没分页 / 定位不到）时整章当一页渲染、从 0 起排 ⇒ 一定是段落开头。
+        guard !pages.isEmpty, !text.isEmpty else { return (text, true) }
         guard let page = pages.first(where: { offset >= $0.location && offset < $0.location + $0.length }) else {
-            return text
+            return (text, true)
         }
         let chars = Array(text)
         let start = min(page.location, chars.count)
         let end = min(page.location + page.length, chars.count)
-        guard start < end else { return "" }
-        return String(chars[start ..< end])
+        guard start < end else { return ("", true) }
+        return (String(chars[start ..< end]), ParagraphBoundary.isParagraphStart(chars, at: start))
     }
 }

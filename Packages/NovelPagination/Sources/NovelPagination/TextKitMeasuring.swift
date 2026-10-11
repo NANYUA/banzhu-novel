@@ -35,17 +35,31 @@ public struct TextKitMeasuring: TextMeasuring {
         // 构建带样式的文字
         let font = ReadingFontFactory.makeFont(configuration: configuration)
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = configuration.lineSpacing
-        paragraphStyle.paragraphSpacing = configuration.paragraphSpacing
-        paragraphStyle.firstLineHeadIndent = configuration.firstLineHeadIndent
-
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .paragraphStyle: paragraphStyle,
+            .paragraphStyle: makeParagraphStyle(
+                firstLineHeadIndent: configuration.firstLineHeadIndent,
+                configuration: configuration
+            ),
             .kern: configuration.characterSpacing,
         ]
-        let attributed = NSAttributedString(string: tail, attributes: attributes)
+        let attributed = NSMutableAttributedString(string: tail, attributes: attributes)
+
+        // 页首若不是段落开头（本页从**段落中间**开始），本页第一行其实是续行，不该有首行缩进。
+        // ⚠️ 与渲染侧 `App/Sources/ReaderPageTextView.swift` 是**同一条判据**（都调
+        // `ParagraphBoundary`）：改一处必须改另一处，否则度量盒与渲染盒错位
+        // —— 每页多塞 / 少塞正文，正文被裁（B0-2 几何契约）。
+        // ⚠️ 只换掉切片**第一个段落**那一份样式；该页后续段落照旧带缩进。
+        if !ParagraphBoundary.isParagraphStart(chars, at: from) {
+            attributed.addAttribute(
+                .paragraphStyle,
+                value: makeParagraphStyle(firstLineHeadIndent: 0, configuration: configuration),
+                range: NSRange(
+                    location: 0,
+                    length: ParagraphBoundary.firstParagraphUTF16Length(in: tail)
+                )
+            )
+        }
 
         // 排版三件套
         let storage = NSTextStorage(attributedString: attributed)
@@ -79,5 +93,22 @@ public struct TextKitMeasuring: TextMeasuring {
         // —— 不换算就会把每页多塞进若干字符。换算逻辑在 NovelCore 的 `TextCursor` 里，
         // 那边是纯 Swift，能被 CI 单测覆盖（本文件依赖 UIKit，CI 只编译不测试）。
         return TextCursor.characterCount(ofUTF16Length: charRange.length, in: tail)
+    }
+
+    /// 段落样式：`firstLineHeadIndent` 单独作参数，**其余字段与渲染侧逐值一致**
+    /// （`App/Sources/ReaderPageTextView.swift` 的 `makeParagraphStyle`）——
+    /// 两处必须同时改，否则度量盒与渲染盒错位。
+    ///
+    /// `firstLineHeadIndent` 传 `0` 就是「本行不加首行缩进」：续行不是新段落，缩进宽度本身
+    /// 仍只有 `PaginationConfiguration.firstLineHeadIndent` 一个来源，这里不引入第二个宽度。
+    private func makeParagraphStyle(
+        firstLineHeadIndent: CGFloat,
+        configuration: PaginationConfiguration
+    ) -> NSMutableParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = configuration.lineSpacing
+        style.paragraphSpacing = configuration.paragraphSpacing
+        style.firstLineHeadIndent = firstLineHeadIndent
+        return style
     }
 }
