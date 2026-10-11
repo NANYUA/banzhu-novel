@@ -188,6 +188,10 @@ public struct ReaderFeature: Reducer {
                 }
 
             case let .loadChapterWithName(path, name):
+                // 换章前先取下「刚离开那一章」：换完章它就是新章的一侧邻居，正文与整章分页
+                // 都在内存里，直接搬过去 ⇒ 往回滑立刻有内容（跳章条「相邻章未就绪」的兜底
+                // 也走这条）。⚠️ 必须在改 `chapterPath` 之前取。
+                let leaving = LeavingChapter(state)
                 state.chapterPath = path
                 state.chapterName = name
                 state.isLoading = true
@@ -197,6 +201,8 @@ public struct ReaderFeature: Reducer {
                 state.currentOffset = 0
                 invalidateNextChapter(&state)
                 invalidatePreviousChapter(&state)
+                // 旧章只可能落在新章的一侧；另一侧保持作废（见 `installLeavingChapter`）。
+                installLeavingChapter(leaving, into: &state)
                 let loader = readerLoader
                 return .run { send in
                     do {
@@ -429,14 +435,19 @@ public extension ReaderFeature.State {
     /// 规则抽成静态函数，因为**下一章**（`nextDisplayText`）必须与它逐字同源：
     /// 换章时预加载的 `nextPages` 直接当新章的分页用，规则一分叉就与渲染错位。
     static func displayText(chapterName: String, text: String) -> String {
-        guard !chapterName.isEmpty else { return text }
+        // 正文原文每段开头常带空白（全角空格 / 空格），行首空白一律删掉 ——
+        // 缩进宽度只由「首行缩进」设置决定，见 `ParagraphIndentStripper`。
+        // 放在最前面：**任何分支**（含无章名时原样返回）都必须归一化，
+        // 否则「没给章名」这条路上行首空白会重新漏回屏幕。
+        let body = ParagraphIndentStripper.strippingLineIndents(in: text)
+        guard !chapterName.isEmpty else { return body }
         let normalizedTitle = chapterName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedTitle.isEmpty else { return text }
-        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty else { return body }
+        let normalizedText = body.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalizedText.hasPrefix(normalizedTitle) {
-            return text
+            return body
         }
-        return normalizedTitle + "\n\n" + text
+        return normalizedTitle + "\n\n" + body
     }
 
     var displayText: String {

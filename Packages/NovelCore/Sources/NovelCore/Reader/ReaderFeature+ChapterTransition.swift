@@ -30,10 +30,12 @@ import Foundation
 //   必须是第 1 页 —— 与完整加载 `loadChapterWithName` 落同一页，否则「预加载有没有就绪」
 //   会让同一个按钮跳到不同的页。
 //
-// ## 为什么每个迁移都要管「另一侧」
+// ## 换章时两侧怎么处理（先都作废，再把「刚离开那一章」搬回它该在的那一侧）
 // 换章后 `previousChapter` 与 `nextChapter` **都**换了对象：只清一侧、把另一侧留在
-// 原处，全景图那一格就会拿**别的章**的正文去切页（错配）。所以两个迁移都是
-// 「本方向：清空 + 链式重新预加载；另一方向：同样清空 + 链式重新预加载」。
+// 原处，全景图那一格就会拿**别的章**的正文去切页（错配）。所以两个迁移都先
+// **两侧作废**，再用 `installLeavingChapter` 把「刚离开那一章」放回它在新章里的那一侧
+// （它的正文与整章分页此刻就在内存里，直接搬 ⇒ 不必等预加载）；
+// 远侧保持作废，靠链式预加载重新取 —— 两侧都仍然会重新预加载一遍。
 //
 // ## 为什么两个预加载串行发（`concatenate` 而不是 `merge`）
 // `.merge` 里两条 effect 是**并发**的，action 到达顺序没有保证；而 `TestStore` 是按
@@ -65,6 +67,59 @@ func invalidateNextChapter(_ state: inout ReaderFeature.State) {
 func invalidatePreviousChapter(_ state: inout ReaderFeature.State) {
     state.previousText = ""
     state.previousPages = []
+}
+
+// MARK: - 刚离开的那一章（换章时直接搬过去）
+
+/// 换章**之前**从 state 里取下的「刚离开那一章」：路径 + 正文 + 整章分页。
+///
+/// ## 为什么三件套必须一起取
+/// `text` 与 `pages` 是**同源**的一对（`pages` 就是按 `displayText(chapterName:text:)`
+/// 与当时的 config 分出来的）；分开取、或中途换了 config，搬过去的分页就与正文错位。
+///
+/// ## 为什么必须先取成值
+/// `nextChapter` / `previousChapter` 是按 `chapterPath` **现算**的派生属性 ——
+/// 一旦改了 `state.chapterPath`，旧章是哪一章就再也问不出来了。
+struct LeavingChapter {
+    let path: String
+    let text: String
+    let pages: [PageRange]
+
+    init(_ state: ReaderFeature.State) {
+        path = state.chapterPath
+        text = state.text
+        pages = state.pages
+    }
+}
+
+/// 换章后把「刚离开那一章」放回它在新章里的那一侧；**另一侧保持作废**。
+///
+/// ## 为什么可以直接搬（owner 真机反馈的那一条）
+/// 「切换章节的时候刚刚阅读的章节正文会消失」—— 旧章的正文与**整章分页**此刻本来就在
+/// 内存里（`state.text` / `state.pages`），而且分页与正文同源 ⇒ 原样搬到 `previousPages` /
+/// `nextPages` 就是那一章的合法分页：不必重新读盘 / 联网，也不必重新分页。
+/// 少了这一步，换章那一瞬间两侧都是空的，而刚离开的那一章正好是其中一侧 ⇒
+/// 马上往回滑（或往前滑回去）看到的是空白，要等预加载回来才有内容。
+///
+/// ## 为什么只搬一侧、另一侧必须作废
+/// 换章后 `previousChapter` 与 `nextChapter` **都**换了对象，而刚离开的那一章只可能落在
+/// 其中**一侧**（往前换 ⇒ 它是新的上一章；往回换 ⇒ 它是新的下一章）；另一侧现在指向的是
+/// **另一个章**，留着旧数据就是错正文 —— 这正是 `invalidateNextChapter` /
+/// `invalidatePreviousChapter` 存在的理由。
+///
+/// ## 方向怎么判
+/// 不比对章号，而是问**换章后**的派生属性：`previousChapter` / `nextChapter` 都按新的
+/// `chapterPath` 现算，谁的路径等于刚离开那一章，旧章就在谁那一侧。判据因此只有一处来源
+/// （`chapters` + `chapterPath`），不会与派生属性分叉；两边都不等于（例如从目录跳到
+/// 不相邻的章）⇒ 什么都不搬，两侧保持作废。
+func installLeavingChapter(_ leaving: LeavingChapter, into state: inout ReaderFeature.State) {
+    if state.previousChapter?.path == leaving.path {
+        state.previousText = leaving.text
+        state.previousPages = leaving.pages
+    } else if state.nextChapter?.path == leaving.path {
+        state.nextText = leaving.text
+        state.nextPages = leaving.pages
+    }
 }
 
 // MARK: - 迁移（换章）
@@ -109,6 +164,9 @@ private func migrateToChapter(
     let pages = target.pages
     let offset = target.offset
     let path = chapter.path
+    // ⚠️ 必须在改 `chapterPath` **之前**取下「刚离开那一章」：`nextChapter` /
+    // `previousChapter` 是按 `chapterPath` 现算的，改完就问不出旧章是哪一章了。
+    let leaving = LeavingChapter(state)
     // 口径与 `contentLoaded` 完全一致（同一个依赖、同样的参数含义），
     // 换章后的缓存行为才与「正常开章」等价。
     let precacheCount = state.precacheCount
@@ -123,6 +181,10 @@ private func migrateToChapter(
     // 绝不能被当成新章的邻居。**两侧都要清** —— 换章后两侧的对象都换了。
     invalidateNextChapter(&state)
     invalidatePreviousChapter(&state)
+    // 再把「刚离开那一章」放回它在新章里的那一侧（另一侧保持刚作废的状态）：
+    // 它的正文与整章分页此刻就在内存里，直接搬 ⇒ 换章后马上往回滑（或往前滑回去）
+    // 立刻有内容，不必等预加载回来（owner 真机反馈：刚读过的那一章在滑动方向上是空白）。
+    installLeavingChapter(leaving, into: &state)
     return .merge(
         // 落盘用 `progressOffset`（已扣掉章名前缀，与 `ReadingProgressStore` 同口径）：
         // 章首时它恒为 0，与旧 `advanceToNextChapter` 里写死的 0 **逐值等价**。

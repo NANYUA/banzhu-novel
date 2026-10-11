@@ -112,6 +112,10 @@ final class ReaderChapterAdvanceTests: XCTestCase {
 
     /// 最后一页 + 下一章已就绪 ⇒ `advanceChapter` 切到下一章：
     /// 路径 / 章名 / 正文 / 分页全换成下一章的，`currentOffset` 归零（契约③：位置存字符偏移）。
+    ///
+    /// 两侧的口径（owner 真机反馈「换章后刚读过的那一章在滑动方向上是空白」）：
+    /// **刚离开的第 1 章直接落进新的上一章槽位**（正文与整章分页都在内存里，不必等预加载），
+    /// 而**远侧（新的下一章）仍作废** —— 换章后它指向的是别的章，旧值留着就是错正文。
     func test章尾换章切到下一章并归零() async {
         let store = makeStore(
             chapters: [Self.first, Self.second],
@@ -136,6 +140,10 @@ final class ReaderChapterAdvanceTests: XCTestCase {
             // 先清空再重算：旧值绝不能被当成新章的「下一章」。
             $0.nextText = ""
             $0.nextPages = []
+            // 刚离开的第 1 章就是新的上一章 ⇒ 它的正文与整章分页（内存里现成的）直接搬过来，
+            // 不必等预加载。远侧（下一章）仍按上一行作废 —— 它现在指向的是别的章。
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         // 反向链式：换到第 2 章那一刻，reducer 也把它的上一章（第 1 章）接上了。
         await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
@@ -307,6 +315,10 @@ extension ReaderChapterAdvanceTests {
             $0.currentOffset = 0
             $0.nextText = ""
             $0.nextPages = []
+            // 刚离开的第 1 章直接落进新的上一章槽位（正文与整章分页同源，不必重新加载）；
+            // 远侧（下一章）仍作废，等下面那一步链式预加载取回来。
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         // 链式：换章那一刻就重新声明了下一章（第 3 章）并重新预加载。
         await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
@@ -344,8 +356,9 @@ extension ReaderChapterAdvanceTests {
         )
     }
 
-    /// 再推进一章到第 3 章（末章）：没有下一章可接，但上一章（第 2 章）要重新接上、
-    /// 旧的（第 1 章）作废；到末章章尾再换 ⇒ 换章 action 不动。
+    /// 再推进一章到第 3 章（末章）：没有下一章可接，但上一章（第 2 章）在换章那一刻就
+    /// 直接搬了过来、随后又被链式预加载确认一遍；更早的（第 1 章）作废；
+    /// 到末章章尾再换 ⇒ 换章 action 不动。
     func test再换一章后重新预加载新的上一章() async {
         let store = makeStore(
             chapters: [Self.first, Self.second, Self.third],
@@ -368,9 +381,10 @@ extension ReaderChapterAdvanceTests {
             $0.currentOffset = 0
             $0.nextText = ""
             $0.nextPages = []
-            // 上一章也换了对象（变成刚离开的第 2 章）：旧的（第 1 章）同样作废。
-            $0.previousText = ""
-            $0.previousPages = []
+            // 上一章也换了对象：**旧的（第 1 章）作废**，而刚离开的第 2 章直接落进这一侧
+            // —— 它的正文与整章分页就在内存里，不必等预加载。
+            $0.previousText = Self.secondText
+            $0.previousPages = secondPages
         }
         // 第 3 章是最后一章（没有下一章），但上一章（第 2 章）要重新接上。
         await store.receive(.previousChapterLoaded(Self.second.path, Self.secondText)) {
@@ -427,6 +441,10 @@ extension ReaderChapterAdvanceTests {
             $0.currentOffset = 0
             $0.nextText = ""
             $0.nextPages = []
+            // 刚离开的第 1 章同样直接落进新的上一章槽位：**这不产生缓存调用**，
+            // 下面那条「换章只补一次缓存」的计数不受影响。
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         // 反向链式：换章后也把新章的上一章接上（这条不是缓存调用，计数不受影响）。
         await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {

@@ -70,11 +70,20 @@ final class ReaderChapterRetreatTests: XCTestCase {
     ///
     /// 闭包里显式清空相邻两章的预加载结果：换章（含从目录手动跳章）会作废它们，
     /// 不清空就会在下一次 `send` 上以「状态不匹配」的形式红，而不是让断言错得莫名其妙。
+    ///
+    /// ⚠️ **例外是「刚离开的那一章」**：换章后它就是新章的一侧邻居，reducer 会把它的正文
+    /// 与整章分页直接搬过去（`installLeavingChapter`）⇒ 这里按同一条口径把那一侧补上。
+    /// 哪一侧、以及「远侧仍作废」，由 `ReaderChapterPanSlotTests` 用写死的期望值钉住；
+    /// 本夹具只负责让前置状态与 reducer 一致。
     private func load(
         _ store: TestStore<ReaderFeature.State, ReaderFeature.Action>,
         chapter: ChapterItem,
         text: String
     ) async {
+        // ⚠️ 必须在 send 之前取：`send` 一过，`chapterPath` 就指向新章了。
+        let leavingPath = store.state.chapterPath
+        let leavingText = store.state.text
+        let leavingPages = store.state.pages
         await store.send(.loadChapterWithName(chapter.path, chapter.name)) {
             $0.chapterPath = chapter.path
             $0.chapterName = chapter.name
@@ -86,6 +95,13 @@ final class ReaderChapterRetreatTests: XCTestCase {
             $0.previousPages = []
             $0.nextText = ""
             $0.nextPages = []
+            if $0.previousChapter?.path == leavingPath {
+                $0.previousText = leavingText
+                $0.previousPages = leavingPages
+            } else if $0.nextChapter?.path == leavingPath {
+                $0.nextText = leavingText
+                $0.nextPages = leavingPages
+            }
         }
         await store.receive(.contentLoaded(text)) {
             $0.text = text
@@ -135,6 +151,10 @@ final class ReaderChapterRetreatTests: XCTestCase {
             // 先清空再重算：旧值绝不能被当成新章的「上一章」。
             $0.previousText = ""
             $0.previousPages = []
+            // 刚离开的第 2 章就是新的下一章 ⇒ 它的正文与整章分页直接搬过来（内存里现成的），
+            // 不必等预加载。远侧（上一章）仍按上面两行作废 —— 它现在指向的是别的章。
+            $0.nextText = Self.secondText
+            $0.nextPages = expectedPages(chapter: Self.second, text: Self.secondText)
         }
         // 反向链式：退到第 1 章后，它的下一章（第 2 章）重新接上。
         await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
@@ -253,8 +273,11 @@ extension ReaderChapterRetreatTests {
             $0.text = Self.secondText
             $0.pages = secondPages
             $0.currentOffset = secondPages.last?.location ?? 0
+            // 远侧（新的上一章）作废；刚离开的第 3 章落进新的下一章槽位。
             $0.previousText = ""
             $0.previousPages = []
+            $0.nextText = Self.thirdText
+            $0.nextPages = expectedPages(chapter: Self.third, text: Self.thirdText)
         }
         // 链式（反向）：它的下一章（第 3 章）先重新接上。
         await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
@@ -274,8 +297,9 @@ extension ReaderChapterRetreatTests {
 
     // MARK: - 4. 手动跳章：旧的上一章结果必须作废
 
-    /// 从第 2 章跳到第 3 章：第 1 章那份 `previousPages` 必须当场作废（`load` 的
-    /// 断言闭包锁住这一步），再由第 3 章的 `contentLoaded` 把新的上一章（第 2 章）接上。
+    /// 从第 2 章跳到第 3 章：第 1 章那份 `previousPages`（此刻指向**远侧**，因为第 3 章的
+    /// 上一章换成了第 2 章）必须当场作废（`load` 的断言闭包锁住这一步），而**刚离开的
+    /// 第 2 章**紧接着就被搬进同一侧 —— 它的分页在内存里，不必等预加载。
     func test手动跳章时旧的上一章结果作废() async {
         let store = makeStore(
             chapters: [Self.first, Self.second, Self.third],
@@ -327,8 +351,12 @@ extension ReaderChapterRetreatTests {
             $0.text = Self.firstText
             $0.pages = firstPages
             $0.currentOffset = firstPages.last?.location ?? 0
+            // 远侧（新的上一章）作废；刚离开的第 2 章直接落进新的下一章槽位
+            // —— 这不产生缓存调用，下面「退章只补一次缓存」的计数不受影响。
             $0.previousText = ""
             $0.previousPages = []
+            $0.nextText = Self.secondText
+            $0.nextPages = expectedPages(chapter: Self.second, text: Self.secondText)
         }
         await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
             $0.nextText = Self.secondText

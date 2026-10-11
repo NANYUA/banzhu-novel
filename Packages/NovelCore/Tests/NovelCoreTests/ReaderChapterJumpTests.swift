@@ -123,6 +123,10 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.currentOffset = 0
             $0.nextText = ""
             $0.nextPages = []
+            // 刚离开的第 1 章就是新的上一章 ⇒ 正文与整章分页直接搬过来（内存里现成的），
+            // 不必等下面那条链式预加载。远侧（下一章）仍作废。
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         let firstPages = expectedPages(chapter: Self.first, text: Self.firstText)
         await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
@@ -153,6 +157,10 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.currentOffset = 0
             $0.nextText = ""
             $0.nextPages = []
+            // 刚离开的第 1 章直接落进新的上一章槽位（分页现成，不必重新加载）；
+            // 远侧（第 2 章之后没有下一章）保持作废。
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         // 链式：换到第 2 章（末章）后，新的上一章（第 1 章）接上；没有下一章可接。
         await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
@@ -198,6 +206,10 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.currentOffset = 0
             $0.nextText = ""
             $0.nextPages = []
+            // 刚离开的第 1 章直接落进新的上一章槽位（分页现成）；远侧（第 3 章）仍作废，
+            // 由下面那条链式预加载取回来。
+            $0.previousText = Self.firstText
+            $0.previousPages = firstPages
         }
         await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
             $0.nextText = Self.thirdText
@@ -243,9 +255,10 @@ final class ReaderChapterJumpTests: XCTestCase {
         // 状态变化发生在 store 处理它那一刻，**不在**这一次 `send` 里。
         // 「不带闭包」本身就是断言：未就绪时按钮这一步**不改任何状态**。
         await store.send(.jumpToAdjacentChapter(Self.second))
-        // 回退路径的后续与「从目录手动跳章」逐字相同（分页桩让这一章同样分不出页）：
-        // 这份期望态与 `ReaderChapterAdvanceTests.test手动跳章时旧的下一章结果作废` 里
-        // 直接发 `.loadChapterWithName` 的那份**逐值相同** —— 回退没有改变任何行为。
+        // 回退路径的后续与「从目录手动跳章」同一条 reducer 分支（分页桩让这一章同样分不出页）。
+        // ⚠️ 与 `ReaderChapterAdvanceTests.test手动跳章时旧的下一章结果作废` 里那份期望态
+        // **不再逐值相同**：那边是第 1 章 → 第 3 章（不相邻 ⇒ 两侧都作废），这里是
+        // 第 1 章 → 第 2 章（相邻 ⇒ 刚离开的第 1 章直接落进新的上一章槽位）。
         await store.receive(.loadChapterWithName(Self.second.path, Self.second.name)) {
             $0.chapterPath = Self.second.path
             $0.chapterName = Self.second.name
@@ -253,6 +266,10 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.text = ""
             $0.pages = []
             $0.currentOffset = 0
+            // 兜底路径同样把「刚离开那一章」搬进它该在的那一侧（正文与整章分页在内存里），
+            // 所以按钮这条兜底也不会让刚读过的那一章在相邻槽位里空掉。
+            $0.previousText = Self.firstText
+            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         await store.receive(.contentLoaded(Self.secondText)) {
             $0.text = Self.secondText
@@ -294,9 +311,12 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.text = Self.firstText
             $0.pages = firstPages
             $0.currentOffset = 0
-            // 两侧都换了对象 ⇒ 都作废（上一章此刻非空，这条同时锁住「不留下旧值」）。
+            // 远侧（新的上一章）作废 —— 第 1 章之前没有上一章，所以作废后是空的；
+            // 刚离开的第 2 章落进新的下一章槽位（正文与整章分页在内存里）。
             $0.previousText = ""
             $0.previousPages = []
+            $0.nextText = Self.secondText
+            $0.nextPages = secondPages
         }
         // 链式：回到第 1 章后，下一章（第 2 章）重新接上；第 1 章没有上一章。
         await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
