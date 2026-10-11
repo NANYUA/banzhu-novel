@@ -18,7 +18,11 @@ import XCTest
 /// 🔴 脱敏：本文件只出现 `example.com` 与 `/49/49034/` 这类既有占位。
 @MainActor
 final class BookDetailPreviewFailureTests: XCTestCase {
-    private static let bookPath = "/49/49034/"
+    // ⚠️ `nonisolated`（两个成员）：本类是 `@MainActor` 的，而 `remoteDetail` 会被
+    // `XCTAssertEqual` 的非隔离 autoclosure 引用（跨隔离读 `static let` 在 Swift 6 下是
+    // async 操作）；`bookPath` 是 `remoteDetail` 初始化式里的依赖，必须一起去掉隔离，
+    // 否则那条初始化式自己就会报同一个警告。都是不可变 `let` ⇒ 安全。
+    private nonisolated static let bookPath = "/49/49034/"
     private static let fallback = BookDetail(bookPath: bookPath, title: "搜索结果")
 
     /// 站点**没配置**时的完整失败文案 = 「没配站点」那句 + 真实原因。
@@ -27,7 +31,7 @@ final class BookDetailPreviewFailureTests: XCTestCase {
     }
 
     /// 兜底回来的详情。字段取全，便于逐项核对 View 依赖。
-    private static let remoteDetail = BookDetail(
+    private nonisolated static let remoteDetail = BookDetail(
         bookPath: bookPath,
         title: "远端书名",
         author: "远端作者",

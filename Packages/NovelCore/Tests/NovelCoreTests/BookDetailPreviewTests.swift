@@ -15,12 +15,16 @@ import XCTest
 /// **且不能**因此把这本书算成「已在书架」。
 @MainActor
 final class BookDetailPreviewTests: XCTestCase {
-    private static let bookPath = "/49/49034/"
-    private static let otherBookPath = "/49/49035/"
+    // ⚠️ `nonisolated`（三个成员）：本类是 `@MainActor` 的，而它们会被非隔离上下文引用 ——
+    // `XCTAssertEqual` 的非隔离 autoclosure，以及 `makeChapter` 那个**非隔离默认形参**
+    // （`bookPath: String = BookDetailPreviewTests.bookPath`）。跨隔离读 `static let` 在
+    // Swift 6 下是 async 操作。都是不可变 `let` ⇒ 去掉隔离安全。
+    private nonisolated static let bookPath = "/49/49034/"
+    private nonisolated static let otherBookPath = "/49/49035/"
     private static let fallback = BookDetail(bookPath: bookPath, title: "搜索结果")
 
     /// 远端兜底回来的详情：搜索列表给不出简介（列表页解析没有这个字段）。
-    private static let remoteDetail = BookDetail(
+    private nonisolated static let remoteDetail = BookDetail(
         bookPath: bookPath,
         title: "远端书名",
         author: "远端作者",

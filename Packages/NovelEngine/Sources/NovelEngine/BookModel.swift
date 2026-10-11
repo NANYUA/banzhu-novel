@@ -13,7 +13,11 @@ import Foundation
 // 拆成 SPM 包后跨包访问必须是 `public`，否则外面的包看不到这些类型。
 
 /// 书籍（搜索结果 / 书架项）
-public struct Book: Identifiable, Codable, Hashable {
+///
+/// ⚠️ `Sendable` 显式声明：`public` 类型不隐式推断它，而 `Book` 会被 `@Sendable` 闭包跨隔离
+/// 使用（`SearchService.search` 的返回值就是 `[Book]`），测试侧 `nonisolated` 也要求它 Sendable；
+/// 全部存储属性都是 Sendable 值类型 ⇒ 语义正确，不是 `@unchecked` 掩盖。
+public struct Book: Identifiable, Codable, Hashable, Sendable {
     public var id: String { path }          // 相对路径 /区/书号/ 作唯一键
     public var path: String                 // 如 /49/49034/
     public var title: String

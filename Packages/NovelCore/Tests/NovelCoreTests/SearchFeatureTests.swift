@@ -5,8 +5,11 @@ import XCTest
 
 @MainActor
 final class SearchFeatureTests: XCTestCase {
-    private static let book = Book(path: "/1/", title: "示例书")
-    private static let row = ShelfRow(
+    // ⚠️ `nonisolated`（两个成员）：本类是 `@MainActor` 的，而它们会被 `@Sendable` 的
+    // `searchService.search` 闭包引用 ⇒ 跨隔离读 `static let` 在 Swift 6 下是 async 操作。
+    // 都是不可变 `let` ⇒ 去掉隔离安全（理由与 `ReaderFeatureTests.sampleText` 同一条）。
+    private nonisolated static let book = Book(path: "/1/", title: "示例书")
+    private nonisolated static let row = ShelfRow(
         bookPath: "/1/",
         title: "示例书",
         author: "某某某",

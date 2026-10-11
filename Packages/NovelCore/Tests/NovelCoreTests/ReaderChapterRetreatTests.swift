@@ -132,7 +132,6 @@ final class ReaderChapterRetreatTests: XCTestCase {
             $0.text = Self.firstText
             $0.pages = firstPages
             $0.currentOffset = firstPages.last?.location ?? 0
-            $0.pageTurnDirection = .backward
             // 先清空再重算：旧值绝不能被当成新章的「上一章」。
             $0.previousText = ""
             $0.previousPages = []
@@ -254,7 +253,6 @@ extension ReaderChapterRetreatTests {
             $0.text = Self.secondText
             $0.pages = secondPages
             $0.currentOffset = secondPages.last?.location ?? 0
-            $0.pageTurnDirection = .backward
             $0.previousText = ""
             $0.previousPages = []
         }
@@ -329,7 +327,6 @@ extension ReaderChapterRetreatTests {
             $0.text = Self.firstText
             $0.pages = firstPages
             $0.currentOffset = firstPages.last?.location ?? 0
-            $0.pageTurnDirection = .backward
             $0.previousText = ""
             $0.previousPages = []
         }

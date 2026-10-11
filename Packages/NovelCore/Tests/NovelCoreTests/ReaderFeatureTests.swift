@@ -12,7 +12,13 @@ import XCTest
 @MainActor
 final class ReaderFeatureTests: XCTestCase {
     /// 样本正文：10 个中文，宽预算 10 → 每页 5 字 → 2 页
-    private static let sampleText = "一二三四五六七八九十"
+    ///
+    /// ⚠️ `nonisolated`：本类是 `@MainActor` 的，成员默认也带 MainActor 隔离；而它会被
+    /// `makeStore` 的 **`@Sendable` loader 闭包**（`{ _ in Self.sampleText }`）引用 ——
+    /// 那是非隔离上下文，跨隔离读一个 `static let` 在 Swift 6 下是 async 操作
+    /// ⇒ 编译器报「expression is 'async' but is not marked with 'await'」。
+    /// `String` 是 Sendable、且这是不可变 `let` ⇒ 去掉隔离是安全的，读法不变。
+    private nonisolated static let sampleText = "一二三四五六七八九十"
 
     private func makeStore(
         text: String,
@@ -90,7 +96,6 @@ final class ReaderFeatureTests: XCTestCase {
 
         await store.send(.prevPage) {
             $0.currentOffset = 0
-            $0.pageTurnDirection = .backward
         }
         await store.finish()
     }

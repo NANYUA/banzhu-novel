@@ -3,11 +3,6 @@ import CoreGraphics
 import Dependencies
 import Foundation
 
-public enum PageTurnDirection: String, Equatable, Sendable {
-    case forward
-    case backward
-}
-
 /// 阅读页 —— 读一章正文，支持翻页。
 ///
 /// ## 🔴 数据契约：state 存 characterOffset，不存页码
@@ -34,7 +29,6 @@ public struct ReaderFeature: Reducer {
                 containerSize: CGSize(width: 320, height: 480)
             ),
             currentOffset: Int = 0,
-            pageTurnDirection: PageTurnDirection = .forward,
             isLoading: Bool = false,
             errorMessage: String? = nil,
             precacheCount: Int = ReaderFeature.defaultPrecacheCount,
@@ -46,7 +40,6 @@ public struct ReaderFeature: Reducer {
             self.text = text
             self.config = config
             self.currentOffset = currentOffset
-            self.pageTurnDirection = pageTurnDirection
             self.isLoading = isLoading
             self.errorMessage = errorMessage
             self.precacheCount = precacheCount
@@ -75,9 +68,6 @@ public struct ReaderFeature: Reducer {
         /// **只消费一次**：`contentLoaded` 恢复位置后立刻归零（见
         /// `consumeInitialOffset`）⇒ 之后换章 / 从目录跳章仍从章首开始，既有语义不变。
         public var initialOffset: Int = 0
-
-        /// 最近一次翻页方向，用于让动画与手势方向一致。
-        public var pageTurnDirection: PageTurnDirection
 
         /// 首次加载中
         public var isLoading = false
@@ -134,10 +124,6 @@ public struct ReaderFeature: Reducer {
         /// `ReadingProgressStore` 落盘，**一次拖动就是上百次 SwiftData 写**
         /// （每次 `markRead` 都要读改写一条 `ReadingProgress`）。故把两件事拆开 ——
         /// 本 action **只迁移状态、不落盘**；落盘交给抬手时的 `.pageJumpCommitted` 一次完成。
-        ///
-        /// ## 方向
-        /// 刻意**不设** `pageTurnDirection`：拖动不是「上一页 / 下一页」，一次拖动里方向会来回变；
-        /// 且全仓没有任何视图读它（`pageAnimation()` 也不接受方向参数）⇒ 设了是死写。
         case goToPage(Int)
         /// 拖动结束（抬手）：把当前位置落盘一次（配合 `.goToPage` 使用）。
         ///
@@ -258,7 +244,6 @@ public struct ReaderFeature: Reducer {
                 guard pageIndex >= 0, pageIndex + 1 < state.pages.count else {
                     return .none // 已是最后一页
                 }
-                state.pageTurnDirection = .forward
                 state.currentOffset = state.pages[pageIndex + 1].location
                 return saveProgress(
                     chapterPath: state.chapterPath,
@@ -271,7 +256,6 @@ public struct ReaderFeature: Reducer {
                 guard pageIndex > 0 else {
                     return .none // 已是第一页
                 }
-                state.pageTurnDirection = .backward
                 state.currentOffset = state.pages[pageIndex - 1].location
                 return saveProgress(
                     chapterPath: state.chapterPath,

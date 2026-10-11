@@ -18,10 +18,9 @@ import Foundation
 // 两个方向各自的那一步在 `preloadAdjacentChapters` 里**串行**接起来（先下一章、
 // 后上一章）—— 它是唯一对外的一步，两个 `preload*Chapter` 因此可以是 `private`。
 //
-// 两个迁移**只在两处不同**，都是需求本身要的：
-// 1. 退章后 `currentOffset` 落到**上一章最后一页的页首**（`previousPages.last?.location`），
-//    不是 0 —— 退章要接在上一章章尾之后，进章才是从章首开始；
-// 2. 退章后 `pageTurnDirection = .backward`（进章是 `.forward`）。
+// 两个迁移**只在一处不同**，是需求本身要的：
+// 退章后 `currentOffset` 落到**上一章最后一页的页首**（`previousPages.last?.location`），
+// 不是 0 —— 退章要接在上一章章尾之后，进章才是从章首开始。
 //
 // ## 为什么每个迁移都要管「另一侧」
 // 换章后 `previousChapter` 与 `nextChapter` **都**换了对象：只清一侧、把另一侧留在
@@ -88,7 +87,6 @@ func advanceToNextChapter(
     state.pages = state.nextPages
     // 🔴 数据契约：位置存字符偏移 —— 新章从头开始，不是「把页码归零」。
     state.currentOffset = 0
-    state.pageTurnDirection = .forward
     // 先清空再重算（链式）：新的下一章预加载回来之前，旧的 nextPages
     // 绝不能被当成新章的下一章。
     invalidateNextChapter(&state)
@@ -143,7 +141,6 @@ func retreatToPreviousChapter(
     // 🔴 数据契约：位置存字符偏移 —— 落到**上一章最后一页的页首**，不是「把页码归零」。
     // 这是与 `advanceToNextChapter` 唯一的实质差别：退章要接在上一章章尾之后。
     state.currentOffset = lastLocation
-    state.pageTurnDirection = .backward
     // 先清空再重算（链式）：新的上一章预加载回来之前，旧的 previousPages
     // 绝不能被当成新章的上一章。
     invalidatePreviousChapter(&state)

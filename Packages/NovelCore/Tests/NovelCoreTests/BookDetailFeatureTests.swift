@@ -10,9 +10,9 @@ import XCTest
 /// 按**每个类型声明**算，全塞在一个 class body 里必然超限（`BookshelfFeatureTests` 同款拆法）。
 @MainActor
 final class BookDetailFeatureTests: XCTestCase {
-    private static let bookPath = "/1/"
+    private nonisolated static let bookPath = "/1/" // ⚠️ nonisolated：见 ReaderFeatureTests.sampleText
     private static let fallback = BookDetail(bookPath: bookPath, title: "搜索结果")
-    private static let row = ShelfRow(
+    private nonisolated static let row = ShelfRow( // ⚠️ 同上（同为被非隔离上下文引用的夹具）
         bookPath: bookPath,
         title: "搜索结果",
         author: "某某某",
