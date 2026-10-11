@@ -69,39 +69,6 @@ extension ReaderView {
         )
     }
 
-    // MARK: - 控制栏显隐的兜底点击
-
-    /// 控制栏显隐的**兜底点击层**（挂在 `ReaderView.body` 的正文 `ZStack` 上）。
-    ///
-    /// ## 为什么需要
-    /// 正文还没排出来时，`readerContent` 走的是占位分支、**不经过 `pageContent`**
-    /// ⇒ 上面那条 `readerGesture` 根本没挂上，整屏点击无处可去。换章 / 开章的网络
-    /// 等待里因此点不出上下栏，也就按不到「返回」退出书本。
-    ///
-    /// ## 只在「加载中且无正文」时生效
-    /// 判据与 `readerContent` 的**加载**分支逐字对应（`isLoading` 且 `text` 为空）。
-    /// ⛔ **加载失败态不由本层兜底**：那个分支页面上有「重试」按钮，而本层是它的祖先
-    /// —— 点按钮时两层可能同发（重试的同时把上下栏也切了）；失败态改由页面自己垫在
-    /// `ContentUnavailableView` **之下**的点击层接管（见 `readerContent` 的失败分支）。
-    /// 正文排出来后 `guard` 挡住：中央点击仍由正文层自己的 `SpatialTapGesture` 负责。
-    ///
-    /// ## 为什么只挂点击、不挂拖拽
-    /// 占位状态下没有任何可翻的页：挂拖拽只会把 `trackSlide` / `slideBaseline` 这些
-    /// 跟手状态在空 `pages` 上写脏。平移翻页的手势口径因此一字未改。
-    ///
-    /// 覆盖**整屏**（含正文盒之外的上 / 下边距，`PageInset()` 默认 78 / 30）：加载中
-    /// 要按的「返回」就在屏幕顶部，而它并不在正文盒里。
-    func chromeToggleTapFallback(
-        _ content: some View,
-        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        onToggle: @escaping () -> Void
-    ) -> some View {
-        content.onTapGesture {
-            guard viewStore.isLoading, viewStore.text.isEmpty else { return }
-            onToggle()
-        }
-    }
-
     // MARK: - 平移翻页（全景图）
 
     /// 全景图：当前页 + 相邻页铺成一条，跟着手指一起平移。
@@ -406,5 +373,43 @@ extension ReaderView {
     /// 屏幕中间三分之一算「中央点击」（呼出 / 收起控制栏），左右两侧留给翻页。
     private func isCenterTap(_ locationX: CGFloat, width: CGFloat) -> Bool {
         locationX >= width / 3 && locationX <= width * 2 / 3
+    }
+}
+
+// MARK: - 控制栏显隐的兜底点击
+
+/// 控制栏显隐的**兜底点击层**（挂在 `ReaderView.body` 的正文 `ZStack` 上）。
+///
+/// ## 为什么需要
+/// 正文还没排出来时，`readerContent` 走的是占位分支、**不经过 `pageContent`**
+/// ⇒ 上面那条 `readerGesture` 根本没挂上，整屏点击无处可去。换章 / 开章的网络
+/// 等待里因此点不出上下栏，也就按不到「返回」退出书本。
+///
+/// ## 只在「加载中且无正文」时生效
+/// 判据与 `readerContent` 的**加载**分支逐字对应（`isLoading` 且 `text` 为空）。
+/// ⛔ **加载失败态不由本层兜底**：那个分支页面上有「重试」按钮，而本层是它的祖先
+/// —— 点按钮时两层可能同发（重试的同时把上下栏也切了）；失败态改由页面自己垫在
+/// `ContentUnavailableView` **之下**的点击层接管（见 `readerContent` 的失败分支）。
+/// 正文排出来后 `guard` 挡住：中央点击仍由正文层自己的 `SpatialTapGesture` 负责。
+///
+/// ## 为什么只挂点击、不挂拖拽
+/// 占位状态下没有任何可翻的页：挂拖拽只会把 `trackSlide` / `slideBaseline` 这些
+/// 跟手状态在空 `pages` 上写脏。平移翻页的手势口径因此一字未改。
+///
+/// 覆盖**整屏**（含正文盒之外的上 / 下边距，`PageInset()` 默认 78 / 30）：加载中
+/// 要按的「返回」就在屏幕顶部，而它并不在正文盒里。
+///
+/// ⚠️ 必须是 `extension View` 而不是 `extension ReaderView`：调用点是链式的
+/// `.chromeToggleTapFallback(...)` 挂在正文 `ZStack` 上，成员查找按**接收者的类型**
+/// （`ZStack`）走 —— 写在 `ReaderView` 上会报 `has no member`（CI 实测）。
+extension View {
+    func chromeToggleTapFallback(
+        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
+        onToggle: @escaping () -> Void
+    ) -> some View {
+        onTapGesture {
+            guard viewStore.isLoading, viewStore.text.isEmpty else { return }
+            onToggle()
+        }
     }
 }
