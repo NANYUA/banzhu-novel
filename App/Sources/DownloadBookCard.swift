@@ -38,30 +38,33 @@ struct DownloadBookCard: View {
     /// 长按**已识别**标志：在长按被识别的那一刻（按下满 0.5s，**抬手之前**）置位，
     /// 由抬手时的 `primaryAction` 消费。
     ///
-    /// ## 生命周期（🔴 这是本卡最容易改坏的一处，三个时点必须都看清）
+    /// ## 三点生命周期（🔴 这是本卡最容易改坏的一处）
     /// 1. **置位**：`longPressGesture` 的 `onChanged(true)` —— 按下满 0.5s 那一刻，
     ///    **严格早于抬手**；
-    /// 2. **清零 ①**：`touchDownGesture` 的 `onChanged` —— **下一次触摸按下那一刻**，
-    ///    严格早于该次触摸的抬手；
-    /// 3. **清零 ②**：`primaryAction` 丢弃本次单点时顺手清（幂等，只是兜底）。
+    /// 2. **消费**：抬手时 `primaryAction` 读到 `true` ⇒ 丢弃这次单点，并顺手清零（幂等）；
+    /// 3. **兜底清零**：`longPressGesture` 的 `onEnded` 里**延后一个主线程回合**再清一次。
     ///
-    /// ## 为什么必须有「按下沿」这个清零点（U13 缺陷的根因）
-    /// 原先只有第 3 个清零点（抬手时由 Button 的 action 消费）—— 而**长按抬手时
-    /// Button 的 action 到底会不会触发并没有保证**（长按手势是 `.simultaneousGesture`
-    /// 挂上去的，手势成功识别后 Button 的 press 手势可能被取消）。
-    /// 一旦它不触发，标志就永远停在 `true`：**之后每一次单击都被静默丢弃**
-    /// （owner 真机反馈「长按能进选择模式、单击完全没反应」，不弹窗也不进阅读页），
-    /// 而长按根本不读这个标志 ⇒ 照旧能用 —— 症状完全吻合。
-    /// 把清零点补到「下一次按下」之后，标志的存活期不再依赖「抬手时谁先跑、谁触发了」。
+    /// ## 为什么这三种时序**全都**正确（关键，别只记结论）
+    /// - 置位在**识别那一刻**（抬手之前 0.5s）⇒ 与「两个回调谁先跑」**无关**；
+    /// - 消费在 Button 的 action ⇒ 同一回合内它读到的必定是 `true` ⇒ 长按被吞掉
+    ///   （不会顺手把书打开 / 把刚切换的勾选又翻回去）；
+    /// - 清零**延后一个主线程回合** ⇒ 一定**晚于**同一回合内的任何 action ⇒
+    ///   既不会「提前清掉、让长按漏进阅读页」，又保证标志**必定**被清掉。
+    ///   ⇒ **标志不可能跨触摸残留 ⇒ 长按之后紧接着的第一次单击必定生效**（owner 真机判据）。
     ///
-    /// ## 为什么不用「最近一次长按时间 + 0.4s 窗口」（旧实现，owner 真机上没挡住）
-    /// `LongPressGesture` 的 `onEnded` 与 `Button` 的 action **都在抬手那一刻执行**，
-    /// 谁先谁后没有任何保证 —— 实测 Button 先跑，时间戳还没写进去就被判成「不是长按」；
-    /// 即便顺序反过来，用户按住超过 0.4s 再抬手时那个窗口本身也已经过期。
+    /// ## ⛔ 为什么这里**不再**挂「按下沿清零」的第二个手势（2026-10-11 真机回归的根因）
+    /// U13 那版为了让标志不残留，在 Button 上**又挂了一条**
+    /// `LongPressGesture(minimumDuration: 0).onChanged { didRecognizeLongPress = false }`。
+    /// 但**零时长长按在按下那一刻就识别**，它会把 Button 自己的按压手势取消掉 ⇒
+    /// **Button 的 action 从此永不触发**（连按下强调层都不出现）⇒ 单击**全部**失效：
+    /// 非选择模式点不进阅读页、选择模式点不动勾选 —— owner 真机反馈的正是**这两条同时出现**。
+    /// 对照证据（决定性）：**书架用的是同一个 `Button` + 0.5s 长按，唯独没有这条零时长手势，
+    /// 在真机上一直是好的**。
+    /// ⇒ 结论：**不要在 Button 上再挂任何「按下即识别」的手势**（残留由第 3 点兜住，不需要它）。
     ///
-    /// ⚠️ 这里**刻意只有一个判据**：曾经的第二个判据 `@GestureState isLongPressing`
-    /// （「长按仍在进行」）已删除 —— 它在抬手那一刻的真假同样没有保证，却**能单独吞掉单击**；
-    /// 只留一个生命周期明确的标志，判据更严也更可推理。
+    /// ⚠️ **与 `BookshelfView.rowContent` 用的是同一套三点生命周期**（置位在「识别那一刻」/
+    /// 消费在 Button 的 action / 清零在 `onEnded` 延后一个主线程回合）——**改一处必须改另一处**，
+    /// 两处都别再退回「时间戳窗口」那种依赖回调顺序的写法（书架上就是这么翻车的）。
     @State private var didRecognizeLongPress = false
 
     var body: some View {
@@ -72,10 +75,9 @@ struct DownloadBookCard: View {
         // 强调层贴书卡自己的 12pt 圆角（`Radius.sm`），避免按下瞬间在圆角外露出方角。
         .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
         // 非选择模式长按进选择模式、选择模式再长按退出：两个模式共用同一条手势。
+        // ⛔ **只挂这一条**：再挂任何「按下即识别」的手势（例如 `LongPressGesture(minimumDuration: 0)`）
+        // 会把 Button 自己的按压手势取消掉、让**单击全部失效** —— 见 `didRecognizeLongPress` 的说明。
         .simultaneousGesture(longPressGesture)
-        // 按下沿：每次**新触摸按下**时把长按标志清掉（U13 缺陷的修法，见 `touchDownGesture`）。
-        // 与上面那条并列识别，互不抢事件（都是 `.simultaneousGesture`）。
-        .simultaneousGesture(touchDownGesture)
         // 装饰性勾选图的语义交给 Button 的 `.isSelected` trait，避免 VoiceOver 读两遍。
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -244,29 +246,13 @@ private extension DownloadBookCard {
             }
             .onEnded { _ in
                 onLongPress()
-            }
-    }
-
-    /// **按下沿**：每一次新触摸的起点，把长按标志归零。
-    ///
-    /// ## 为什么这就是顺序无关的
-    /// 一次触摸内三个时点严格有序：**按下**（本手势的 `onChanged`）→ 长按**识别**（0.5s 后，
-    /// 置位）→ **抬手**（`primaryAction` 消费）。清零点排在置位点之前、置位点排在消费点之前，
-    /// 全部发生在**同一次触摸内部**，不跨回调比较先后 ⇒
-    /// - Button 的 action 在长按抬手时**触发**：读到 `true`，丢弃这次单点（判据 ② 不回归）；
-    /// - Button 的 action **不触发**：标志也不会残留到下一次触摸（按下沿会清），
-    ///   紧接着的第一次单击读到 `false`，照常进阅读页 / 切换勾选（判据 ①）。
-    ///
-    /// ## 为什么用「零时长长按」而不是别的
-    /// 它只做一件事：在**按下那一刻**回调一次 `onChanged(true)`（与上面那条 0.5s 手势
-    /// 「识别那一刻回调」同源）。不是 `DragGesture`（那会与 `List` 的滚动手势抢识别），
-    /// 也不引 `@GestureState`（它在抬手时的真假没有保证，正是本次要除掉的东西）。
-    /// `minimumDuration: 0` ⇒ 短点与长按都会走到这里；`false` 是抬手 / 复位，直接忽略。
-    var touchDownGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0)
-            .onChanged { isRecognized in
-                guard isRecognized else { return }
-                didRecognizeLongPress = false
+                // 兜底清零，且**延后一个主线程回合**：同一回合里 Button 的 action 若也触发，
+                // 读到的仍是 `true`（长按被正确吞掉，不会顺手把书打开 / 把勾选又翻回去）；
+                // 而无论 Button 的 action 有没有触发，标志都必定被清掉
+                // ⇒ **不可能跨触摸残留**（不会出现「长按之后第一次单击被丢弃」）。
+                Task { @MainActor in
+                    didRecognizeLongPress = false
+                }
             }
     }
 
@@ -276,8 +262,9 @@ private extension DownloadBookCard {
     /// 否则「长按进选择模式」会顺手把书打开（owner 真机反馈的缺陷），
     /// 或把刚切换的勾选又翻回去。
     ///
-    /// ⚠️ 判据只有这一个标志，且它**不可能**残留到下一次触摸（清零点见 `touchDownGesture`）
-    /// ⇒ 单击不会被静默丢弃；标志的真假只由「本次触摸有没有被识别成长按」决定。
+    /// ⚠️ 判据只有这一个标志，且它**不可能**残留到下一次触摸（清零见 `longPressGesture` 的
+    /// `onEnded` 延后一回合 + 这里的顺手清）⇒ 单击不会被静默丢弃；
+    /// 标志的真假只由「本次触摸有没有被识别成长按」决定。
     func primaryAction() {
         if didRecognizeLongPress {
             didRecognizeLongPress = false

@@ -59,8 +59,26 @@ struct BookshelfView: View {
     @State var preparingBookPath: String?
     /// 准备失败的提示。非 `nil` = 弹 alert —— 取目录失败**不静默**。
     @State var prepareErrorMessage: String?
-    /// 最近一次长按时间：用来挡掉长按抬手时 Button 多触发的那次点击。
-    @State private var lastLongPressAt: Date?
+    /// 长按**已识别**标志。⚠️ 与 `DownloadBookCard` 用的是**同一套三点生命周期**，
+    /// **改一处必须改另一处**（两处都别再退回「时间戳窗口」那种依赖回调顺序的写法）。
+    ///
+    /// ## 生命周期（顺序无关，这是关键）
+    /// 1. **置位**：长按手势的 `onChanged(true)` —— 按下满 0.5s 那一刻，**严格早于抬手**；
+    /// 2. **消费**：抬手时 Button 的 action 读到 `true` ⇒ 丢弃这次单点（不会顺手进阅读页），并顺手清零；
+    /// 3. **兜底清零**：长按手势的 `onEnded` 里**延后一个主线程回合**清一次
+    ///    ⇒ 无论 Button 的 action 有没有触发，标志都不可能跨触摸残留
+    ///    ⇒ **长按之后紧接着的第一次单击必定生效**。
+    ///
+    /// ## 为什么三种时序全都正确
+    /// 置位在识别那一刻（抬手之前 0.5s）⇒ 与「谁先跑」无关；消费在同一回合内读到 `true` ⇒ 长按被吞；
+    /// 清零**晚于**同一回合内的任何 action ⇒ 既不会提前清掉（长按漏进阅读页），又保证必定被清。
+    ///
+    /// ## ⛔ 为什么不用「最近一次长按时间 + 0.4s 窗口」（旧实现，owner 真机上挡不住）
+    /// `onEnded` 与 Button 的 action **都在抬手那一刻执行、谁先谁后没有任何保证** ——
+    /// 真机实测 Button 先跑 ⇒ 时间戳还没写进去就被判成「不是长按」
+    /// ⇒ **长按既进了选择模式、又顺手进了阅读页**（owner 2026-10-11 真机反馈）。
+    /// 改成「置位在识别那一刻（抬手之前 0.5s）」后，顺序上不可能来不及。
+    @State private var didRecognizeLongPress = false
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -404,10 +422,18 @@ private extension BookshelfView {
         } else {
             // 🔴 这里刻意不用 NavigationLink：它的点击手势会和长按手势抢识别，
             // 结果「点书进不去阅读页」（长按进编辑是既有交互，不能砍）。
-            // 用 Button 拿到按下反馈（HIG：按下即反馈），长按用 simultaneousGesture
-            // 并行识别；长按抬手时 Button 也会触发一次 action，用时间戳挡掉。
+            // 用 Button 拿到按下反馈（HIG：按下即反馈），长按用 `simultaneousGesture` 并行识别。
+            //
+            // ⚠️ 长按抬手时 Button 的 action **可能**也触发 ⇒ 用 `didRecognizeLongPress` 挡掉：
+            // 置位发生在「识别那一刻」（抬手之前 0.5s）⇒ 与「两个回调谁先跑」无关。
+            // ⛔ **只挂这一条手势**：再挂「按下即识别」的手势（如 `LongPressGesture(minimumDuration: 0)`）
+            // 会把 Button 自己的按压手势挤掉、让**单击全部失效** —— `DownloadBookCard` 真机踩过这个坑，
+            // 两处是同一套设计（见 `didRecognizeLongPress` 的说明）。
             Button {
-                guard !isLongPressSuppressed else { return }
+                if didRecognizeLongPress {
+                    didRecognizeLongPress = false
+                    return
+                }
                 prepareReader(
                     bookPath: row.bookPath,
                     bookTitle: row.title,
@@ -419,18 +445,23 @@ private extension BookshelfView {
             // 强调层贴书卡自己的 12pt 圆角（`Radius.sm`），避免按下瞬间在圆角外露出方角（U0-4）。
             .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
             .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                    lastLongPressAt = Date()
-                    viewStore.send(.editModeChanged(true))
-                }
+                LongPressGesture(minimumDuration: 0.5)
+                    .onChanged { isRecognized in
+                        // 识别那一刻（抬手之前）置位 ⇒ 用来吞掉长按抬手时可能触发的那次 action。
+                        guard isRecognized else { return }
+                        didRecognizeLongPress = true
+                    }
+                    .onEnded { _ in
+                        viewStore.send(.editModeChanged(true))
+                        // 兜底清零、**延后一个主线程回合**：同一回合里 Button 的 action 若也触发，
+                        // 读到的仍是 `true`（长按被正确吞掉）；无论它触不触发，标志都必定被清
+                        // ⇒ 不可能跨触摸残留（长按之后紧接着的第一次单击照常生效）。
+                        Task { @MainActor in
+                            didRecognizeLongPress = false
+                        }
+                    }
             )
         }
-    }
-
-    /// 长按抬手后 Button 也会收到一次 action，这里挡掉，避免「长按同时进阅读页」。
-    private var isLongPressSuppressed: Bool {
-        guard let lastLongPressAt else { return false }
-        return Date().timeIntervalSince(lastLongPressAt) < 0.4
     }
 }
 
