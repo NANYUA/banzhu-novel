@@ -416,7 +416,7 @@ private extension ReaderView {
         configuration: PaginationConfiguration
     ) -> some View {
         let slice = currentPageSlice(viewStore)
-        PageTextView(
+        return PageTextView(
             text: slice.text,
             configuration: configuration,
             startsAtParagraphStart: slice.startsAtParagraphStart

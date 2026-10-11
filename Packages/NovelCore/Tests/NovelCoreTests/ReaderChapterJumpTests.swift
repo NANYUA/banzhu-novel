@@ -238,7 +238,15 @@ final class ReaderChapterJumpTests: XCTestCase {
         await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText))
         XCTAssertTrue(store.state.nextPages.isEmpty, "前置条件：下一章未就绪")
 
-        await store.send(.jumpToAdjacentChapter(Self.second)) {
+        // ⚠️ 这里**刻意不带状态闭包**：未就绪时走的是回退分支，而它返回
+        // `Effect.send(.loadChapterWithName(...))` —— 那是**重新进 store 的一个新 action**，
+        // 状态变化发生在 store 处理它那一刻，**不在**这一次 `send` 里。
+        // 「不带闭包」本身就是断言：未就绪时按钮这一步**不改任何状态**。
+        await store.send(.jumpToAdjacentChapter(Self.second))
+        // 回退路径的后续与「从目录手动跳章」逐字相同（分页桩让这一章同样分不出页）：
+        // 这份期望态与 `ReaderChapterAdvanceTests.test手动跳章时旧的下一章结果作废` 里
+        // 直接发 `.loadChapterWithName` 的那份**逐值相同** —— 回退没有改变任何行为。
+        await store.receive(.loadChapterWithName(Self.second.path, Self.second.name)) {
             $0.chapterPath = Self.second.path
             $0.chapterName = Self.second.name
             $0.isLoading = true
@@ -246,7 +254,6 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.pages = []
             $0.currentOffset = 0
         }
-        // 回退路径的后续与「从目录手动跳章」逐字相同（分页桩让这一章同样分不出页）。
         await store.receive(.contentLoaded(Self.secondText)) {
             $0.text = Self.secondText
             $0.isLoading = false
@@ -259,6 +266,7 @@ final class ReaderChapterJumpTests: XCTestCase {
 
         XCTAssertFalse(store.state.isLoading)
         XCTAssertEqual(store.state.chapterPath, Self.second.path, "兜底也要真的换过去")
+        XCTAssertEqual(store.state.currentOffset, 0, "兜底也落到新章章首（与就绪那条路同页）")
         XCTAssertTrue(store.state.pages.isEmpty, "分页桩让这一章分不出页（本用例不关心它的分页）")
     }
 
