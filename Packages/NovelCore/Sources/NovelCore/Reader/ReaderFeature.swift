@@ -140,6 +140,10 @@ public struct ReaderFeature: Reducer {
         case retreatChapter
         /// 上一章正文预加载完成（章节路径 + 正文）；分页由 reducer 按**当前** config 现算。
         case previousChapterLoaded(String, String)
+        /// 跳章条的「上一章 / 下一章」按钮被按下（目标章）：已就绪的相邻章直接换章（无 loading），
+        /// 未就绪才回退完整加载 —— 为什么不再直接 `.loadChapterWithName`，见
+        /// `ReaderFeature+ChapterTransition.swift` 的 `reduceJumpToAdjacentChapter`。
+        case jumpToAdjacentChapter(ChapterItem)
         /// 分页配置变化（触发重算分页 + 按 offset 重新定位）
         case configChanged(PaginationConfiguration)
         /// 自动预缓存后续章节数变化
@@ -312,6 +316,9 @@ public struct ReaderFeature: Reducer {
                     to: &state,
                     using: paginationService
                 )
+
+            case let .jumpToAdjacentChapter(chapter):
+                return reduceJumpToAdjacentChapter(&state, chapter: chapter)
 
             case let .configChanged(newConfig):
                 guard newConfig != state.config else { return .none }

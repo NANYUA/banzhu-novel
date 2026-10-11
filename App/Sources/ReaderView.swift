@@ -186,15 +186,12 @@ struct ReaderView: View {
                             onSearch: { isShowingSearch = true },
                             onSettings: { isShowingSettings = true },
                             onShowDetail: onShowDetail,
-                            // 上一章 / 下一章走**同一条**既有加载路径，而不是 `.advanceChapter`：
-                            // `loadChapterWithName` 会重置到章首 offset 0、作废旧的下一章预加载、
-                            // 写进度并触发后续章节自动缓存；`.advanceChapter` 只服务「章尾左滑」，
-                            // 它 `guard !nextPages.isEmpty` —— 没预加载完就什么都不做，
-                            // 按钮会显得「点了没反应」。所以这里不新增 action。
+                            // 上一章 / 下一章走 `.jumpToAdjacentChapter`：相邻章**预加载就绪**时
+                            // 直接换章（无 loading，与章尾左滑同一条路），没就绪才回退
+                            // `loadChapterWithName` 完整加载。两条路的落页口径**相同**（都是新章章首），
+                            // 所以按钮不会因为「缓存好没好」跳到不同的页。
                             onJumpToChapter: { chapter in
-                                viewStore.send(
-                                    .loadChapterWithName(chapter.path, chapter.name)
-                                )
+                                viewStore.send(.jumpToAdjacentChapter(chapter))
                             },
                             // 本章页码进度条（跳章条中间）：拖到哪一页就立刻翻到哪一页。
                             // `.goToPage` 只迁移位置、**不落盘**（拖动中高频调用）；抬手时
