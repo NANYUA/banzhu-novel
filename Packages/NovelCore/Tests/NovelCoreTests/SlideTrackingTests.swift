@@ -45,8 +45,11 @@ final class SlideTrackingTests: XCTestCase {
                         fromDisplayedOffset: 0,
                         translation: translation,
                         availableWidth: availableWidth,
-                        pageIndex: pageCase.index,
-                        pageCount: pageCase.count
+                        position: SlideTracking.PagePosition(
+                            index: pageCase.index,
+                            count: pageCase.count
+                        ),
+                        neighbors: .none
                     )
                     XCTAssertEqual(
                         actual,
@@ -194,6 +197,10 @@ final class SlideTrackingTests: XCTestCase {
 
     // MARK: - 辅助
 
+    /// 跟手位移（默认基线 0、页宽 `width`）。
+    ///
+    /// 章尾 / 章首那条口径（相邻章已就绪就不算边界）不在这里测 —— 本夹具一律喂
+    /// `.none`，见 `SlideChapterBoundaryTests`。
     private func offset(
         from displayed: CGFloat,
         translation: CGFloat,
@@ -205,8 +212,8 @@ final class SlideTrackingTests: XCTestCase {
             fromDisplayedOffset: displayed,
             translation: translation,
             availableWidth: availableWidth ?? width,
-            pageIndex: index,
-            pageCount: count
+            position: SlideTracking.PagePosition(index: index, count: count),
+            neighbors: .none
         )
     }
 }

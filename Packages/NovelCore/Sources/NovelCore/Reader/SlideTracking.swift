@@ -24,30 +24,97 @@ public enum SlideTracking {
     /// 渐近线是 **`availableWidth`**（一整屏宽，见 `rubberBanded`）。
     static let resistance: CGFloat = 0.55
 
+    /// 当前页在**本章分页**里的位置：第几页 + 本章共几页。
+    ///
+    /// 与 `ChapterNeighbors` 同理收成一个值类型：这两个值在边界判定里**永远一起出现**
+    /// （「是不是本章第一页 / 最后一页」两个判据各用一次），而
+    /// `function_parameter_count` 的 warning 档是 5 —— 并列两个参数会把 `offset`
+    /// 顶到 6 个（本机 `_lint_approx.ps1` 实测）。⚠️ 带默认值的参数**同样计入**，
+    /// 所以不是「加个默认值」能绕过去的。
+    ///
+    /// 只描述**本章**：章尾 / 章首之外还有没有内容由 `ChapterNeighbors` 负责。
+    ///
+    /// `public` 是必须的：`offset` 是 `public`，它的形参类型不能比它更封闭
+    /// （否则 App 那层看不见这个类型，`PagePanTracking.panOffset` 也编译不过）。
+    public struct PagePosition: Equatable {
+        /// 当前页下标。
+        public var index: Int
+        /// 本章总页数。
+        public var count: Int
+
+        public init(index: Int, count: Int) {
+            self.index = index
+            self.count = count
+        }
+    }
+
+    /// 章尾之后 / 章首之前**还有没有可翻的一页**（即相邻章是否已就绪）。
+    ///
+    /// 收成一个值类型而不是两个并列 `Bool`：它们**永远一起出现、一起被读**（都只在
+    /// 「当前页是不是本章首 / 末页」这一处边界判定里用），而
+    /// `function_parameter_count` 的 warning 档是 5 —— 并列两个参数会把
+    /// `offset` 顶到 6 个。形状与 `PagePanGeometry` 的那两个字段**同名同义**，
+    /// 转换由 `PagePanGeometry.chapterNeighbors` 一处负责。
+    ///
+    /// ⚠️ 带默认值的参数**同样计入** `function_parameter_count`，
+    /// 所以「加个 `= .none` 默认值」并不能把它从计数里去掉。
+    ///
+    /// `hasNext` / `hasPrevious` 都是 `false`（前后都没有相邻章）时，
+    /// 与改动前「章尾 / 章首一律算边界」逐字一致。
+    ///
+    /// `public` 的理由同 `PagePosition`：`offset` 的形参类型必须同样可见。
+    public struct ChapterNeighbors: Equatable {
+        /// 本章最后一页之后是否还接得上一页 —— 即**下一章第 1 页已就绪**。
+        public var hasNext: Bool
+        /// 本章第一页之前是否还接得上一页 —— 即**上一章最后一页已就绪**。
+        public var hasPrevious: Bool
+
+        /// 前后都没有相邻章（改动前的唯一情形）。
+        public static let none = ChapterNeighbors()
+
+        public init(hasNext: Bool = false, hasPrevious: Bool = false) {
+            self.hasNext = hasNext
+            self.hasPrevious = hasPrevious
+        }
+    }
+
     /// 本次手势跟手后，页面应当显示的横向偏移。
     ///
     /// 非边界时就是 `displayedOffset + translation`；边界时走橡皮筋（见下）。
+    ///
+    /// ⚠️ 「边界」= **文档**的首 / 末页，不是**本章**的首 / 末页：章尾还有下一章
+    /// （或章首还有上一章）时不算边界，见下面 `isAtEdge` 处的说明。
     ///
     /// - Parameters:
     ///   - displayedOffset: **抓取瞬间页面真实显示**的偏移（吸附动画进行中即呈现值）。
     ///   - translation: 本次手势的 `DragGesture.Value.translation.width`。
     ///   - availableWidth: 阅读区可用宽度（安全区内的盒宽）。
-    ///   - pageIndex: 当前页下标。
-    ///   - pageCount: 总页数。
+    ///   - position: 当前页下标 + 本章总页数。
+    ///   - neighbors: 章尾 / 章首之外还有没有可翻的一页。
     /// - Returns: 页面此刻应显示的偏移。
     public static func offset(
         fromDisplayedOffset displayedOffset: CGFloat,
         translation: CGFloat,
         availableWidth: CGFloat,
-        pageIndex: Int,
-        pageCount: Int
+        position: PagePosition,
+        neighbors: ChapterNeighbors
     ) -> CGFloat {
         // 宽高为 0 的退化盒子：直接归零，别让橡皮筋公式算出 0/0。
         guard availableWidth > 0 else { return 0 }
 
         // 边界判定与改动前**逐字一致**：只看「本次手势的方向 + 当前页」，
         // 不看基线 —— 否则抓着停在别的页面上的画面会改变边界判定。
-        let isAtEdge = translation > 0 ? pageIndex <= 0 : pageIndex + 1 >= pageCount
+        //
+        // 章尾 / 章首这两个边界是**例外**：相邻章已就绪时，`+1` / `-1` 那一格摆的是
+        // 下一章第 1 页 / 上一章最后一页（渲染判据见 `panSlots`），跟手就该与章内
+        // 翻页**同一条路**（1:1 到一页宽），而不是被橡皮筋压住 —— 否则手感变成
+        // 「只能把书脊拉到中线」。相邻章**不可用**时（最后一章 / 还没预加载完）
+        // 那一格是空的，保留橡皮筋才是对的（否则会把空白拉出来）。
+        // `neighbors` 是**同一个来源**：调用方由 `PagePanGeometry` 一次算出、同时喂给
+        // 本函数与 `PagePanTracking.turn`，不在这里另写一套「相邻章可用」的判断。
+        let isAtEdge = translation > 0
+            ? position.index <= 0 && !neighbors.hasPrevious
+            : position.index + 1 >= position.count && !neighbors.hasNext
         guard isAtEdge else { return displayedOffset + translation }
 
         // 边界这条路也作用在**同一个量**上：先把「此刻显示的位置」还原成它对应的

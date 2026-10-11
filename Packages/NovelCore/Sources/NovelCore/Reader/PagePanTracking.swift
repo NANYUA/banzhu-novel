@@ -50,15 +50,28 @@ public struct PagePanGeometry: Equatable, Sendable {
         self.hasNextChapterPage = hasNextChapterPage
         self.hasPreviousChapterPage = hasPreviousChapterPage
     }
+
+    /// 喂给 `SlideTracking.offset` 的「章尾 / 章首还有没有一页」——
+    /// 跟手（`panOffset`）与判页（`turn`）读的因此是**同一个值**，不会分叉。
+    var chapterNeighbors: SlideTracking.ChapterNeighbors {
+        SlideTracking.ChapterNeighbors(
+            hasNext: hasNextChapterPage,
+            hasPrevious: hasPreviousChapterPage
+        )
+    }
 }
 
 /// 阅读页「平移翻页」（全景图式左右平移）的纯数学，CI 可测。
 ///
 /// ## 与 `SlideTracking` 的分工
 /// `SlideTracking` 管的是「**一页**怎么跟手」：抓取基线 + 本次位移 → 页面偏移，含边界橡皮筋。
-/// 本类型在它之上只补两条「平移」特有的规则，**不改它一行**：
+/// 本类型在它之上只补两条「平移」特有的规则，**不改它的公式**：
 /// 1. **单页约束**（`panOffset`）：全景图只铺相邻两页，位移夹在一页之内；
 /// 2. **中线判据**（`turn`）：松手后两页的中线是否越过屏幕中线，决定翻页还是滑回本页。
+///
+/// ⚠️ 它唯一转交给 `SlideTracking` 的额外输入是「章尾 / 章首还有没有相邻章那一页」
+/// （`PagePanGeometry` 的两个 `has*ChapterPage`）—— 那决定章尾 / 章首算不算边界。
+/// 跟手与判页**共用这一个值**，不允许两处各判一次。
 ///
 /// 跟手基线、边界橡皮筋、动量投射的既有口径全部沿用 `SlideTracking` / U0-8 ——
 /// 那是 owner 已验收的行为，这里只做「覆盖 → 平移」这一处口径替换。
@@ -73,26 +86,32 @@ public struct PagePanGeometry: Equatable, Sendable {
 public enum PagePanTracking {
     /// 本次手势跟手后，全景图应当显示的横向偏移（一次最多一页）。
     ///
+    /// 章尾 / 章首的跟手口径**由 `geometry` 定**，与 `turn` 共用同一个值：
+    /// `geometry.hasNextChapterPage` / `hasPreviousChapterPage` 为真（`panSlots` 会在
+    /// 相邻那一格渲染下一章第 1 页 / 上一章最后一页）⇒ 该方向**不阻尼**，能整页拉过去；
+    /// 为假（最后一章 / 还没预加载完，那一格是空的）⇒ 维持已验收的橡皮筋。
+    /// 两处判据同源，不各写一套。
+    ///
     /// - Parameters:
     ///   - displayedOffset: **抓取瞬间页面真实显示**的偏移（吸附动画进行中即呈现值）。
     ///   - translation: 本次手势的 `DragGesture.Value.translation.width`。
-    ///   - availableWidth: 阅读区可用宽度 —— 也就是**一页**的宽。
-    ///   - pageIndex: 当前页下标。
-    ///   - pageCount: 总页数。
+    ///   - geometry: 页宽 + 当前页下标 + 总页数 + 章尾之后 / 章首之前还有没有一页。
     /// - Returns: 全景图此刻应显示的偏移，恒在 `[-availableWidth, availableWidth]` 内。
     public static func panOffset(
         fromDisplayedOffset displayedOffset: CGFloat,
         translation: CGFloat,
-        availableWidth: CGFloat,
-        pageIndex: Int,
-        pageCount: Int
+        geometry: PagePanGeometry
     ) -> CGFloat {
+        let availableWidth = geometry.availableWidth
         let tracked = SlideTracking.offset(
             fromDisplayedOffset: displayedOffset,
             translation: translation,
             availableWidth: availableWidth,
-            pageIndex: pageIndex,
-            pageCount: pageCount
+            position: SlideTracking.PagePosition(
+                index: geometry.pageIndex,
+                count: geometry.pageCount
+            ),
+            neighbors: geometry.chapterNeighbors
         )
         // 单页约束：全景图只铺「当前页 + 相邻一页」，夹在一页宽内就不会露出第三页或底色。
         // 文档首尾那一支（`SlideTracking` 的橡皮筋）结果恒在一页宽内，本句对它不产生任何改变

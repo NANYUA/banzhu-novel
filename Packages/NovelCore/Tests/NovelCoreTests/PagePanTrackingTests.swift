@@ -53,8 +53,8 @@ final class PagePanTrackingTests: XCTestCase {
                     fromDisplayedOffset: 0,
                     translation: translation,
                     availableWidth: pageWidth,
-                    pageIndex: 0,
-                    pageCount: 10
+                    position: SlideTracking.PagePosition(index: 0, count: 10),
+                    neighbors: .none
                 ),
                 "首页向右拖仍是橡皮筋（t=\(translation)）"
             )
@@ -66,8 +66,8 @@ final class PagePanTrackingTests: XCTestCase {
                     fromDisplayedOffset: 0,
                     translation: translation,
                     availableWidth: pageWidth,
-                    pageIndex: 9,
-                    pageCount: 10
+                    position: SlideTracking.PagePosition(index: 9, count: 10),
+                    neighbors: .none
                 ),
                 "末页向左拖仍是橡皮筋（t=\(translation)）"
             )
@@ -346,9 +346,11 @@ private func panOffset(
     PagePanTracking.panOffset(
         fromDisplayedOffset: displayed,
         translation: translation,
-        availableWidth: availableWidth ?? pageWidth,
-        pageIndex: index,
-        pageCount: count
+        geometry: PagePanGeometry(
+            availableWidth: availableWidth ?? pageWidth,
+            pageIndex: index,
+            pageCount: count
+        )
     )
 }
 

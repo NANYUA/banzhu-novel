@@ -193,6 +193,9 @@ extension ReaderView {
     /// 2. 判页走 `PagePanTracking.turn`（**两页中线是否越过屏幕中线**），
     ///    并且松手后**把平移走完**再归零，而不是只把当前页滑回原位。
     ///
+    /// 两者喂的是**同一份 `PagePanGeometry`**（`panGeometry(_:availableWidth:)`）——
+    /// 章尾 / 章首「相邻章已就绪就不算边界」这条判据只有一处，跟手与判页不会分叉。
+    ///
     /// 跟手基数是**抓取瞬间页面真实显示的位置**（方案 A）：吸附回位动画没跑完就再抓时
     /// 从当前显示位置继续，而不是从 0 重开。呈现值怎么来的见
     /// `ReaderView+SlideTracking.swift`，纯数学见 `PagePanTracking`。
@@ -239,8 +242,7 @@ extension ReaderView {
         slideOffset = panOffset(
             from: baseline,
             translation: value.translation.width,
-            viewStore: viewStore,
-            availableWidth: availableWidth
+            geometry: panGeometry(viewStore, availableWidth: availableWidth)
         )
     }
 
@@ -256,41 +258,53 @@ extension ReaderView {
         slideIsHorizontal = nil
         slideBaseline = nil
         guard wasHorizontal else { return }
+        // 跟手与判页**共用同一份几何**（同一次手势、同一个 `has*ChapterPage`）：
+        // 分叉一次就会出现「能跟手拉过去、松手却不换章」这类错位。
+        let geometry = panGeometry(viewStore, availableWidth: availableWidth)
         let turn = PagePanTracking.turn(
             trackedOffset: panOffset(
                 from: baseline,
                 translation: value.translation.width,
-                viewStore: viewStore,
-                availableWidth: availableWidth
+                geometry: geometry
             ),
             translation: value.translation.width,
             predictedEndTranslation: value.predictedEndTranslation.width,
-            geometry: PagePanGeometry(
-                availableWidth: availableWidth,
-                pageIndex: viewStore.currentPageIndex,
-                pageCount: viewStore.pages.count,
-                // 下一章第 1 页已就绪 ⇒ 本章最后一页仍可继续 `.next`（换章）。
-                hasNextChapterPage: !viewStore.nextPages.isEmpty,
-                // 上一章最后一页已就绪 ⇒ 本章第一页仍可继续 `.previous`（退章）。
-                hasPreviousChapterPage: !viewStore.previousPages.isEmpty
-            )
+            geometry: geometry
         )
         settlePan(turn, viewStore: viewStore, availableWidth: availableWidth)
+    }
+
+    /// 本次手势的几何：页宽 + 当前页下标 + 总页数 + 相邻章是否已就绪。
+    ///
+    /// `hasNextChapterPage` / `hasPreviousChapterPage` 与 `panSlots` 渲染相邻那一格
+    /// 用的是**同一个条件**（`nextPages` / `previousPages` 非空）：非空 ⇒ 那一格摆的是
+    /// 下一章第 1 页 / 上一章最后一页 ⇒ 章尾 / 章首不算边界，跟手与章内一致；
+    /// 空 ⇒ 那一格空着 ⇒ 保留橡皮筋，不把空白拉出来。
+    private func panGeometry(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
+        availableWidth: CGFloat
+    ) -> PagePanGeometry {
+        PagePanGeometry(
+            availableWidth: availableWidth,
+            pageIndex: viewStore.currentPageIndex,
+            pageCount: viewStore.pages.count,
+            // 下一章第 1 页已就绪 ⇒ 本章最后一页仍可继续 `.next`（换章）。
+            hasNextChapterPage: !viewStore.nextPages.isEmpty,
+            // 上一章最后一页已就绪 ⇒ 本章第一页仍可继续 `.previous`（退章）。
+            hasPreviousChapterPage: !viewStore.previousPages.isEmpty
+        )
     }
 
     /// 跟手位移：纯数学在 `PagePanTracking`，这里只负责把 `@State` 递进去。
     private func panOffset(
         from baseline: CGFloat,
         translation: CGFloat,
-        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        availableWidth: CGFloat
+        geometry: PagePanGeometry
     ) -> CGFloat {
         PagePanTracking.panOffset(
             fromDisplayedOffset: baseline,
             translation: translation,
-            availableWidth: availableWidth,
-            pageIndex: viewStore.currentPageIndex,
-            pageCount: viewStore.pages.count
+            geometry: geometry
         )
     }
 
