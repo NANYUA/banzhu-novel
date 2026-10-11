@@ -10,7 +10,8 @@ import SwiftUI
 ///
 /// ## 视觉语言与书架同源
 /// 封面块 60×80 + 书名（`.headline`）+ 作者（`.caption`）+ 次要信息（`.caption` / `.caption2`），
-/// 卡面 `AppTheme.Surface.card` + `Radius.sm`，按下反馈复用 `PressableCardButtonStyle`
+/// 卡面 `AppTheme.Surface.card` + `Radius.sm`，按下反馈走 `pressHighlight(isPressed:shape:)`
+/// （与 `PressableCardButtonStyle` 共用同一套 `PressHighlightMetrics` 取值）
 /// —— 与 `BookshelfView` 的 `BookRow` 是同一套观感。
 ///
 /// ⚠️ 封面优先走**真封面**（`BookDownloadSummary.coverUrl`，来自书库的 `BookRecord.coverUrl`）；
@@ -24,7 +25,7 @@ import SwiftUI
 ///
 /// ## 单点区域 = 整张卡（U11）
 /// 右上角「更多」菜单删除后，卡上不再有需要独立命中的兄弟控件 ⇒ 不必再把
-/// 「封面 + 文字」单独包一层 Button：整张卡就是一个按钮，命中区与按下强调层
+/// 「封面 + 文字」单独包一层可点控件：**整张卡就是一个可点区域**，命中区与按下强调层
 /// 因此**铺满整卡**（原先「右上角那块不是单点区」的例外随之消失）。
 struct DownloadBookCard: View {
     let summary: BookDownloadSummary
@@ -35,51 +36,42 @@ struct DownloadBookCard: View {
     let onOpenBook: () -> Void
     let onLongPress: () -> Void
 
-    /// 长按**已识别**标志：在长按被识别的那一刻（按下满 0.5s，**抬手之前**）置位，
-    /// 由抬手时的 `primaryAction` 消费。
+    /// 按下高亮的状态（**手势版没有 `Button`**，`ButtonStyle` 收不到按压事件 ⇒ 自己驱动）。
     ///
-    /// ## 三点生命周期（🔴 这是本卡最容易改坏的一处）
-    /// 1. **置位**：`longPressGesture` 的 `onChanged(true)` —— 按下满 0.5s 那一刻，
-    ///    **严格早于抬手**；
-    /// 2. **消费**：抬手时 `primaryAction` 读到 `true` ⇒ 丢弃这次单点，并顺手清零（幂等）；
-    /// 3. **兜底清零**：`longPressGesture` 的 `onEnded` 里**延后一个主线程回合**再清一次。
-    ///
-    /// ## 为什么这三种时序**全都**正确（关键，别只记结论）
-    /// - 置位在**识别那一刻**（抬手之前 0.5s）⇒ 与「两个回调谁先跑」**无关**；
-    /// - 消费在 Button 的 action ⇒ 同一回合内它读到的必定是 `true` ⇒ 长按被吞掉
-    ///   （不会顺手把书打开 / 把刚切换的勾选又翻回去）；
-    /// - 清零**延后一个主线程回合** ⇒ 一定**晚于**同一回合内的任何 action ⇒
-    ///   既不会「提前清掉、让长按漏进阅读页」，又保证标志**必定**被清掉。
-    ///   ⇒ **标志不可能跨触摸残留 ⇒ 长按之后紧接着的第一次单击必定生效**（owner 真机判据）。
-    ///
-    /// ## ⛔ 为什么这里**不再**挂「按下沿清零」的第二个手势（2026-10-11 真机回归的根因）
-    /// U13 那版为了让标志不残留，在 Button 上**又挂了一条**
-    /// `LongPressGesture(minimumDuration: 0).onChanged { didRecognizeLongPress = false }`。
-    /// 但**零时长长按在按下那一刻就识别**，它会把 Button 自己的按压手势取消掉 ⇒
-    /// **Button 的 action 从此永不触发**（连按下强调层都不出现）⇒ 单击**全部**失效：
-    /// 非选择模式点不进阅读页、选择模式点不动勾选 —— owner 真机反馈的正是**这两条同时出现**。
-    /// 对照证据（决定性）：**书架用的是同一个 `Button` + 0.5s 长按，唯独没有这条零时长手势，
-    /// 在真机上一直是好的**。
-    /// ⇒ 结论：**不要在 Button 上再挂任何「按下即识别」的手势**（残留由第 3 点兜住，不需要它）。
-    ///
-    /// ⚠️ **与 `BookshelfView.rowContent` 用的是同一套三点生命周期**（置位在「识别那一刻」/
-    /// 消费在 Button 的 action / 清零在 `onEnded` 延后一个主线程回合）——**改一处必须改另一处**，
-    /// 两处都别再退回「时间戳窗口」那种依赖回调顺序的写法（书架上就是这么翻车的）。
-    @State private var didRecognizeLongPress = false
+    /// 由 `onLongPressGesture` 的 `onPressingChanged` 在**按下那一刻**置位、抬手复位，
+    /// 再交给 `pressHighlight(isPressed:shape:)` —— 那套取值与 `PressableCardButtonStyle` 逐值相同
+    /// （都来自 `PressHighlightMetrics`），所以卡片与栏内按钮的按下观感不会分叉。
+    @State private var isPressed = false
 
     var body: some View {
-        // 两种模式共用同一个 Button（选择模式切换勾选 / 否则进阅读页），长按与它并行识别。
-        Button(action: primaryAction) {
-            cardLabel
-        }
-        // 强调层贴书卡自己的 12pt 圆角（`Radius.sm`），避免按下瞬间在圆角外露出方角。
-        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
-        // 非选择模式长按进选择模式、选择模式再长按退出：两个模式共用同一条手势。
-        // ⛔ **只挂这一条**：再挂任何「按下即识别」的手势（例如 `LongPressGesture(minimumDuration: 0)`）
-        // 会把 Button 自己的按压手势取消掉、让**单击全部失效** —— 见 `didRecognizeLongPress` 的说明。
-        .simultaneousGesture(longPressGesture)
-        // 装饰性勾选图的语义交给 Button 的 `.isSelected` trait，避免 VoiceOver 读两遍。
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        // ## 单击 / 长按**都走手势**（不再用 Button）—— 2026-10-11 真机缺陷的修法
+        // ⛔ 旧实现是 `Button` + `.simultaneousGesture(LongPressGesture)`：真机实测那个组合会把
+        // `Button` **自己的按压手势挤掉** ⇒ ① 按下反馈不出现（owner：「连按下变色都没有」）；
+        // ② 快速单击的 action 不触发（非选择模式点不进阅读页、选择模式点不动勾选）；
+        // ③ 只在长按成功、抬手时才走一次 action ⇒「长按进选择模式」顺手进了阅读页。
+        // ⇒ 改用 SwiftUI **有文档保证**的仲裁：`onTapGesture` 与 `onLongPressGesture` 挂在**同一个视图**上时，
+        //   按住 ≥ 0.5s **只**走长按、快速点**只**走 tap ⇒ **不需要任何标志、也不依赖回调顺序**。
+        //   （原先那套「三点生命周期」的标志已整体删除：它存在的唯一理由就是弥补 Button 的这个毛病。）
+        cardLabel
+            .contentShape(Rectangle())
+            .onTapGesture { primaryAction() }
+            .onLongPressGesture(
+                minimumDuration: 0.5,
+                perform: { onLongPress() },
+                // ⚠️ `onPressingChanged` 是 iOS 17 起的**当前签名**（旧的 `pressing:` 已弃用：
+                // 用它会在编译日志里留一条弃用警告，而本项目要求警告为 0）。
+                onPressingChanged: { isPressing in isPressed = isPressing }
+            )
+            // 强调层贴书卡自己的 12pt 圆角（`Radius.sm`），避免按下瞬间在圆角外露出方角。
+            .pressHighlight(
+                isPressed: isPressed,
+                shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+            )
+            // 装饰性勾选图的语义交给 `.isSelected` trait，避免 VoiceOver 读两遍；
+            // 手势版没有 Button ⇒ 显式补上「这是个按钮」与它的激活动作（否则 VoiceOver 只能读、不能点）。
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .accessibilityAction { primaryAction() }
     }
 }
 
@@ -87,9 +79,9 @@ private extension DownloadBookCard {
     /// 卡面：勾选框（选择模式）+ 封面 + 书名 / 进度 / 状态。
     ///
     /// ## 可点区域与内边距
-    /// 整张卡由 `body` 那一个 Button 包住（U11：右上角「更多」菜单删除后，
-    /// 卡上不再有需要独立命中的兄弟控件）⇒ 卡面这里只负责「内容怎么排」，
-    /// 不再自己包 Button。
+    /// 整张卡的可点区域由 `body` 那一组手势覆盖（`.onTapGesture` + `.onLongPressGesture`，
+    /// U11：右上角「更多」菜单删除后，卡上不再有需要独立命中的兄弟控件）
+    /// ⇒ 卡面这里只负责「内容怎么排」，不自己挂任何手势 / 不自己包可点控件。
     ///
     /// 卡片内边距由各块**各自持有**（而不是 HStack 统一 `.padding`），
     /// 这样命中区与强调层能一直铺到卡片边缘，不在四周留一圈点不动的死区；
@@ -110,7 +102,7 @@ private extension DownloadBookCard {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
     }
 
-    /// 选择模式的勾选框（装饰性图形：选中语义交给 Button 的 `.isSelected` trait）。
+    /// 选择模式的勾选框（装饰性图形：选中语义交给卡片的 `.isSelected` trait）。
     var selectionMark: some View {
         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
             .font(.title3)
@@ -230,46 +222,12 @@ private extension DownloadBookCard {
             }
     }
 
-    /// 长按：**按下阶段**（长按被识别那一刻）置位标志，抬手时由 `primaryAction` 消费。
-    ///
-    /// 两种模式共用同一条手势：非选择模式长按进选择模式、选择模式再长按退出
-    /// （都由调用方在 `onLongPress` 里切换 `selectionModeChanged`）。
-    var longPressGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.5)
-            .onChanged { isRecognized in
-                // ⚠️ 关键在时机：`onChanged` 在**按下阶段**回调（长按刚被识别、抬手之前），
-                // 而 `onEnded` 与 Button 的 action 都在抬手时执行、顺序不保证
-                // ⇒ 标志只能在这里置位（旧实现写在 `onEnded` 里，真机上没挡住）。
-                // 只在 `true` 时置位：`false` 是抬手 / 复位，不能反过来把标志清掉。
-                guard isRecognized else { return }
-                didRecognizeLongPress = true
-            }
-            .onEnded { _ in
-                onLongPress()
-                // 兜底清零，且**延后一个主线程回合**：同一回合里 Button 的 action 若也触发，
-                // 读到的仍是 `true`（长按被正确吞掉，不会顺手把书打开 / 把勾选又翻回去）；
-                // 而无论 Button 的 action 有没有触发，标志都必定被清掉
-                // ⇒ **不可能跨触摸残留**（不会出现「长按之后第一次单击被丢弃」）。
-                Task { @MainActor in
-                    didRecognizeLongPress = false
-                }
-            }
-    }
-
     /// 单点动作：按当前模式分派（选择模式 = 切换勾选，否则 = 进阅读页）。
     ///
-    /// 抬手时若本次触摸**已经被识别成长按**（`didRecognizeLongPress`），就丢弃这次单点 ——
-    /// 否则「长按进选择模式」会顺手把书打开（owner 真机反馈的缺陷），
-    /// 或把刚切换的勾选又翻回去。
-    ///
-    /// ⚠️ 判据只有这一个标志，且它**不可能**残留到下一次触摸（清零见 `longPressGesture` 的
-    /// `onEnded` 延后一回合 + 这里的顺手清）⇒ 单击不会被静默丢弃；
-    /// 标志的真假只由「本次触摸有没有被识别成长按」决定。
+    /// ⚠️ 这里**没有任何「是不是长按」的判据** —— 长按由 `onLongPressGesture` 独占，
+    /// 系统仲裁保证「长按抬手不会走 tap」⇒ 原先那套「长按已识别」标志（连同它的
+    /// 三点生命周期）已整体删除：它存在的唯一理由就是弥补 `Button` 被长按手势挤掉按压识别的问题。
     func primaryAction() {
-        if didRecognizeLongPress {
-            didRecognizeLongPress = false
-            return
-        }
         if isSelecting {
             onToggleSelection()
         } else {

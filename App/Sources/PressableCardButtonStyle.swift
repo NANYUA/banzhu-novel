@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// 按下强调层的**唯一一套取值** —— `ButtonStyle` 版（`PressableCardButtonStyle`）与
+/// **手势版**（`pressHighlight(isPressed:shape:)`）共用，避免两处各写一遍 0.12 / 0.98 / 0.05 / 0.2。
+///
+/// ## 为什么需要两个入口
+/// 卡片的交互有两种实现：`Button` + `ButtonStyle`（书架编辑态那一支、栏内按钮），
+/// 以及 `.onTapGesture` + `.onLongPressGesture`（需要「单击 + 长按」两个动作时 ——
+/// `Button` + `.simultaneousGesture(LongPressGesture)` 那个组合会把 Button 自己的按压手势挤掉，
+/// 真机实测「单击连按下变色都没有」，见 `DownloadBookCard.body` 的说明）。
+/// 后者没有 `Button`，`ButtonStyle` 用不上 ⇒ 用同一个 `PressHighlightMetrics` 驱动。
+enum PressHighlightMetrics {
+    /// 0.12 —— 强调层峰值不透明度（推导见 `PressableCardButtonStyle` 的类型注释）。
+    static let opacity: Double = 0.12
+
+    /// 0.98 —— 按下缩放。卡片越大，幅度越小，避免整屏晃动。
+    static let scale: CGFloat = 0.98
+
+    /// 进入（touch-down）曲线 `response`：0.05 —— 约 18ms 就跨过「看得见」的门槛。
+    static let enterResponse: Double = 0.05
+
+    /// 退出（抬手复原）曲线 `response`：0.2；「减弱动态效果」时 0.1。
+    static let exitResponse: Double = 0.2
+    static let exitResponseReduceMotion: Double = 0.1
+}
+
 /// 卡片 / 胶囊类可点元素的按压反馈。
 ///
 /// ## 为什么需要它
@@ -35,7 +59,8 @@ import SwiftUI
 /// iOS 18 的材质与控件体系；**不使用** iOS 26 的液态玻璃材质。
 struct PressableCardButtonStyle: ButtonStyle {
     /// 按下时的缩放比例。卡片越大，幅度越小，避免整屏晃动。
-    var pressedScale: CGFloat = 0.98
+    /// 取值来自 `PressHighlightMetrics.scale`（与手势版共用同一个数）。
+    var pressedScale: CGFloat = PressHighlightMetrics.scale
 
     /// 按下强调层贴合的轮廓。
     /// 默认矩形（永远落在元素自己的边界内）；圆角卡片传
@@ -44,8 +69,8 @@ struct PressableCardButtonStyle: ButtonStyle {
     var shape = AnyShape(Rectangle())
 
     /// 按下强调层的不透明度。按下瞬间就到达这个值，所以它就是**峰值**强度；
-    /// 低于约 0.08 就开始「看不见」了，别调太小。
-    var pressedHighlightOpacity: Double = 0.12
+    /// 低于约 0.08 就开始「看不见」了，别调太小。取值来自 `PressHighlightMetrics.opacity`。
+    var pressedHighlightOpacity: Double = PressHighlightMetrics.opacity
 
     /// 按下强调层的颜色。默认 `Color.primary` —— 既有调用点（书卡行、分组 / 分类胶囊、
     /// 通知关闭按钮）的**强调层颜色**与改造前**逐字不变**（本轮只改了进入方向的曲线快慢，
@@ -73,27 +98,92 @@ struct PressableCardButtonStyle: ButtonStyle {
         let highlightOpacity: Double
         let highlightColor: Color
 
-        @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-        private var isPressed: Bool {
-            configuration.isPressed
-        }
-
+        /// 视觉本体**只有一处**：`pressHighlight(isPressed:shape:scale:opacity:color:)`
+        /// —— 手势版走的是同一个修饰器，两条路径的强调层 / 缩放 / 曲线在结构上不可能分叉。
         var body: some View {
             configuration.label
-                .overlay {
-                    shape.fill(highlightColor.opacity(isPressed ? highlightOpacity : 0))
-                }
-                .scaleEffect(reduceMotion || !isPressed ? 1 : pressedScale)
-                .animation(pressAnimation, value: isPressed)
+                .pressHighlight(
+                    isPressed: configuration.isPressed,
+                    shape: shape,
+                    scale: pressedScale,
+                    opacity: highlightOpacity,
+                    color: highlightColor
+                )
         }
+    }
+}
 
-        /// 按下（进入）与抬手（退出）各一条临界阻尼弹簧曲线，见类型注释。
-        /// 进入用 0.05：约 18ms 跨过 0.08 的可感知阈值、50ms 到位；退出保持原来的 0.2（减弱动态效果时 0.1）。
-        private var pressAnimation: Animation {
-            isPressed
-                ? .spring(response: 0.05, dampingFraction: 1)
-                : .spring(response: reduceMotion ? 0.1 : 0.2, dampingFraction: 1)
-        }
+// MARK: - 手势版：同一套按下强调层
+
+extension View {
+    /// **手势版**按下强调层：取值与曲线与 `PressableCardButtonStyle` **逐值相同**
+    /// （都来自 `PressHighlightMetrics`，所以不存在第二个真相源）。
+    ///
+    /// ## 什么时候用它
+    /// 当可点元素**不能用 `Button`** 时 —— 需要「单击 + 长按」两个动作的场景：
+    /// `Button` + `.simultaneousGesture(LongPressGesture)` 会把 Button **自己的按压手势挤掉**
+    /// （真机实测：单击连按下变色都没有、action 只在长按抬手时走一次 ⇒「长按进选择模式」顺手进了阅读页）。
+    /// 改用 `.onTapGesture` + `.onLongPressGesture` 之后没有 `ButtonStyle` 了，
+    /// 于是由调用方把「按下状态」传进来。
+    ///
+    /// ## 用法（两处调用点：`DownloadBookCard` 与 `BookshelfView.rowContent`）
+    /// ```swift
+    /// .onLongPressGesture(
+    ///     minimumDuration: 0.5,
+    ///     perform: { /* 长按动作 */ },
+    ///     onPressingChanged: { isPressed = $0 }        // ⚠️ 用 iOS 17 的当前签名
+    /// )
+    /// .pressHighlight(isPressed: isPressed, shape: AnyShape(RoundedRectangle(cornerRadius: Radius.sm)))
+    /// ```
+    /// ⚠️ 调用方必须真的把 `isPressed` 接上（`onPressingChanged` 在**按下那一刻**就给 `true`），
+    /// 否则 §9 的「按下瞬间必须有可感知反馈」就落空了。
+    func pressHighlight(
+        isPressed: Bool,
+        shape: AnyShape,
+        scale: CGFloat = PressHighlightMetrics.scale,
+        opacity: Double = PressHighlightMetrics.opacity,
+        color: Color = .primary
+    ) -> some View {
+        modifier(
+            PressHighlightModifier(
+                isPressed: isPressed,
+                shape: shape,
+                scale: scale,
+                opacity: opacity,
+                color: color
+            )
+        )
+    }
+}
+
+/// 手势版强调层的实现体（与 `PressableCardButtonStyle.PressableLabel` 共用同一套取值与曲线）。
+private struct PressHighlightModifier: ViewModifier {
+    let isPressed: Bool
+    let shape: AnyShape
+    let scale: CGFloat
+    let opacity: Double
+    let color: Color
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                shape.fill(color.opacity(isPressed ? opacity : 0))
+            }
+            .scaleEffect(reduceMotion || !isPressed ? 1 : scale)
+            .animation(pressAnimation, value: isPressed)
+    }
+
+    /// 按下（进入）与抬手（退出）各一条临界阻尼弹簧曲线，推导见 `PressableCardButtonStyle` 的类型注释。
+    private var pressAnimation: Animation {
+        isPressed
+            ? .spring(response: PressHighlightMetrics.enterResponse, dampingFraction: 1)
+            : .spring(
+                response: reduceMotion
+                    ? PressHighlightMetrics.exitResponseReduceMotion
+                    : PressHighlightMetrics.exitResponse,
+                dampingFraction: 1
+            )
     }
 }
