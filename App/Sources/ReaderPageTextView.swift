@@ -212,8 +212,8 @@ final class PageBoxTextView: UITextView {
     override func layoutSubviews() {
         super.layoutSubviews()
         pinTextContainerToBounds()
-        // ⚠️ 仅诊断用（删诊断时连同 `captureDiagnostics()` 一起删）。
-        if ReaderPageDiagnostics.isEnabled {
+        // ⚠️ 仅诊断用（删诊断时连同 `captureDiagnostics()` 一起删）：两条展示路径任一开启就采集。
+        if ReaderPageDiagnostics.isOn {
             captureDiagnostics()
         }
     }
@@ -280,5 +280,62 @@ final class PageBoxTextView: UITextView {
             lastLineFragmentMaxY: lastFragment,
             lastLineOverflow: max(lastUsed, lastFragment) - textContainer.size.height
         )
+        if ReaderPageDiagnostics.isUIKitPanelEnabled {
+            updateDiagnosticsLabel()
+        }
+    }
+
+    /// ⚠️ 仅诊断用：UIKit 自绘诊断面板（当前生效路径，见 `ReaderPageDiagnostics.isUIKitPanelEnabled`）。
+    ///
+    /// 为什么用它：owner 真机上 SwiftUI 浮层「挂了却没渲染」（包已确认含该代码）⇒ 改用最原始的方式
+    /// —— 文本视图的一个 `UILabel` 子视图（子视图天然画在文本之上，与 SwiftUI 的图层 / 时序无关）。
+    /// 半透明深底 + `UIColor.label`：浅色页面上底被提亮、深色页面上底变暗，文字两种模式下都读得清。
+    /// `isUserInteractionEnabled = false`：不吃手势（正文本身也不吃，见 `ReaderView` 的
+    /// `.allowsHitTesting(false)`）。
+    private lazy var diagnosticsLabel: UILabel = {
+        let label = UILabel()
+        label.numberOfLines = 0
+        // 语义字号（随 Dynamic Type 缩放）；不硬编码 pt —— 正式 UI 尺寸走 DesignTokens，这是临时件。
+        label.font = UIFont.preferredFont(forTextStyle: .caption2)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .label
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        label.layer.cornerRadius = DesignTokens.Radius.sm
+        label.clipsToBounds = true
+        label.isUserInteractionEnabled = false
+        return label
+    }()
+
+    /// ⚠️ 仅诊断用：把面板文字与尺寸刷成最新一帧（位置 = 正文盒左上 (8, 8)，宽度固定不折行）。
+    private func updateDiagnosticsLabel() {
+        let label = diagnosticsLabel
+        label.text = Self.diagnosticsText(ReaderPageDiagnostics.snapshot)
+        let width = max(bounds.width - 2 * DesignTokens.Spacing.xs, 0)
+        label.preferredMaxLayoutWidth = width
+        let fitted = label.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        label.frame = CGRect(
+            x: DesignTokens.Spacing.xs,
+            y: DesignTokens.Spacing.xs,
+            width: width,
+            height: fitted.height
+        )
+        if label.superview == nil {
+            addSubview(label)
+        }
+    }
+
+    /// ⚠️ 仅诊断用：6 行诊断文本（与 SwiftUI 版同源，读同一个 `Snapshot`；页码在右下角 HUD 里有）。
+    private static func diagnosticsText(_ snapshot: ReaderPageDiagnostics.Snapshot) -> String {
+        func pt(_ value: CGFloat) -> String {
+            String(format: "%.1f", value)
+        }
+        return [
+            "配置盒(分页) \(pt(snapshot.configWidth)) × \(pt(snapshot.configHeight))",
+            "渲染 bounds \(pt(snapshot.boundsWidth)) × \(pt(snapshot.boundsHeight))",
+            "排版容器 \(pt(snapshot.containerWidth)) × \(pt(snapshot.containerHeight))",
+            "本页字形 容器内 \(snapshot.glyphsInContainer) / 共 \(snapshot.glyphCount)（\(snapshot.lineCount) 行）",
+            "末行底边 used \(pt(snapshot.lastLineUsedMaxY)) · frag \(pt(snapshot.lastLineFragmentMaxY))",
+            "末行越底 \(pt(snapshot.lastLineOverflow))",
+        ].joined(separator: "\n")
     }
 }

@@ -11,16 +11,35 @@ import SwiftUI
 /// ③ 末行底边越出排版盒（TextKit 的行片段语义）。
 /// owner 截一张图即可定位是哪一种。
 ///
+/// ## 两条展示路径（⛔ 同一时刻只开一条）
+/// - **UIKit 自绘面板（当前生效）**：`PageBoxTextView` 里的 `UILabel` 子视图 —— owner 真机上
+///   SwiftUI 浮层「挂了却没渲染」（包已确认含该代码）⇒ 用子视图兜底，与 SwiftUI 的图层 / 时序无关。
+///   开关 = `isUIKitPanelEnabled = true`。
+/// - **SwiftUI 浮层（默认关，保留备用）**：`ReaderView.body` 最外层那条
+///   `.readerPageDiagnostics(page:pageCount:)`。**要打开它**：把下面 `isEnabled` 改成 `true`，
+///   同时把 `isUIKitPanelEnabled` 改成 `false`（一行常量，其余不用动）。
+///
 /// ## 怎么删（提交前整块删干净，共 3 处）
 /// 1. 删本文件 `App/Sources/ReaderPageDiagnostics.swift`；
 /// 2. `App/Sources/ReaderView.swift`：删那一行 `.readerPageDiagnostics(page:pageCount:)`；
 /// 3. `App/Sources/ReaderPageTextView.swift`：删 `pageBoxWidth` 属性、`makeUIView` 与
-///    `updateUIView` 里各一行 `pageBoxWidth = …`、`layoutSubviews` 里的 `captureDiagnostics()`
-///    调用、以及 `captureDiagnostics()` 方法本身。
+///    `updateUIView` 里各一行 `pageBoxWidth = …`、`layoutSubviews` 里的
+///    `if ReaderPageDiagnostics.isOn { captureDiagnostics() }`，以及 `captureDiagnostics()`、
+///    `diagnosticsLabel`、`updateDiagnosticsLabel()`、`diagnosticsText(_:)` 四个诊断成员。
 enum ReaderPageDiagnostics {
-    /// 总开关（编译期常量）：诊断构建置 `true`；删本文件时它一起消失，**不影响正式逻辑**
-    /// （`false` 时下面的分支会被编译器整个去掉）。
-    static let isEnabled = true
+    /// SwiftUI 浮层开关（**默认关**）。owner 真机上「挂了却没渲染」（包已确认含该代码）⇒
+    /// 本轮改用 `isUIKitPanelEnabled` 的 UIKit 自绘面板。
+    /// 要换回 SwiftUI 浮层：本行改 `true`、下一行改 `false` 即可（其余不用动）。
+    static let isEnabled = false
+
+    /// UIKit 自绘面板开关（**当前生效路径**）：`PageBoxTextView` 里的 `UILabel` 子视图。
+    /// 子视图天然画在文本之上，不依赖 SwiftUI 的 overlay / TimelineView 图层与时序。
+    static let isUIKitPanelEnabled = true
+
+    /// 数据采集总开关：两条展示路径任一开启就需要采集（`PageBoxTextView.layoutSubviews` 用它）。
+    static var isOn: Bool {
+        isEnabled || isUIKitPanelEnabled
+    }
 
     /// 最近一帧的实测值：由 `PageBoxTextView` 在布局后**直接赋值**。
     ///
@@ -55,17 +74,23 @@ enum ReaderPageDiagnostics {
 
 /// 诊断浮层：只读 `ReaderPageDiagnostics.snapshot`，不改状态、不吃手势、不进读屏。
 ///
-/// 放在**左上角**（不遮正文末行 —— owner 要看的正是页面底部那一行）。
+/// ## 三条「必须真的看得见」的保险（上一版 owner 没看到它）
+/// 1. **由调用方挂到最外层**（`ReaderView.body` 最末尾那条 `.readerPageDiagnostics(...)`）——
+///    不在正文层内部，正文层 / 页面背景色 / 边框都盖不住它；
+/// 2. **面板不包在 `if` 里**：`TimelineView` 一出现就渲染内容（周期刷新只是附带），
+///    排除「条件为假 / 首帧没触发」这类看不见的失败（开关挪到了下面的 `@ViewBuilder` 里）；
+/// 3. **不透明底**（`.regularMaterial`）+ 语义前景色：浅色 / 深色下都一眼可见。
+///
+/// 位置：左上、**让开章节名 HUD 那一行**（下移 `Spacing.xxl`）；不遮正文末行 ——
+/// owner 要看的正是页面底部那一行。
 struct ReaderPageDiagnosticsOverlay: View {
     /// 当前页下标（0 基）与总页数，由调用方从 `ReaderFeature.State` 传入。
     let page: Int
     let pageCount: Int
 
     var body: some View {
-        if ReaderPageDiagnostics.isEnabled {
-            TimelineView(.periodic(from: .now, by: 0.4)) { _ in
-                panel(ReaderPageDiagnostics.snapshot)
-            }
+        TimelineView(.periodic(from: .now, by: 0.4)) { _ in
+            panel(ReaderPageDiagnostics.snapshot)
         }
     }
 
@@ -82,8 +107,9 @@ struct ReaderPageDiagnosticsOverlay: View {
         .font(.system(.caption2, design: .monospaced))
         .foregroundStyle(.primary)
         .padding(DesignTokens.Spacing.xs)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
-        .padding(DesignTokens.Spacing.xs)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+        .padding(.top, DesignTokens.Spacing.xxl)
+        .padding(.horizontal, DesignTokens.Spacing.xs)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -102,9 +128,17 @@ struct ReaderPageDiagnosticsOverlay: View {
 
 extension View {
     /// 叠一层临时诊断浮层（内容与开关见 `ReaderPageDiagnostics`）。
+    ///
+    /// 关掉时**原样返回**（不产生任何额外层）—— 用 `@ViewBuilder` 而不是在浮层内部判断，
+    /// 免得「浮层里那个 `if` 为假」这种失败模式让人误以为「挂了但看不见」。
+    @ViewBuilder
     func readerPageDiagnostics(page: Int, pageCount: Int) -> some View {
-        overlay(alignment: .topLeading) {
-            ReaderPageDiagnosticsOverlay(page: page, pageCount: pageCount)
+        if ReaderPageDiagnostics.isEnabled {
+            overlay(alignment: .topLeading) {
+                ReaderPageDiagnosticsOverlay(page: page, pageCount: pageCount)
+            }
+        } else {
+            self
         }
     }
 }
