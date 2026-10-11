@@ -18,11 +18,14 @@ import SwiftUI
 // 现在只有一项（「书籍详情」），但渲染路径是 `[ReaderMoreMenuItem]` 的遍历 ⇒
 // **以后加项只改数组**（`ReaderMoreMenuItem.readerMoreMenu(onShowDetail:)`），不动视图。
 //
-// ## 几何（2026-10-11 owner 看过几何对比稿后定的**最终**口径）
-// 面板宽 = `clamp(内容理想宽, 150, 240)`、高 = 4 + 行高 44 + 4 = **52**
-// ⇒ 单项时 **150 × 52 ≈ 2.9:1**（改前是 100 × 68 = 1.47:1 的「方块」）。
-// 行内是**纯文字、单独水平居中**（`.frame(maxWidth: .infinity)` + 默认 `.center` 对齐）。
-// 推导与实测留白见 `ReaderMoreMenuMetrics` 与 `row(_:)`。
+// ## 几何（2026-10-11 owner 定稿：**一个选项 = 一张卡片**）
+// 每张卡片按**自己的文字宽**定尺寸：宽 = 文字 + `textHorizontalPadding`(12) × 2 + `cardPadding`(4) × 2、
+// 高 = 行高 44 + 4 × 2 = **52** ⇒ 单项「书籍详情」= **100 × 52**；
+// 四边视觉留白**相等**（上下 `(44 − 20) / 2 + 4 = 16` = 左右 `12 + 4 = 16`）。
+// 卡片之间留 `Spacing.xs`(8)、整体右对齐（`VStack(alignment: .trailing)`）。
+// **按下高亮覆盖整张卡片**：内边距与玻璃都在 Button 的 label 内部 ⇒ label 的 frame 就是卡片，
+// 强调层的 `shape` 取同一个 `Radius.lg`(18) ⇒ 与卡片完全重合（零内缩、天然同心）。
+// 推导见 `ReaderMoreMenuMetrics` 与 `card(_:)`。
 
 // MARK: - 条目模型
 
@@ -76,50 +79,42 @@ extension ReaderMoreMenuItem {
 
 /// 下拉面板专有的尺度（**有名字、带推导**，不散落成魔数）。
 ///
-/// ⚠️ 面板的内边距在这里**自己开常量**（`panelPadding`），**不**复用
+/// ⚠️ 卡片的两个内边距在这里**自己开常量**，**不**复用
 /// `ReaderChromeMetrics.panelVerticalPadding`(12) / `barInnerPadding`(12)：
 /// 那两条是**上下栏与跳章条**的内边距（三者同高 68pt 靠的就是它），
-/// 菜单面板要的是更紧凑的一档（4）—— 复用共享常量会把三条面板一起压扁或撑高。
+/// 菜单卡片要的是更紧凑的一档（4 + 12）—— 复用共享常量会把三条面板一起压扁或撑高。
 private enum ReaderMoreMenuMetrics {
-    /// 4 —— 面板的**内边距**（上下左右**同一个值**）。
+    /// 4 —— **卡片的内边距**（上下左右同一个值）。
     ///
-    /// owner 口径：**选项左右内边距与上下内边距一致** ⇒ 横竖共用这一个常量，不拆成两个。
-    ///
-    /// ## 面板几何
-    /// 单项「书籍详情」的内容理想宽 = 4 × 2 + 文字 68 = **76**（< `minPanelWidth` 150 ⇒ 被它托住）；
-    /// 面板高 = 4 × 2 + 行高 44 = **52pt**。
-    ///
-    /// ## ⚠️ 按下强调层与面板圆角的几何（owner 已知悉，本次刻意保持强调层圆角不变）
-    /// 强调层是画在**行的 frame** 上的 `Radius.xs`(6) 圆角矩形，面板圆角是 `Radius.lg`(18)。
-    /// 内边距 4 ⇒ 强调层左右各只内缩 4pt。四角是否落在面板圆角**之内**，判据是
-    /// `|内边距 + 强调层圆角 − 面板圆角| × √2 + 强调层圆角 ≤ 面板圆角`
-    /// ⇒ `|4 + 6 − 18| × 1.414 + 6 ≈ 17.31 ≤ 18` ✓ **仍在内、按下不会露方角**。
-    /// ⚠️ 但**余量只有约 0.7pt**：同心解是 `内边距 + 强调层圆角 = 面板圆角`
-    /// ⇒ 内边距 4 时强调层圆角应取 **14**（本项目 `Radius.xs`(6) 的推导本来就是 `18 − 12`）。
-    /// 本次**不改**强调层圆角（保持 6），这个取舍留给 owner。
-    static let panelPadding: CGFloat = 4
+    /// ## ⚠️ 它加在 **Button 的 label 内部**（不是卡片外面）
+    /// 这样 label 的 frame **就是整张卡片**，按下强调层（`PressableCardButtonStyle` 的 overlay）
+    /// 因此与卡片**完全重合**（同一形状、同一圆角 `Radius.lg`(18)、**零内缩**）——
+    /// owner 口径「点击效果的圆角要覆盖到整个卡片」。同心是**构造上的恒等式**（同一个圆角值）。
+    /// ⛔ 不要再把它挪到卡片外面：那样强调层会被内缩 4pt，既与卡片不同心、又要在圆角处算余量。
+    static let cardPadding: CGFloat = 4
 
-    /// 150 —— 面板的**最小宽度**。
+    /// 12 —— 文字**额外**的左右内边距（加在 `Text` 那一层）。
     ///
-    /// ## 推导（⚠️ **观感值，需真机复核**）
-    /// 单项「书籍详情」的文字宽 ≈ 4 字 × `.body`(17pt) = **68**；
-    /// 加面板内边距 4 × 2 = 8 ⇒ 内容理想宽 **76 < 150** ⇒ 面板被这条下限托到 **150**。
-    /// 面板高 = 4 × 2 + 44 = **52** ⇒ **150 × 52 ≈ 2.9 : 1**，一眼是「一条菜单」而不是「一个方块」。
-    /// 行内容宽 = 150 − 8 = **142** ⇒ 文字 68 居中后**左右各约 37pt 留白**。
-    ///
-    /// ## 为什么需要它（owner 真机反馈「选项长宽太接近导致太臃肿」）
-    /// 改前是 **100 × 68（1.47:1）**：面板**完全没有横向内边距**（旧注释写着「横向内边距取 12」，
-    /// 代码里并不存在），内容贴着左右边缘 ⇒ 又方又挤。⇒ 补内边距 + 加这条下限，
-    /// 比例从 1.47:1 变成 2.9:1。
-    static let minPanelWidth: CGFloat = 150
+    /// ## owner 口径：文字四周的视觉留白必须**相等**
+    /// - **上下** = 行高 44 与文字行高 ≈20 的差的一半 `(44 − 20) / 2 = 12` + 卡片内边距 4 = **16pt**；
+    /// - **左右** = 本常量 12 + 卡片内边距 4 = **16pt** ⇒ 与上下相等 ✓。
+    /// ⇒ 这就是 owner 说的「左右边距」——指的是**文字距卡片边框**的距离，
+    /// 不是可点区域那一层（可点区域仍是整张卡片）。
+    static let textHorizontalPadding: CGFloat = 12
 
-    /// 240 —— 面板的最大宽度。超长词条时行内容宽 = 240 − 内边距 4 × 2 = **232**，
-    /// 文字在这一段内由 `lineLimit(1)` 截断。
+    /// 240 —— **每张卡片**的最大宽度（语义已从「整个面板的上限」变成「单张卡片的上限」）。
     ///
-    /// ⚠️ 为什么 240 结构上**不可能溢出屏幕**：面板左右各留
+    /// 卡片宽 = 文字 + `textHorizontalPadding`(12) × 2 + `cardPadding`(4) × 2
+    /// ⇒ **文字上限 = 240 − 32 = 208**，超长词条在这一段内由 `lineLimit(1)` 截断。
+    ///
+    /// ⚠️ 为什么 240 结构上**不可能溢出屏幕**：卡片左右各留
     /// `ReaderChromeMetrics.panelOuterMargin`(16) ⇒ 需要 240 + 32 = **272pt**，
     /// 而可运行 iOS 17 的最窄机型是 **320pt** ⇒ 余量 **48pt**。
-    static let maxPanelWidth: CGFloat = 240
+    ///
+    /// ⛔ **刻意没有「最小宽度」**：有了它，短词条的卡片会被托宽、而文字仍居中
+    /// ⇒ 左右留白远大于上下（16pt）—— 那正是 owner 这次指出的「不一致」。
+    /// 卡片按**自己的文字宽**定尺寸，四边留白才天然相等。
+    static let maxCardWidth: CGFloat = 240
 }
 
 // MARK: - 点面板外关闭
@@ -154,12 +149,19 @@ struct ReaderMoreMenuDismissLayer: View {
 
 // MARK: - 面板
 
-/// 右上角「更多」的**下拉面板**：与上下栏同一套玻璃，右对齐、贴在上栏下方 8pt。
+/// 右上角「更多」的**下拉区**：与上下栏同一套玻璃，右对齐、贴在上栏下方 8pt。
+///
+/// ## ⚠️ 结构是「**一个选项 = 一张卡片**」（owner 2026-10-11 口径）
+/// 本视图只是把若干张**各自独立**的卡片按 `.trailing` 堆起来：
+/// 每张卡片自带 `ReaderChromeGlass`（圆角 / 材质 / 边缘线 / 柔影）、按**自己的文字宽**定尺寸，
+/// 卡片之间留 `Spacing.xs`(8)。**没有** `Divider()`（卡片之间不需要分隔线），
+/// 也**没有**「整块面板的内边距 / 最小宽度」——那两条会破坏「文字四边留白相等」。
+/// ⇒ 以后新增一个选项就是**再加一张卡片**，不要再改回「一个面板装多行」。
 ///
 /// ## 为什么 `edge: .top`
-/// `ReaderChromeEdge` 的语义是「**贴近正文的那一侧**」：本面板的内容在**下方**（正文方向）
+/// `ReaderChromeEdge` 的语义是「**贴近正文的那一侧**」：卡片的内容在**下方**（正文方向）
 /// ⇒ 边缘线画在**下沿**、柔影朝下（`shadowOffsetY = +5`）落在正文上，
-/// **不会**把上方的上栏压暗 —— 那正是改造前「颜色不一致」的另一半原因。
+/// **不会**把上方的上栏（或上一张卡片）压暗 —— 那正是改造前「颜色不一致」的另一半原因。
 /// 圆角与材质由 `ReaderChromeGlass` 自带（`Radius.lg`(18) + `.regularMaterial` + 系统底色 @0.92），
 /// 本文件**不**再画第二层卡面。
 ///
@@ -174,82 +176,71 @@ struct ReaderMoreMenuPanel: View {
     let onSelect: (ReaderMoreMenuItem) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                // 行间分隔线用系统 `Divider()`（不自算 1px），与分组栏那条同源。
-                // 单项时不渲染 ⇒ 面板不会多出一条悬空的分隔线。
-                if index > 0 {
-                    Divider()
-                }
-                row(item)
+        // ## 一个选项 = 一张卡片（owner 口径）
+        // 以后新增一个选项就是**再加一张卡片**，不要再改回「一个面板装多行 + 分隔线」。
+        // 每张卡片**各自**带 `ReaderChromeGlass`（圆角 / 材质 / 边缘线 / 柔影都在它里面）⇒ 不需要 `Divider()`；
+        // 卡片之间留 `Spacing.xs`(8) —— 与「面板距上栏 8pt」**同一个令牌**。
+        // ⚠️ `alignment: .trailing` 是必须的：外层已经右对齐 ⇒ 每张卡片按**自己的宽度**、
+        // 且**右边缘对齐**；左边缘允许参差（owner 已确认）。
+        VStack(alignment: .trailing, spacing: DesignTokens.Spacing.xs) {
+            ForEach(items) { item in
+                card(item)
             }
         }
-        // 上下左右**同一个**内边距（owner 口径：选项左右内边距与上下一致）。
-        // ⚠️ 它必须加在**面板**上，不能加在行**内部**：
-        // 按下强调层（`ReaderChromeMetrics.buttonStyle`）画在**行的 frame** 上、是 `Radius.xs`(6)
-        // 圆角矩形；加在行内部则行的 frame 从面板边缘 x=0 起 ⇒ 强调层贴着面板边缘、
-        // 且四角落到面板 `Radius.lg`(18) 圆角的**弧外**，按下时在圆角外露方角。
-        // 加在面板上则强调层四边各内缩 4pt ⇒ `|4 + 6 − 18| × √2 + 6 ≈ 17.31 ≤ 18`
-        // ⇒ **仍在圆角之内、不会露方角**（余量约 0.7pt；完整算式与「同心解」见 `panelPadding`）。
-        .padding(ReaderMoreMenuMetrics.panelPadding)
-        // ## 宽度 = clamp(内容理想宽, 150, 240)：先抬下限 / 封顶、再**强制贴合内容**
-        // `.frame(minWidth:maxWidth:)` 单独用**不足以保证贴合**（它是「夹取提案」的语义，
-        // 遇到弹性提案会跟着提案走）⇒ 在它**之后**加 `.fixedSize(horizontal: true, vertical: false)`：
-        // 这一层向下提案「未指定宽度」，内层 frame 于是按内容的**理想宽**定尺寸。
-        // ⇒ 单项「书籍详情」：内容理想宽 = 4 + 68 + 4 = **76** ⇒ 被 `minPanelWidth`(150) 托到 **150**；
-        // 长词条先顶到 240、再由 `lineLimit(1)` 截断 ⇒ 宽度**结构上不可能**超过 240。
-        // ⚠️ 顺序不可换：`.fixedSize` 必须在 `.background { ReaderChromeGlass }` **之前**，
-        // 否则玻璃会按外层提案拉伸，面板右侧留出一条没有内容的空玻璃。
-        .frame(
-            minWidth: ReaderMoreMenuMetrics.minPanelWidth,
-            maxWidth: ReaderMoreMenuMetrics.maxPanelWidth,
-            alignment: .leading
-        )
-        .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(style.foreground)
-        .background {
-            ReaderChromeGlass(style: style, edge: .top)
-        }
     }
 
-    /// 一行：**纯文字，且在选项里单独水平居中**（owner 2026-10-11 的最终口径）。
+    /// 一张卡片：**纯文字**、四边视觉留白相等、按**自己的文字宽**定尺寸、**按下高亮覆盖整张卡片**。
     ///
     /// ## 命中区与按下反馈
-    /// 行高 ≥ `ReaderChromeMetrics.minTouchTarget`(44)（HIG §9），整块 `contentShape` 可点；
-    /// 按下反馈**复用控制栏那一个** `buttonStyle`（`PressableCardButtonStyle`）——
-    /// 面板与上下栏的按钮因此是同一种反馈，不另造第二个按下样式。
+    /// 行高 ≥ `ReaderChromeMetrics.minTouchTarget`(44)（HIG §9），整块 `contentShape` 可点。
+    /// 按下反馈用 `PressableCardButtonStyle`，**`shape` 传 `Radius.lg`(18)** ——
+    /// 与 `ReaderChromeGlass` 自己的圆角**同一个值** ⇒ 强调层与卡片**完全重合**
+    /// （同一形状、同一圆角、**零内缩**），同心是构造上的恒等式。
+    /// ⛔ 不要再传 `Radius.xs`(6)、也**不要**把 `cardPadding` / 玻璃挪到 Button 外面：
+    /// 那样强调层会被内缩、与卡片不同心，还要在圆角处算「会不会露方角」的余量。
     ///
-    /// ## 居中怎么来的
-    /// `Text` 外面套一层 `.frame(maxWidth: .infinity)`（**默认 `.center` 对齐**）⇒
-    /// 文字块撑满行的可用宽、文字中心 = 行中心 = 面板中心。
+    /// ## 四边视觉留白相等（owner 口径）
+    /// - **上下** = 行高 44 与文字行高 ≈20 之差的一半 `(44 − 20) / 2 = 12` + `cardPadding`(4) = **16pt**；
+    /// - **左右** = `textHorizontalPadding`(12) + `cardPadding`(4) = **16pt** ✓。
+    /// owner 说的「左右边距」指的是**文字距卡片边框**的距离 —— 可点区域仍是整张卡片。
     ///
-    /// ## ⚠️ 刻意**不**给 `Text` 加任何 `maxWidth`
-    /// 加了就成了「有上限的弹性宽」，算式变复杂、也没必要：超长词条由
-    /// 「面板上限 240 + `.lineLimit(1)`」自然截断（长词条时行内容宽 = 240 − 4 × 2 = **232pt**，
-    /// 文字就在这一段里截断）。
-    ///
-    /// ## 当前唯一一项的实测几何（「书籍详情」）
-    /// 行内容宽 = 面板 150 − 内边距 4 × 2 = **142**；文字 ≈ 68 居中 ⇒ **左右各约 37pt 留白**。
-    ///
-    /// ## 内边距在**面板**上（`panelPadding` 4），不在行里
-    /// 见面板那一层的注释：加在行内部会让强调层贴着面板边缘、并在圆角外露方角。
-    private func row(_ item: ReaderMoreMenuItem) -> some View {
+    /// ## 宽度：按自己的文字宽（⛔ 没有最小宽度）
+    /// `textHorizontalPadding` 加在 `Text` 那一层、`cardPadding` 加在它外面（**都在 label 内**）
+    /// ⇒ 卡片宽 = 文字 + 12×2 + 4×2；`.fixedSize(horizontal: true, vertical: false)` 让卡片按
+    /// **理想宽**定尺寸（玻璃在 label 内、贴着 label，因此不会出现「空玻璃」）。
+    /// 超长词条由 `maxCardWidth`(240) 封顶、文字在 240 − 32 = **208pt** 内 `lineLimit(1)` 截断。
+    /// ⛔ 刻意**不**引入「最小宽度」：那会把短词条的卡片托宽、而文字仍居中
+    /// ⇒ 左右留白远大于上下，正是 owner 指出过的不一致。
+    private func card(_ item: ReaderMoreMenuItem) -> some View {
         Button {
             onSelect(item)
         } label: {
             Text(item.title)
                 .font(.body)
                 .lineLimit(1)
-                // 撑满行的可用宽 ⇒ 文字中心 = 行中心 = 面板中心。
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, ReaderMoreMenuMetrics.textHorizontalPadding)
                 .frame(minHeight: ReaderChromeMetrics.minTouchTarget)
+                // 卡片内边距与玻璃都在 **label 内部** ⇒ label 的 frame 就是整张卡片，
+                // 强调层（画在 label 上）因此覆盖整张卡片。
+                .padding(ReaderMoreMenuMetrics.cardPadding)
                 .contentShape(Rectangle())
+                .background {
+                    ReaderChromeGlass(style: style, edge: .top)
+                }
         }
-        .buttonStyle(ReaderChromeMetrics.buttonStyle)
+        .buttonStyle(
+            PressableCardButtonStyle(
+                shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
+            )
+        )
         .disabled(!item.isEnabled)
         // 置灰只靠 `.disabled` 不够：本项目按钮走**自定义** `ButtonStyle`，系统不会替它降级外观
         // ⇒ 不显式调透明度就会「看着能点、点下去没反应」（与跳章条的处置同源，同一个常量）。
+        // ⚠️ `.disabled` 同时让 `ButtonStyle` 收不到按下事件 ⇒ 置灰项**没有**按下反馈（刻意保持）。
         .opacity(item.isEnabled ? 1 : ReaderChromeMetrics.disabledOpacity)
+        .frame(maxWidth: ReaderMoreMenuMetrics.maxCardWidth, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
