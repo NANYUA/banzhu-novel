@@ -210,8 +210,6 @@ struct ReaderView: View {
                 .chromeToggleTapFallback(viewStore: viewStore) {
                     setChromeVisible(!isChromeVisible)
                 }
-                // ⚠️ 临时诊断浮层（删诊断时删本行 + 删 `ReaderPageDiagnostics.swift`）。
-                .readerPageDiagnostics(page: viewStore.currentPageIndex, pageCount: viewStore.pages.count)
                 .task {
                     viewStore.send(.loadSavedSettings(contentSize))
                     viewStore.send(
@@ -287,6 +285,8 @@ struct ReaderView: View {
                 downloadPickerSheet(viewStore)
             }
             .preferredColorScheme(viewStore.config.appearanceMode.preferredColorScheme)
+            // 渲染盒 ≠ 分页盒 ⇒ 确定性回写（每帧比较，不等就送回；见 `PageBoxTextView.reportBoxMismatchIfNeeded`）。
+            .environment(\.readerBoxMismatchHandler) { size in viewStore.send(.containerSizeChanged(size)) }
         }
     }
 }

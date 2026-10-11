@@ -3,6 +3,24 @@ import NovelPagination
 import SwiftUI
 import UIKit
 
+/// 渲染盒 ≠ 分页盒时把**真实盒**送回 reducer 的回调（由 `ReaderView` 注入，见
+/// `EnvironmentValues.readerBoxMismatchHandler`）。
+///
+/// 为什么走环境而不是构造参数：`PageTextView` 有**两处**构造点（`ReaderView.singlePage` 与
+/// `ReaderView+PageGesture.panPage`），而平移翻页是**默认路径** —— 逐点传参必须同时改两处
+/// （漏一处就只在兜底路径生效）；环境值对两处一视同仁，且不动任何构造点。
+private struct ReaderBoxMismatchKey: EnvironmentKey {
+    static let defaultValue: ((CGSize) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    /// 渲染盒 ≠ 分页盒时的确定性回写（`ReaderView` 里转成 `viewStore.send(.containerSizeChanged)`）。
+    var readerBoxMismatchHandler: ((CGSize) -> Void)? {
+        get { self[ReaderBoxMismatchKey.self] }
+        set { self[ReaderBoxMismatchKey.self] = newValue }
+    }
+}
+
 /// 单页 `UITextView` 包装（UIKit 承载，SwiftUI 里用 `UIViewRepresentable`）。
 ///
 /// `PageTurnMode` 只剩 `.slide`：恒为单页渲染，滚动恒关闭。
@@ -15,6 +33,20 @@ struct PageTextView: UIViewRepresentable {
     /// 为 `false` 时本页第一行是**续行**（本页从段落中间开始），不加首行缩进；
     /// 只影响本页**第一个段落**，本页后续段落照旧加缩进。
     let startsAtParagraphStart: Bool
+
+    /// 渲染盒 ≠ 分页盒时的回写回调（见 `ReaderBoxMismatchKey`）。
+    ///
+    /// ⚠️ 刻意**不写 `private`**：`private` 存储属性会让**隐式 memberwise 初始化器**变成
+    /// `private`（Swift 规则），而本结构体在 `ReaderView` 与 `ReaderView+PageGesture` 两个文件里
+    /// 构造 —— 那会直接编译不过。下面另写了显式 `init`，把这条歧义彻底去掉。
+    @Environment(\.readerBoxMismatchHandler) var onBoxMismatch: ((CGSize) -> Void)?
+
+    /// 显式初始化器：只吃三个渲染输入（环境值由 SwiftUI 注入，不参与构造）。
+    init(text: String, configuration: PaginationConfiguration, startsAtParagraphStart: Bool) {
+        self.text = text
+        self.configuration = configuration
+        self.startsAtParagraphStart = startsAtParagraphStart
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -33,15 +65,19 @@ struct PageTextView: UIViewRepresentable {
         // 视图盒之外**一律不画**：正文盒（= 下边距的线）之下不许出现正文。
         // 高度那半由 `PageBoxTextView` 封顶到分页盒兑现，这里是最后一道兜底。
         textView.clipsToBounds = true
-        // 容器高的**上限**（= 分页盒高）：见 `pinTextContainerToBounds()` 的说明。
-        textView.pageBoxHeight = configuration.containerSize.height
-        // ⚠️ 仅诊断用（`ReaderPageDiagnostics`）：分页盒的**宽**，浮层要拿它跟 bounds 宽对比。
-        textView.pageBoxWidth = configuration.containerSize.width
+        // 分页盒（容器高的上限 + 「渲染盒是否等于分页盒」的比较基准）。
+        textView.paginatedBoxSize = configuration.containerSize
+        textView.onBoxMismatch = onBoxMismatch
         return textView
     }
 
     func updateUIView(_ uiView: PageBoxTextView, context: Context) {
         context.coordinator.parent = self
+
+        // ⚠️ 这两项**先于**下面的内容比较写：盒不匹配的回写恰恰要覆盖「内容没变、只是盒还没落定」
+        // 那条路径（`guard contentChanged` 之后才写就会漏掉它）。
+        uiView.paginatedBoxSize = configuration.containerSize
+        uiView.onBoxMismatch = onBoxMismatch
 
         let contentChanged = context.coordinator.appliedText != text
             || context.coordinator.appliedConfiguration != configuration
@@ -82,12 +118,6 @@ struct PageTextView: UIViewRepresentable {
             bottom: 0,
             right: configuration.inset.trailing
         )
-        // 容器高的**上限** = 分页盒高（`configuration.containerSize.height`，= 边框标线所在盒的高
-        // = `TextKitMeasuring` 排版用的同一个高）。必须在 `textContainerInset` **之后**钉，
-        // 否则用的是上一份 inset。
-        uiView.pageBoxHeight = configuration.containerSize.height
-        // ⚠️ 仅诊断用（删诊断时连同 `captureDiagnostics()` 一起删）。
-        uiView.pageBoxWidth = configuration.containerSize.width
         uiView.pinTextContainerToBounds()
         uiView.backgroundColor = configuration.backgroundStyle.uiColor(
             custom: configuration.customBackgroundColor,
@@ -104,7 +134,8 @@ struct PageTextView: UIViewRepresentable {
     /// 高度同理：返回的盒高 = 父级可用高 = `configuration.containerSize.height`（`ReaderView`
     /// 那层的 `.frame(width:height:)` 已把可用盒钉成分页盒）⇒ 与 `TextKitMeasuring` 的容器高同源。
     /// ⚠️ 这里**不做** `min(提案, 盒)` 的封顶：那会在「配置尺寸还没同步过来」的首帧把盒缩小
-    /// （配置默认 320×480）⇒ 页面被居中缩小、首帧闪一下。
+    /// （配置默认 320×480）⇒ 页面被居中缩小、首帧闪一下；盒不同步由 `PageBoxTextView` 的
+    /// **确定性回写**（`reportBoxMismatchIfNeeded()`）修，而不是靠把渲染盒改小。
     /// 「末行越盒」的根因在**度量侧**（`TextKitMeasuring.trimmedGlyphRange` 逐行回退，那一行落到
     /// 下一页）；`PageBoxTextView` 的容器封顶与 `ReaderView.readerContent` 的 `.clipped()` 只是兜底。
     func sizeThatFits(
@@ -180,20 +211,21 @@ struct PageTextView: UIViewRepresentable {
 }
 
 /// 正文盒 `UITextView`：把**文本容器**钉死在正文盒内（高度这半；宽度那半由
-/// `widthTracksTextView` 维护，见 `PageTextView.makeUIView`）。
+/// `widthTracksTextView` 维护，见 `PageTextView.makeUIView`），并在**渲染盒与分页盒不一致时
+/// 把真实盒回写出去**（时序缺陷的确定性修复，见 `reportBoxMismatchIfNeeded()`）。
 ///
-/// ## 为什么容器高要**封顶到分页盒**（owner 真机两轮反馈）
-/// - 第一轮只把容器高钉到 `bounds.height`（「视图盒高」）：真机复测**没生效**。原因是这条
-///   等式的前提「`bounds` == 正文盒」**不成立** —— 非滚动 `UITextView` 的固有高度是**内容高**，
-///   SwiftUI 给它的 frame 可能比正文盒高 ⇒ `bounds.height` 本身就是那个「出界的盒」，钉在它
-///   上面等于没钉；`clipsToBounds` 也救不了（正文在**视图内**，只是视图比盒高）。
-/// - 本版把上限取成**分页盒**：`min(bounds − 竖向 inset, configuration.containerSize.height)`。
+/// ## 为什么容器高要**封顶到分页盒**（owner 真机前几轮反馈）
+/// - 只把容器高钉到 `bounds.height`（「视图盒高」）时真机复测**没生效**。原因是这条等式的前提
+///   「`bounds` == 正文盒」**不成立** —— 非滚动 `UITextView` 的固有高度是**内容高**，SwiftUI 给它的
+///   frame 可能比正文盒高 ⇒ `bounds.height` 本身就是那个「出界的盒」，钉在它上面等于没钉；
+///   `clipsToBounds` 也救不了（正文在**视图内**，只是视图比盒高）。
+/// - 上限取**分页盒**：`min(bounds − 竖向 inset, configuration.containerSize.height)`。
 ///   `containerSize.height` 就是 `TextKitMeasuring` 排版时用的那个高（= 边框标线所在盒的高）
 ///   ⇒ 渲染容器**不会比度量容器高**，不会多排正文。
 /// - ⚠️ 但「容器不超高」**不等于**「没有一行越盒」：`NSTextContainer` 的高度只是行片段**起点**的
-///   上限，起点在盒内、底边越出的那一行仍会被排出来（owner 第三轮反馈「正文被直接截断」就是它）。
-///   根因修在**度量侧**（`TextKitMeasuring.trimmedGlyphRange` 逐行回退 ⇒ 那一行落到下一页）；
-///   本类的容器封顶与 `ReaderView.readerContent` 的 `.clipped()` 只作**最后兜底**。
+///   上限，起点在盒内、底边越出的那一行仍会被排出来。根因修在**度量侧**
+///   （`TextKitMeasuring.trimmedGlyphRange` 逐行回退 ⇒ 那一行落到下一页）；本类的容器封顶与
+///   `ReaderView.readerContent` 的 `.clipped()` 只作**最后兜底**。
 ///
 /// ## 为什么在 `layoutSubviews` 里钉（而不是只在 `updateUIView` 里设一次）
 /// `updateUIView` 在**内容未变**时直接 return（见它的 `guard contentChanged`），而 frame 会随
@@ -201,21 +233,20 @@ struct PageTextView: UIViewRepresentable {
 /// 是 frame 落定后 UIKit 必然调用的钩子，两条路径都由它兜住；`updateUIView` 里也在
 /// `textContainerInset` 之后显式调一次，让「内容变化」那条路径不依赖后续的布局回调。
 final class PageBoxTextView: UITextView {
-    /// 分页时用的正文盒高（`PaginationConfiguration.containerSize.height`）：
-    /// 文本容器高的**上限**。由 `PageTextView` 在 `makeUIView` / `updateUIView` 里写入。
-    var pageBoxHeight: CGFloat = 0
+    /// 分页时用的正文盒（`PaginationConfiguration.containerSize`）。由 `PageTextView` 在
+    /// `makeUIView` / `updateUIView` 里写入。两个用途：
+    /// 1. 文本容器高的**上限**（`pinTextContainerToBounds()`）；
+    /// 2. 与**真实渲染盒**（`bounds.size`）逐值比较的基准（`reportBoxMismatchIfNeeded()`）。
+    var paginatedBoxSize: CGSize = .zero
 
-    /// ⚠️ 仅诊断用（`ReaderPageDiagnostics`）：分页盒的**宽**，与 `pageBoxHeight` 同一来源。
-    /// 删诊断时连同 `captureDiagnostics()` 一起删。
-    var pageBoxWidth: CGFloat = 0
+    /// 渲染盒 ≠ 分页盒时把**真实盒**回写出去（由 `PageTextView` 从环境注入 ⇒ `ReaderView` 里
+    /// 转成 `viewStore.send(.containerSizeChanged(_:))`）。
+    var onBoxMismatch: ((CGSize) -> Void)?
 
     override func layoutSubviews() {
         super.layoutSubviews()
         pinTextContainerToBounds()
-        // ⚠️ 仅诊断用（删诊断时连同 `captureDiagnostics()` 一起删）：两条展示路径任一开启就采集。
-        if ReaderPageDiagnostics.isOn {
-            captureDiagnostics()
-        }
+        reportBoxMismatchIfNeeded()
     }
 
     /// 容器高 = `min(视图 bounds 高 − textContainerInset 竖向, 分页盒高)`（竖向 inset 本 App 恒 0）。
@@ -228,8 +259,8 @@ final class PageBoxTextView: UITextView {
         // 每轮重申：`clipsToBounds` 是最后一道兜底，别被 UIKit 重配容器时清掉。
         clipsToBounds = true
         var height = max(bounds.height - textContainerInset.top - textContainerInset.bottom, 0)
-        if pageBoxHeight > 0 {
-            height = min(height, pageBoxHeight)
+        if paginatedBoxSize.height > 0 {
+            height = min(height, paginatedBoxSize.height)
         }
         guard textContainer.size.height != height else { return }
         var size = textContainer.size
@@ -237,105 +268,28 @@ final class PageBoxTextView: UITextView {
         textContainer.size = size
     }
 
-    /// ⚠️ 仅诊断用：把这一帧的实测值写进 `ReaderPageDiagnostics.snapshot`（只读 TextKit 查询，
-    /// 不触发布局；删诊断时整个方法删掉）。
+    /// ## 确定性回写：渲染盒 ≠ 分页盒 ⇒ 把**真实盒**送回 reducer
     ///
-    /// `glyphsInContainer < glyphCount` 是**最关键**的一行：本页切片有字形没排进容器 ⇒
-    /// 要么容器比分页盒矮、要么分页盒本身比渲染盒高 —— 浮层一屏就能看明白。
-    func captureDiagnostics() {
-        // 走 `textContainer.layoutManager`（可选）而不是 `UITextView.layoutManager`（隐式解包）：
-        // 万一这个 textView 是 TextKit 2 支撑的，前者返回 nil（诊断直接跳过）而后者会崩。
-        guard let manager = textContainer.layoutManager else { return }
-        let glyphCount = manager.numberOfGlyphs
-        let inContainer = manager.glyphRange(for: textContainer).length
-        var lineCount = 0
-        var lastUsed: CGFloat = 0
-        var lastFragment: CGFloat = 0
-        var index = 0
-        while index < glyphCount {
-            var lineRange = NSRange()
-            let used = manager.lineFragmentUsedRect(forGlyphAt: index, effectiveRange: &lineRange)
-            let fragment = manager.lineFragmentRect(forGlyphAt: index, effectiveRange: nil)
-            lineCount += 1
-            lastUsed = used.maxY
-            lastFragment = fragment.maxY
-            let next = NSMaxRange(lineRange)
-            if next <= index {
-                break
-            }
-            index = next
-        }
-        ReaderPageDiagnostics.snapshot = ReaderPageDiagnostics.Snapshot(
-            configWidth: pageBoxWidth,
-            configHeight: pageBoxHeight,
-            boundsWidth: bounds.width,
-            boundsHeight: bounds.height,
-            containerWidth: textContainer.size.width,
-            containerHeight: textContainer.size.height,
-            glyphCount: glyphCount,
-            glyphsInContainer: inContainer,
-            lineCount: lineCount,
-            textLength: textStorage.length,
-            lastLineUsedMaxY: lastUsed,
-            lastLineFragmentMaxY: lastFragment,
-            lastLineOverflow: max(lastUsed, lastFragment) - textContainer.size.height
-        )
-        if ReaderPageDiagnostics.isUIKitPanelEnabled {
-            updateDiagnosticsLabel()
-        }
-    }
-
-    /// ⚠️ 仅诊断用：UIKit 自绘诊断面板（当前生效路径，见 `ReaderPageDiagnostics.isUIKitPanelEnabled`）。
+    /// owner 真机的决定性线索：**「加上调试面板以后正文内容就不溢出了」** —— 调试面板作为子视图
+    /// 多触发了一次布局，那一次让盒尺寸落定 ⇒ 溢出消失。⇒ 真因不是「差几个 pt」，而是**时序**：
+    /// 某一帧里 `bounds`（真实渲染盒）还没落定、或配置里的 `containerSize` 还是旧值（含首次分页
+    /// 时 State 的默认 `320×480`），分页就按**错的那个盒**算 ⇒ 页内多装一行 ⇒ 越出下边距标线。
     ///
-    /// 为什么用它：owner 真机上 SwiftUI 浮层「挂了却没渲染」（包已确认含该代码）⇒ 改用最原始的方式
-    /// —— 文本视图的一个 `UILabel` 子视图（子视图天然画在文本之上，与 SwiftUI 的图层 / 时序无关）。
-    /// 半透明深底 + `UIColor.label`：浅色页面上底被提亮、深色页面上底变暗，文字两种模式下都读得清。
-    /// `isUserInteractionEnabled = false`：不吃手势（正文本身也不吃，见 `ReaderView` 的
-    /// `.allowsHitTesting(false)`）。
-    private lazy var diagnosticsLabel: UILabel = {
-        let label = UILabel()
-        label.numberOfLines = 0
-        // 语义字号（随 Dynamic Type 缩放）；不硬编码 pt —— 正式 UI 尺寸走 DesignTokens，这是临时件。
-        label.font = UIFont.preferredFont(forTextStyle: .caption2)
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = .label
-        label.backgroundColor = UIColor.black.withAlphaComponent(0.6)
-        label.layer.cornerRadius = DesignTokens.Radius.sm
-        label.clipsToBounds = true
-        label.isUserInteractionEnabled = false
-        return label
-    }()
-
-    /// ⚠️ 仅诊断用：把面板文字与尺寸刷成最新一帧（位置 = 正文盒左上 (8, 8)，宽度固定不折行）。
-    private func updateDiagnosticsLabel() {
-        let label = diagnosticsLabel
-        label.text = Self.diagnosticsText(ReaderPageDiagnostics.snapshot)
-        let width = max(bounds.width - 2 * DesignTokens.Spacing.xs, 0)
-        label.preferredMaxLayoutWidth = width
-        let fitted = label.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        label.frame = CGRect(
-            x: DesignTokens.Spacing.xs,
-            y: DesignTokens.Spacing.xs,
-            width: width,
-            height: fitted.height
-        )
-        if label.superview == nil {
-            addSubview(label)
-        }
-    }
-
-    /// ⚠️ 仅诊断用：6 行诊断文本（与 SwiftUI 版同源，读同一个 `Snapshot`；页码在右下角 HUD 里有）。
-    private static func diagnosticsText(_ snapshot: ReaderPageDiagnostics.Snapshot) -> String {
-        func pt(_ value: CGFloat) -> String {
-            String(format: "%.1f", value)
-        }
-        return [
-            "配置盒(分页) \(pt(snapshot.configWidth)) × \(pt(snapshot.configHeight))",
-            "渲染 bounds \(pt(snapshot.boundsWidth)) × \(pt(snapshot.boundsHeight))",
-            "排版容器 \(pt(snapshot.containerWidth)) × \(pt(snapshot.containerHeight))",
-            "本页字形 容器内 \(snapshot.glyphsInContainer) / 共 \(snapshot.glyphCount)（\(snapshot.lineCount) 行）",
-            "末行底边 used \(pt(snapshot.lastLineUsedMaxY)) · frag \(pt(snapshot.lastLineFragmentMaxY))",
-            "末行越底 \(pt(snapshot.lastLineOverflow))",
-        ].joined(separator: "\n")
+    /// 这里不再依赖 `.onChange(of: contentSize)` 的触发时机（它只在尺寸**变化**时修；配置被旧值
+    /// 覆写、而尺寸没变时它不修）：`layoutSubviews` 是「frame 落定后必然调用」的钩子，每帧拿
+    /// **真实盒**与**分页盒**比一次，不等就回写 ⇒ 分页一定按真实盒重算。
+    ///
+    /// ## 为什么不会自激
+    /// 回写只送一个 action（`containerSizeChanged`），reducer 侧 `applyContainerSize`
+    /// （`ReaderFeature.swift`）自带 `guard state.config.containerSize != size else { return }`
+    /// ⇒ 同尺寸**不发状态变更**、不重渲染；而回写送的就是本帧 `bounds.size`，下一帧比较时
+    /// `paginatedBoxSize` 已经等于它 ⇒ **一次修正后收敛**。若之后又被 `.settingsLoaded` /
+    /// `.configChanged` 用旧值覆写，下一帧再修一次，仍然收敛。⛔ 这里不直接改 SwiftUI 状态、
+    /// 也不重排文本，只送这一个 action。
+    private func reportBoxMismatchIfNeeded() {
+        // bounds 还没落定（0）时不许回写：那会把「空盒」当成真实盒送进分页。
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        guard bounds.size != paginatedBoxSize else { return }
+        onBoxMismatch?(bounds.size)
     }
 }
