@@ -66,7 +66,9 @@ struct BookshelfView: View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             NavigationStack {
                 VStack(spacing: 0) {
-                    groupBar(viewStore)
+                    // U13：分组栏还收下载队列的 store —— 选择模式的「完成」出口钉在它最右边
+                    // （原先在下载页常驻上栏里）。状态判据与布局都在 `groupBar` 内，见该函数说明。
+                    groupBar(viewStore, downloadStore: downloadStore)
 
                     ZStack {
                         if viewStore.showsLocalGroup {

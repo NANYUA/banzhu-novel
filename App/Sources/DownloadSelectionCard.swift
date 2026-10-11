@@ -6,7 +6,7 @@ import SwiftUI
 /// owner 口径：「长按选择就是让选择卡片使用进度卡片的位置，两张卡片在一个位置交替展示」。
 /// 原先四个操作悬在 `List` 上方（`DownloadSelectionBar`，`.regularMaterial` 分层），
 /// 触发选择时总进度那块还留在列表里 —— 两套卡片语言并存。现在两者在
-/// `DownloadQueueView.queueList` 的**同一个 `Section` 分支**里二选一
+/// `DownloadQueueView.pinnedHeader` 的**同一个 `Group` 分支**里二选一
 /// （`if isSelecting { 本卡 } else { 总进度卡 }`），尺寸统一到
 /// `DownloadCardMetrics.contentHeight`（= 书卡内容区高度）。
 ///
@@ -55,7 +55,7 @@ struct DownloadSelectionCard: View {
             deleteAction
             retryFailedAction
         }
-        // 与总进度卡片、书卡同高：内容区 `contentHeight`(88) + 内边距 12×2 + `.downloadQueueCard()` 的 8×2。
+        // 与总进度卡片、书卡同高：内容区 `contentHeight`(80) + 内边距 12×2 + `.downloadQueueCard()` 的 8×2。
         .frame(minHeight: DownloadCardMetrics.contentHeight)
         .padding(DesignTokens.Spacing.sm)
         .downloadQueueCard()

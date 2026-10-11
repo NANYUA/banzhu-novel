@@ -131,7 +131,7 @@ struct DownloadQueueView: View {
         return "删除选中的 \(pendingDeletePaths.count) 本书的下载？"
     }
 
-    /// 本地页：**上栏（进度卡片 / 选择卡片，选择模式下另有一行「完成」）常驻**，只有书卡列表滚动。
+    /// 本地页：**上栏（进度卡片 / 选择卡片）常驻**，只有书卡列表滚动。
     ///
     /// 卡片原先占 `List` 里那个 `Section` 的第一行 ⇒ 随列表滚走；owner 口径「进度卡片（选择卡片）
     /// 向上滑动 … 作为上栏，下方已下载的书籍从这个上栏的下方走」⇒ 现在与 `List` **并列**放进
@@ -179,51 +179,23 @@ struct DownloadQueueView: View {
         }
     }
 
-    /// 常驻上栏：进度卡片 / 选择卡片（`isSelecting` 二选一，**同位交替**，同尺寸）；
-    /// **仅在选择模式下**，其上方再加一行「完成」出口。
+    /// 常驻上栏：进度卡片 / 选择卡片（`isSelecting` 二选一，**同位交替**，同尺寸）。
     ///
-    /// 非选择模式**零高度**：那一行整行不渲染（不留空行占位，否则上栏会白白多出约 30pt）——
-    /// 卡片自己的「总进度」已说明它是队列总览，不需要一行文字再重复一遍。
+    /// ⚠️ U13 起这里**只剩这一处内容**：选择模式的「完成」出口搬到了书架分组栏最右边
+    /// （`BookshelfView+GroupBar.swift` 的 `groupBar(_:downloadStore:)`）—— 原先那一行
+    /// 常驻上栏的「完成」已删除，故这里不再需要承载「选择模式才渲染的行」，
+    /// 外面那层只为叠两行而存在的 `VStack(spacing: 0)` 一并去掉（不留空 VStack）。
     private func pinnedHeader(
         _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
     ) -> some View {
-        VStack(spacing: 0) {
+        Group {
             if viewStore.isSelecting {
-                selectionDoneRow(viewStore)
                 selectionCard(viewStore)
             } else {
                 summaryCard(viewStore)
             }
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
-    }
-
-    /// 选择模式的**退出出口**：右端一个「完成」按钮，常驻在上栏里；**非选择模式不渲染**。
-    ///
-    /// 为什么需要它：选择操作卡片取代了总进度卡片，而原先那条自带「完成」的批量操作栏
-    /// （`DownloadSelectionBar`）已随本轮删除 —— 出口必须另找一处，且必须**在选择模式下依然存在**，
-    /// 故由 `pinnedHeader` 在选择模式分支内渲染（上栏常显，同 owner 对书架分组栏的要求）。
-    /// 语义与长按退出逐字相同：`.selectionModeChanged(false)`。
-    private func selectionDoneRow(
-        _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
-    ) -> some View {
-        HStack {
-            Spacer()
-
-            Button {
-                viewStore.send(.selectionModeChanged(false))
-            } label: {
-                Text("完成")
-                    .font(.body.weight(.semibold))
-                    // HIG §9：`.frame` 落在 label 上才真的撑开命中区。
-                    // `minHeight` 只管高度：「完成」二字在 `.body` 下约 34pt 宽，
-                    // 不补 `minWidth` 命中区只有约 34×44pt，低于 HIG 的 44×44 下限。
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            // 显式给强调色，与「可点的主操作」一致（原 `List` header 会把次级灰压给内容）。
-            .foregroundStyle(AppTheme.accent)
-        }
     }
 
     /// 非选择模式那一支：总进度卡片。

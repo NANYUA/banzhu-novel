@@ -43,16 +43,17 @@ struct PageTextView: UIViewRepresentable {
         // 上面关掉了 `isScrollEnabled`（UITextView 会因此重配文本容器），此处重新钉一次宽度不变量。
         // 高度**不钉**：容器高由 UITextView 自己维护（排完本页）；手动设定属未验证改动。
         uiView.textContainer.widthTracksTextView = true
-        // 竖向 inset **clamp 到 >= 0**（U9-7）：`PageInset.top/bottom` 的默认值是负的，
-        // 语义是「相对安全区向屏幕边缘推的偏移量」——但负值在这里**不是外扩，是被裁掉**：
-        // `UITextView.clipsToBounds` 默认 `true`，负 inset 只是把正文挪出自身 bounds。
-        // 真正的外扩由 `ReaderView` 放大布局盒兑现（盒高 = 安全区盒高 + 外扩量，
-        // 与 `configuration.containerSize` 逐值相同），本视图因此恒按 0 起排。
+        // 竖向 inset 恒为 **0**（2026-10-11 语义变更）：`PageInset.top/bottom` 现在是
+        // 「**距屏幕边缘的绝对距离**」（`0` = 贴屏幕边、不避让刘海），由 `ReaderView` 的布局
+        // padding 兑现，并且**已经**从盒高里扣掉（盒高 = 全屏高 − top − bottom
+        // = `configuration.containerSize.height`，见 `readerContentPaddings` /
+        // `readerContentSize`，B0-2 几何契约）⇒ 这里再按 inset 起排就是**两处都算**、边距翻倍。
+        // 旧实现（U9-7）是「外层管负值、内层管正值」的两段式，负值在这里被 clamp 成 0 —— 那套已废弃。
         // 左右**不动**：仍是「安全区盒内再减左右边距」，正值语义未变。
         uiView.textContainerInset = UIEdgeInsets(
-            top: max(0, configuration.inset.top),
+            top: 0,
             left: configuration.inset.leading,
-            bottom: max(0, configuration.inset.bottom),
+            bottom: 0,
             right: configuration.inset.trailing
         )
         uiView.backgroundColor = configuration.backgroundStyle.uiColor(

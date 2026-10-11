@@ -86,32 +86,32 @@ public struct PageInset: Equatable, Sendable, Codable {
     public var bottom: CGFloat
     public var trailing: CGFloat
 
-    /// 默认：左右 **24pt**、上下 **-18 / -18pt**（竖向**对称**）。
+    /// 默认：左右 **24pt**、上下 **78 / 30pt**（竖向**不对称** —— 上下各有自己的滑杆）。
     ///
-    /// - 左右 24（U1-8，owner 指定）比 HIG 的 16pt 底线更宽松：中文正文一行排得下的字数更舒服，
-    ///   也避开屏幕圆角。
-    /// - 上下 **-18 / -18**（U9-7，owner 真机反馈「距离屏幕上下太远」）：
-    ///   **负值不是「减掉边距」，而是「相对安全区向屏幕边缘推的偏移量」**。
-    ///   此前是 0（U9-3b），正文正好贴在安全区边界上 —— 而状态栏已隐藏，安全区顶那几十 pt
-    ///   是纯留白（量测：屏幕顶到章标题首字形 72px = 安全区顶 59 + 行高留白 ~13）。
-    ///   - **竖向默认值必须对称**：设置面板只有**一个**「上下边距」滑杆，
-    ///     `verticalInsetBinding` 一次同时写 `top` 与 `bottom` ⇒ 默认值不对称时，
-    ///     `bottom` 会落在滑杆范围之外（例：`bottom = -22` 配下限 `-18`），用户一拖就被夹到下限、
-    ///     下边缘凭空上移；滑杆读数（`Int(inset.top)`）也代表不了实际的下边距。
-    ///   - `-18`（上）：盒顶上移到安全区顶之上 18pt，首行**字形**顶 ≈ 安全区顶 − 18 + 13（首行留白）：
-    ///     - 灵动岛机型（安全区顶 59、缺口下沿 48）：59 − 18 + 13 = 54 ⇒ 余量 **6pt**；
-    ///     - 刘海屏机型（安全区顶 ~47、缺口下沿 ~33）：47 − 18 + 13 = 42 ⇒ 余量 **9pt**。
-    ///     两种缺口机型都有可感知余量。此前取的 `-24` 只按灵动岛推导（59 − 24 + 13 = 48，
-    ///     余量 0pt），换到刘海屏只剩约 3pt —— 而「首行行高留白 13pt」本身是量测**估算值**，
-    ///     ±3pt 就会让首行被缺口盖住（正文整行满宽，躲不开），故必须留余量、收到 `-18`。
-    ///   - `-18`（下）：下边距的安全极限约 `-34`（屏幕底往上约 5pt 的 Home Indicator 细条），
-    ///     `-18` 让末行离屏幕底约 16pt，比原来的 `-22`（约 12pt）更宽裕。
-    ///   负值由 SwiftUI 层**放大盒子**实现（`ReaderView.readerContentSize`）——
-    ///   传给 TextKit 的竖向 inset 一律 clamp 到 `>= 0`（`UITextView.clipsToBounds` 默认 true，
-    ///   负 inset 只会把正文裁掉而不是往外扩）。
-    ///   滑杆范围 `-18 ... 48` 恰好覆盖这个下限（全机型都不会让首行被缺口盖住），
-    ///   用户仍可自己调回 0 或加正边距。
-    public init(top: CGFloat = -18, leading: CGFloat = 24, bottom: CGFloat = -18, trailing: CGFloat = 24) {
+    /// ## 新语义：`top` / `bottom` = **距屏幕边缘的绝对距离**（2026-10-11，owner 口径）
+    /// - `0` = 正文贴到**屏幕最边缘**，**不自己适配刘海 / 灵动岛**（内容可以被缺口盖住
+    ///   —— owner 明确要这个行为）；`78` = 距屏幕上边 78pt。
+    /// - 范围：上 **0 … 200**、下 **0 … 120**（设置页两个滑杆各自只改自己那一侧）。
+    /// - 默认 78 / 30 都在范围内，且能被滑杆步长 2 精确取到。
+    /// - **为什么改成绝对距离**：旧语义是「相对安全区的偏移」，同一个读数在安全区顶 59 的
+    ///   灵动岛机型和 47 的刘海屏机型上落到完全不同的位置（差 12pt）；owner 要的是
+    ///   「正文距屏幕边多少就是多少」的可预期手感。代价是 `0` 附近不再自动避让缺口。
+    ///
+    /// ## 实现：竖向边距**只有一套机制**
+    /// 由 SwiftUI 层的布局 padding 兑现（`ReaderView.readerContentPaddings`，盒高与它同源）。
+    /// `PageTextView.textContainerInset` 与 `TextKitMeasuring` 的竖向一律按 **0** 处理 ——
+    /// 两处都算就是边距翻倍、且分页与渲染错位（B0-2）。
+    /// 左右（`leading` / `trailing`）**语义未变**：正值是「安全区盒内再减的左右边距」，
+    /// 由 `textContainerInset` 的 left / right 兑现，默认 24（U1-8，owner 指定）比 HIG 的
+    /// 16pt 底线更宽松：中文正文一行排得下的字数更舒服，也避开屏幕圆角。
+    ///
+    /// ## 历史（已废弃，保留是为了看懂老 JSON / 老注释）
+    /// U9-7 的默认值是 **-18 / -18**：那时 `top` / `bottom` 是「**相对安全区向屏幕边缘推**的
+    /// 偏移量」，负值不是「减掉边距」而是把正文盒往屏幕边推（由 SwiftUI 层放大盒子兑现），
+    /// 传给 TextKit 的竖向 inset 一律 clamp 到 `>= 0`。新语义下**负值无意义**
+    /// （`-18` 会被读成「屏幕外 18pt」）⇒ 已存数据由 `VerticalInsetDefaultMigration`
+    /// （key `reader.insetDefaultMigrated.v3`）一次性重置为新默认。
+    public init(top: CGFloat = 78, leading: CGFloat = 24, bottom: CGFloat = 30, trailing: CGFloat = 24) {
         self.top = top
         self.leading = leading
         self.bottom = bottom
@@ -125,8 +125,8 @@ public struct PageInset: Equatable, Sendable, Codable {
 /// 阅读设置一次定型，避免每加一个控件都改类型、改 init、改测试。
 ///
 /// ## 影响分页与只影响渲染的字段
-/// 影响分页：字体、字号、行距、段间距、字间距、加粗/倾斜、页边距、首行缩进。
-/// 只影响渲染：背景色、文字颜色、亮度跟随、翻页方式、翻页动画、夜间模式。
+/// 影响分页：字体、字号、行距、段间距、字间距、加粗/倾斜、页边距、首行缩进开关。
+/// 只影响渲染：背景色、文字颜色、亮度跟随、翻页方式、翻页动画、夜间模式、角落标签边距。
 ///
 /// `affectsPagination(comparedTo:)` 用来区分这两类，避免改背景色也重排整章。
 public struct PaginationConfiguration: Equatable, Sendable {
@@ -159,8 +159,17 @@ public struct PaginationConfiguration: Equatable, Sendable {
     /// 字体倾斜
     public var isItalic: Bool
 
-    /// 首行缩进
-    public var firstLineHeadIndent: CGFloat
+    /// 是否打开首行缩进（owner 口径：**默认打开**）。
+    public var isFirstLineIndentOn: Bool
+
+    /// 首行缩进宽度：由 `isFirstLineIndentOn` 与 `fontSize` **派生**（2 个字符宽，与旧实现逐值一致）。
+    ///
+    /// 派生而不是各存一份：两份状态一旦不同步就会出现「开关开着但缩进是 0」这种自相矛盾的配置
+    /// （旧实现靠设置页在改字号时手动同步，漏一处就漂）。它仍是排版层的公开读接口
+    /// （`PageTextView` / `TextKitMeasuring` 直接读它），调用方不需要知道开关。
+    public var firstLineHeadIndent: CGFloat {
+        isFirstLineIndentOn ? fontSize * 2 : 0
+    }
 
     // MARK: - 只影响渲染的字段
 
@@ -191,9 +200,22 @@ public struct PaginationConfiguration: Equatable, Sendable {
     /// 夜间模式 / 外观模式
     public var appearanceMode: ReadingAppearanceMode
 
+    /// 角落状态标签（左上书名 / 章节名、左下电量、右下页码）距**屏幕左右边缘**的距离（pt）。
+    ///
+    /// 三个标签**共用**这一个值：`ReaderCornerHUD` 的一条 `.padding(.horizontal, …)`
+    /// 同时管住左上 / 左下 / 右下。默认 `16` = App 层尺度令牌 `DesignTokens.Spacing.md`
+    /// （NovelCore 不能 import SwiftUI / DesignTokens，故此处写同值，
+    /// `ReadingSettingsStoreTests` 有一条「两处默认值同源」的锚点测试）。
+    ///
+    /// **只影响渲染**：不进 `affectsPagination` ⇒ 拖这个滑杆不重排正文、不动阅读位置。
+    public var hudHorizontalInset: CGFloat
+
     // MARK: - init
 
     /// 全字段初始化（结构体一次定型）。
+    ///
+    /// ⚠️ 没有 `firstLineHeadIndent` 参数：缩进宽度由 `isFirstLineIndentOn` + `fontSize` 派生
+    /// （见该属性的文档），传进来一份独立值只会与开关脱节。
     public init(
         containerSize: CGSize,
         fontSize: CGFloat = 17,
@@ -204,7 +226,7 @@ public struct PaginationConfiguration: Equatable, Sendable {
         characterSpacing: CGFloat = 0,
         isBold: Bool = false,
         isItalic: Bool = false,
-        firstLineHeadIndent: CGFloat = 0,
+        isFirstLineIndentOn: Bool = true,
         backgroundStyle: ReadingBackgroundStyle = .white,
         customBackgroundColor: ReadingColor = .defaultCustomBackground,
         customBackgroundColorDark: ReadingColor = .defaultCustomBackground,
@@ -213,7 +235,8 @@ public struct PaginationConfiguration: Equatable, Sendable {
         followsSystemBrightness: Bool = true,
         pageTurnMode: PageTurnMode = .slide,
         pageTurnAnimation: PageTurnAnimation = .none,
-        appearanceMode: ReadingAppearanceMode = .system
+        appearanceMode: ReadingAppearanceMode = .system,
+        hudHorizontalInset: CGFloat = 16
     ) {
         self.containerSize = containerSize
         self.fontSize = fontSize
@@ -224,7 +247,7 @@ public struct PaginationConfiguration: Equatable, Sendable {
         self.characterSpacing = characterSpacing
         self.isBold = isBold
         self.isItalic = isItalic
-        self.firstLineHeadIndent = firstLineHeadIndent
+        self.isFirstLineIndentOn = isFirstLineIndentOn
         self.backgroundStyle = backgroundStyle
         self.customBackgroundColor = customBackgroundColor
         self.customBackgroundColorDark = customBackgroundColorDark
@@ -234,6 +257,7 @@ public struct PaginationConfiguration: Equatable, Sendable {
         self.pageTurnMode = pageTurnMode
         self.pageTurnAnimation = pageTurnAnimation
         self.appearanceMode = appearanceMode
+        self.hudHorizontalInset = hudHorizontalInset
     }
 
     /// 判断这次配置变化是否需要重新分页。
@@ -249,6 +273,6 @@ public struct PaginationConfiguration: Equatable, Sendable {
             || characterSpacing != other.characterSpacing
             || isBold != other.isBold
             || isItalic != other.isItalic
-            || firstLineHeadIndent != other.firstLineHeadIndent
+            || isFirstLineIndentOn != other.isFirstLineIndentOn
     }
 }

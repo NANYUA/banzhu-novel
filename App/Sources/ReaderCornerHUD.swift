@@ -186,7 +186,12 @@ extension ReaderView {
     ///
     /// 外留边刻意与控制栏同一套 ⇒ 控制栏一呼出就正好盖住它：上边距由调用方传入**同一个**
     /// `topBarPadding(safeAreaInsets:)` 的结果（在这里重算一份就成了第二套定位来源，日后必然
-    /// 漂移），下 = `Spacing.xs`（下栏面板底边），左右 = 安全区 + `Spacing.md`（面板外留边）。
+    /// 漂移），下 = `Spacing.xs`（下栏面板底边），左右 = 安全区 + **「标签边距」设置项**
+    /// （`PaginationConfiguration.hudHorizontalInset`，设置页那个 0…64 的滑杆；
+    /// 默认 16 = `Spacing.md`，与硬编码时代逐值相同）。
+    ///
+    /// ⚠️ 三个标签**共用**那一个左右值（一条 `.padding(.horizontal)` 同时管住左上 / 左下 / 右下）；
+    /// **垂直位置不受它影响** —— 上仍走 `topBarPadding`、下仍走 `Spacing.xs`。
     ///
     /// 整层不参与正文布局、不占正文空间、不改任何 `padding` / `frame` / 分页参数。
     func readerCornerHUD(
@@ -207,7 +212,7 @@ extension ReaderView {
         )
         .padding(.leading, safeAreaInsets.leading)
         .padding(.trailing, safeAreaInsets.trailing)
-        .padding(.horizontal, DesignTokens.Spacing.md)
+        .padding(.horizontal, viewStore.config.hudHorizontalInset)
         .padding(.top, topPadding)
         .padding(.bottom, DesignTokens.Spacing.xs)
     }

@@ -156,7 +156,7 @@ final class PaginatorTests: XCTestCase {
 
     // MARK: - 默认页边距（U1-8 → U9-3b → U9-7）
 
-    /// ⑯ 默认页边距：左右 24、上下 **-18 / -18**（负值 = 相对安全区向屏幕边缘推；竖向对称）。
+    /// ⑯ 默认页边距：左右 24、上下 **78 / 30**（**距屏幕边缘的绝对距离**，`0` = 贴屏幕边）。
     ///
     /// 这个默认值此前**没有任何测试锁着**（B0-4 把它从 0 改成 16 时也没锁），
     /// 改歪了没人会发现。U1-8 补了锚点（当时上下是 8）；
@@ -166,13 +166,16 @@ final class PaginatorTests: XCTestCase {
     /// （余量 0pt，刘海屏只剩约 3pt），故上边距收到 **-18**；
     /// 又因设置面板是**一个**滑杆同时写上下（`verticalInsetBinding`），
     /// 非对称默认值会让 `bottom` 落在滑杆范围之外、一拖就被夹走，故下边距也取对称的 **-18**。
+    /// 2026-10-11 owner 改口径：上下边距的**参考点从安全区换成屏幕边缘**（`0` = 贴屏幕最边缘、
+    /// **不自己适配刘海**），范围上 `0…200` / 下 `0…120`，**两个滑杆各改各的**，
+    /// 默认 **78 / 30** —— 旧负值在新语义下无意义，由迁移（key `v3`）重置。
     /// **这条用例的价值就在于：上下默认值每被改一次，都必须在这里显式改一次。**
-    func test默认页边距左右二十四上下负十八() {
+    func test默认页边距左右二十四上下七十八与三十() {
         let inset = PageInset()
         XCTAssertEqual(inset.leading, 24)
         XCTAssertEqual(inset.trailing, 24)
-        XCTAssertEqual(inset.top, -18)
-        XCTAssertEqual(inset.bottom, -18)
+        XCTAssertEqual(inset.top, 78)
+        XCTAssertEqual(inset.bottom, 30)
     }
 
     /// ⑰ 分页配置与落盘设置必须**同源**取默认值：

@@ -9,6 +9,11 @@ import XCTest
 /// 用户永远调不回来，而且极难归因（表现出来只是「设置不生效」）。
 /// 所以这里锁住四件事：只重置上下 inset、其它字段逐值不变、标记已存在时不覆盖、连续 apply 幂等。
 ///
+/// 2026-10-11（竖向边距语义变更）追加两组锚点：
+/// - 迁移标记必须换到 `v3` —— 否则装过 U9-7 那版的设备上，新默认（78 / 30）永远不会生效；
+/// - 两个新字段（首行缩进开关 / 标签边距）的**老数据兼容**：缺 key 的旧 JSON 仍能解码
+///   （新字段一律 `Optional` 的原因），且 `nil` 由 `mergedConfiguration` 按新默认兜底。
+///
 /// ## 隔离
 /// 一律用独立 suite 的 `UserDefaults`（`UserDefaults(suiteName:)`），`tearDown` 里清干净 ——
 /// **绝不碰 `.standard`**：那是真机 / 模拟器上用户的真实阅读设置。
@@ -46,8 +51,9 @@ final class ReadingSettingsStoreTests: XCTestCase {
             fontName: "PingFangSC-Regular",
             isBold: true,
             isItalic: true,
-            firstLineHeadIndent: 24,
+            isFirstLineIndentOn: false,
             inset: inset,
+            hudHorizontalInset: 40,
             backgroundStyle: .custom,
             customBackgroundColor: ReadingColor(red: 0.1, green: 0.2, blue: 0.3),
             customBackgroundColorDark: ReadingColor(red: 0.4, green: 0.5, blue: 0.6),
@@ -84,6 +90,9 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertEqual(migrated.inset.trailing, 40)
         XCTAssertEqual(migrated.fontSize, 21)
         XCTAssertEqual(migrated.fontName, "PingFangSC-Regular")
+        // 新增的两个字段同样逐值保留（显式关掉的缩进不能被强行打开）。
+        XCTAssertEqual(migrated.isFirstLineIndentOn, false)
+        XCTAssertEqual(migrated.hudHorizontalInset, 40)
         // 标记必须写入，否则下次启动会再迁移一次（把用户随后的调整又冲掉）。
         XCTAssertTrue(defaults.bool(forKey: VerticalInsetDefaultMigration.storageKey))
     }
@@ -140,5 +149,82 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertEqual(third, userEdited)
         XCTAssertEqual(third.inset.top, 20)
         XCTAssertEqual(third.inset.bottom, 20)
+    }
+
+    // MARK: - 2026-10-11：竖向边距语义变更 + 两个新字段
+
+    /// ⑤ 老版本存下的 JSON（**没有**新增的两个 key）必须仍能解出来。
+    ///
+    /// 锁的失效模式：给 `ReadingSettings` 加一个**非 Optional** 字段 ⇒ 合成 `Decodable`
+    /// 对缺失的 key 抛错 ⇒ `ReadingSettingsLive.load()` 的 `try?` 把它吞成 `nil`
+    /// ⇒ 用户**整份**设置静默归零（字号 / 颜色 / 字体全没）。这正是新字段一律 `Optional` 的原因。
+    func test缺少新增字段的旧数据仍可解码() throws {
+        let data = try JSONEncoder().encode(makeStoredSettings())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        // 老版本的 JSON 里没有这两个 key（下标赋 nil = 删掉这个 key）。
+        object["isFirstLineIndentOn"] = nil
+        object["hudHorizontalInset"] = nil
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(ReadingSettings.self, from: legacy)
+
+        XCTAssertNil(decoded.isFirstLineIndentOn)
+        XCTAssertNil(decoded.hudHorizontalInset)
+        // 老数据的其它字段逐值保留（解码本身不得动它们）。
+        XCTAssertEqual(decoded.fontSize, 21)
+        XCTAssertEqual(decoded.inset, PageInset(top: 12, leading: 8, bottom: 0, trailing: 40))
+        XCTAssertEqual(decoded.backgroundStyle, .custom)
+    }
+
+    /// ⑥ 老数据（两个新字段都是 `nil`）经 `mergedConfiguration` 兜底：
+    /// 首行缩进**打开**（owner 口径「默认打开」）、标签边距 `16`（= `Spacing.md`）。
+    func test老数据的新字段按新默认兜底() {
+        var legacy = ReadingSettings()
+        legacy.isFirstLineIndentOn = nil
+        legacy.hudHorizontalInset = nil
+
+        let merged = legacy.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
+
+        XCTAssertTrue(merged.isFirstLineIndentOn)
+        XCTAssertEqual(merged.firstLineHeadIndent, legacy.fontSize * 2)
+        XCTAssertEqual(merged.hudHorizontalInset, 16)
+    }
+
+    /// ⑦ 用户主动关掉缩进 / 改过标签边距之后，合并结果必须是**存下来的值**
+    /// （不能被默认兜底盖掉 —— 那会让「设置改不动」）。
+    func test已存的新字段优先于默认兜底() {
+        var stored = ReadingSettings()
+        stored.isFirstLineIndentOn = false
+        stored.hudHorizontalInset = 48
+
+        let merged = stored.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
+
+        XCTAssertFalse(merged.isFirstLineIndentOn)
+        XCTAssertEqual(merged.firstLineHeadIndent, 0)
+        XCTAssertEqual(merged.hudHorizontalInset, 48)
+    }
+
+    /// ⑧ 两处默认值同源（写法沿用 `PaginatorTests` ⑰）：`ReadingSettings()` 与
+    /// `PaginationConfiguration` 的标签边距 / 缩进开关必须一致 ——
+    /// 漂了就会出现「从没动过设置，但阅读页与设置页读数不同」。
+    func test新字段的两处默认值同源() {
+        let settings = ReadingSettings()
+        let configuration = PaginationConfiguration(containerSize: CGSize(width: 320, height: 480))
+
+        XCTAssertEqual(settings.hudHorizontalInset, configuration.hudHorizontalInset)
+        XCTAssertEqual(settings.isFirstLineIndentOn, configuration.isFirstLineIndentOn)
+        XCTAssertEqual(configuration.hudHorizontalInset, 16)
+        XCTAssertTrue(configuration.isFirstLineIndentOn)
+        // 缩进宽度由开关与字号派生（不单独落盘）。
+        XCTAssertEqual(configuration.firstLineHeadIndent, configuration.fontSize * 2)
+    }
+
+    /// ⑨ 迁移标记必须是 `v3`。
+    ///
+    /// 锁的失效模式：这个迁移的语义是「**标记不存在** ⇒ 重置为新默认」，而 `v2` 标记在装过
+    /// U9-7 那版的设备上**早已写下** ⇒ 谁把 key 改回 `v2`，那些设备的新默认（78 / 30）
+    /// **永远不会生效**，owner 真机上只会看到「没变化」。
+    func test迁移标记为第三版() {
+        XCTAssertEqual(VerticalInsetDefaultMigration.storageKey, "reader.insetDefaultMigrated.v3")
     }
 }

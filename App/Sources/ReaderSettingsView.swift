@@ -76,7 +76,7 @@ struct ReaderSettingsView: View {
 
             HStack {
                 Text("字号")
-                Slider(value: fontSizeBinding, in: 12 ... 30, step: 1)
+                Slider(value: binding(\.fontSize), in: 12 ... 30, step: 1)
                 Text("\(Int(configuration.fontSize))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -151,23 +151,17 @@ struct ReaderSettingsView: View {
                 )
             }
 
-            HStack {
-                Text("上下边距")
-                Slider(value: verticalInsetBinding, in: -18 ... 48, step: 3)
-                Text("\(Int(configuration.inset.top))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 32, alignment: .trailing)
-            }
-
-            HStack {
-                Text("左右边距")
-                Slider(value: horizontalInsetBinding, in: 8 ... 48, step: 4)
-                Text("\(Int(configuration.inset.leading))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 32, alignment: .trailing)
-            }
+            // 上下边距**拆成两个滑杆**（owner 2026-10-11）：语义是「距**屏幕边缘**的绝对距离」，
+            // `0` = 正文贴到屏幕最边缘（**不自己适配刘海**），上 `0…200`、下 `0…120`。
+            // 两个滑杆**各改各的**（旧实现那一个滑杆同时写 `top` 与 `bottom`，已删）。
+            // 步长 2：默认 78 / 30 与两端都能精确取到（`0/30/78/120/200` 全是偶数）。
+            insetSlider("上边距", value: topInsetBinding, range: 0 ... 200, step: 2)
+            insetSlider("下边距", value: bottomInsetBinding, range: 0 ... 120, step: 2)
+            // 左右边距（U1-8）：下限仍守 8pt、默认 24pt 由 `PageInset` 的默认值给 —— 本次未改。
+            insetSlider("左右边距", value: horizontalInsetBinding, range: 8 ... 48, step: 4)
+            // 标签边距（owner 2026-10-11）：三个角落标签（左上书名 / 章节名、左下电量、右下页码）
+            // **共用**这一个值，只调它们距屏幕左 / 右边缘的距离 —— 垂直位置不受它影响。
+            insetSlider("标签边距", value: hudInsetBinding, range: 0 ... 64, step: 2)
 
             Toggle("亮度跟随系统", isOn: binding(\.followsSystemBrightness))
         }
@@ -177,7 +171,10 @@ struct ReaderSettingsView: View {
 
     private var readingSection: some View {
         Section("阅读") {
-            Toggle("首行缩进", isOn: firstLineIndentBinding)
+            // 首行缩进**默认打开**（owner 口径）：开关状态单独存（`isFirstLineIndentOn`），
+            // 缩进宽度由 `fontSize × 2` 派生（`PaginationConfiguration.firstLineHeadIndent`）
+            // ⇒ 改字号不再需要在这里手动同步缩进值。
+            Toggle("首行缩进", isOn: binding(\.isFirstLineIndentOn))
 
             Stepper(
                 value: precacheCountBinding,
@@ -322,6 +319,34 @@ private extension ReaderSettingsView {
         )
     }
 
+    /// 一条「标题 + 滑杆 + 右侧数值」的边距行。
+    ///
+    /// 四行（上 / 下 / 左右 / 标签边距）共用同一套版式与数值显示，逐值沿用既有写法
+    /// （`Int(...)` 截断 + `.monospacedDigit()` + 32pt 右对齐）。
+    /// 抽成函数是因为 `appearanceSection` 本就接近 SwiftLint `function_body_length`
+    /// 的 50 行门槛（warning 即 CI 红），四段内联 HStack 会直接顶穿。
+    ///
+    /// 数值直接读 `value.wrappedValue`，不再单独传一份 `current`：
+    /// 少一个参数，也就少一处「显示值与实际值不同源」的机会。
+    ///
+    /// ⚠️ 范围 / 步长是**业务常量**，仍就地写在调用处（与文件里其它滑杆一致）：
+    /// 上下边距的范围见 `PageInset` 的文档。
+    private func insetSlider(
+        _ title: String,
+        value: Binding<CGFloat>,
+        range: ClosedRange<CGFloat>,
+        step: CGFloat
+    ) -> some View {
+        HStack {
+            Text(title)
+            Slider(value: value, in: range, step: step)
+            Text("\(Int(value.wrappedValue))")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 32, alignment: .trailing)
+        }
+    }
+
     func binding<Value>(
         _ keyPath: WritableKeyPath<PaginationConfiguration, Value>
     ) -> Binding<Value> {
@@ -346,31 +371,6 @@ private extension ReaderSettingsView {
         )
     }
 
-    var fontSizeBinding: Binding<CGFloat> {
-        Binding(
-            get: { configuration.fontSize },
-            set: { newValue in
-                var next = configuration
-                next.fontSize = newValue
-                if next.firstLineHeadIndent > 0 {
-                    next.firstLineHeadIndent = newValue * 2
-                }
-                onChange(next)
-            }
-        )
-    }
-
-    var firstLineIndentBinding: Binding<Bool> {
-        Binding(
-            get: { configuration.firstLineHeadIndent > 0 },
-            set: { isOn in
-                var next = configuration
-                next.firstLineHeadIndent = isOn ? configuration.fontSize * 2 : 0
-                onChange(next)
-            }
-        )
-    }
-
     var precacheCountBinding: Binding<Int> {
         Binding(
             get: { precacheCount },
@@ -378,24 +378,50 @@ private extension ReaderSettingsView {
         )
     }
 
-    /// 上下边距（U1-8）：与左右分开可调 —— 原先一个「页边距」滑杆同时改四边。
+    /// 上边距（owner 2026-10-11）：**距屏幕顶的绝对距离**，`0` = 正文贴到屏幕最边缘
+    /// （**不自己适配刘海 / 灵动岛**，内容可以被缺口盖住 —— owner 明确要这个）。
     ///
-    /// 滑杆范围 `-18 ... 48`（owner 2026-10-11 拍板「收到 -18：全机型都安全」）：
-    /// **负值让正文侵入上下安全区**，上限仍是 48pt；下限从 `-60` 收到 `-18`，
-    /// 因为 `-18` 是**全机型（灵动岛 / 刘海屏）都不会让首行被缺口盖住**的下限 ——
-    /// 此前 `-60` 允许用户把首行直接推到缺口下面（正文整行满宽，躲不开）。
-    /// 步长取 `3` 是为了让上下限**两端都精确可达**（`48 − (−18) = 66 = 22 × 3`；
-    /// 若取 4，步进网格只能到 46，上限 48 就不可达了）。
-    /// 上下不需要 HIG 那套水平页边距的下限
-    /// （左右边距的下限仍守 8pt，见 `horizontalInsetBinding`）。
-    /// 本滑杆**同时写 `top` 与 `bottom`** ⇒ `PageInset` 的竖向默认值必须对称（见其文档）。
-    var verticalInsetBinding: Binding<CGFloat> {
+    /// 范围 `0 ... 200`、步长 2（默认 78 与两端都精确可达）。
+    /// **只写 `inset.top`**：下边距有自己的滑杆（`bottomInsetBinding`），
+    /// 旧实现那一个「同时写上下」的 `verticalInsetBinding` 已删 ——
+    /// 它也正是旧文档里「竖向默认值必须对称」那条约束的来源，现已不成立。
+    var topInsetBinding: Binding<CGFloat> {
         Binding(
             get: { configuration.inset.top },
             set: { newValue in
                 var next = configuration
                 next.inset.top = newValue
+                onChange(next)
+            }
+        )
+    }
+
+    /// 下边距：同样只写自己那一侧，范围 `0 ... 120`、步长 2（默认 30 精确可达）。
+    ///
+    /// 上下限刻意与上边距不同（owner 指定 200 / 120）：下半屏还要给 Home Indicator
+    /// 与底部翻页手势留出空间，能接受的最大留白比顶部小。
+    var bottomInsetBinding: Binding<CGFloat> {
+        Binding(
+            get: { configuration.inset.bottom },
+            set: { newValue in
+                var next = configuration
                 next.inset.bottom = newValue
+                onChange(next)
+            }
+        )
+    }
+
+    /// 标签边距（owner 2026-10-11）：**三个角落标签共用**这一个值，范围 `0 ... 64`、步长 2。
+    ///
+    /// 默认 16 = `DesignTokens.Spacing.md`，与改造前 `ReaderCornerHUD` 里硬编码的那个值同值
+    /// ⇒ 默认观感逐值不变。它**只改左右**（`ReaderCornerHUD` 的一条 `.padding(.horizontal)`），
+    /// 垂直位置仍由 `topBarPadding` / `Spacing.xs` 决定。
+    var hudInsetBinding: Binding<CGFloat> {
+        Binding(
+            get: { configuration.hudHorizontalInset },
+            set: { newValue in
+                var next = configuration
+                next.hudHorizontalInset = newValue
                 onChange(next)
             }
         )

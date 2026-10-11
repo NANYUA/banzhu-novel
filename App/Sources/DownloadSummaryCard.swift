@@ -13,12 +13,14 @@ import SwiftUI
 /// 现搬进右列、紧跟百分比下方。
 ///
 /// ## 尺寸与书卡对齐
-/// 内容区 `DownloadCardMetrics.contentHeight`(88) + 内边距 `Spacing.sm`(12) × 2，
+/// 内容区 `DownloadCardMetrics.contentHeight`(80) + 内边距 `Spacing.sm`(12) × 2，
 /// 再套 `.downloadQueueCard()`（与书卡同一个卡片装饰）⇒ 与书卡、选择卡片同高。
 ///
-/// ⚠️ 它**不再是 `Section`**：Section header（「下载队列」+ 选择模式下的「完成」出口）
-/// 上移到了 `DownloadQueueView.queueList` —— header 若留在本视图里，一进选择模式本视图被
-/// `DownloadSelectionCard` 取代，header 会跟着消失，「完成」也就没地方放了。
+/// ⚠️ 它**不再是 `List` 里的 `Section` 行**：卡片被搬出 `List`、与 `List` **并列常驻上栏**，
+/// 由 `DownloadQueueView.pinnedHeader` 渲染 —— 与选择模式的 `DownloadSelectionCard`
+/// **同位交替**（`if isSelecting { 选择卡 } else { 本卡 }`）。
+/// 选择模式的「完成」出口**已不在下载页**：它搬到了书架分组栏最右边
+/// （`BookshelfView+GroupBar.swift` 的 `groupBar(_:downloadStore:)` 里的 `selectionDoneChip`）。
 ///
 /// ⚠️ 单独成文件（U11 收尾）：`DownloadQueueView.swift` 当时已到 **595/600 行**
 /// （SwiftLint `file_length` warning 600，CI `--strict` 下 warning 即失败），

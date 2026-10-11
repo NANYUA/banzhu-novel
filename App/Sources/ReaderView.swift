@@ -102,19 +102,19 @@ struct ReaderView: View {
                     safeAreaInsets: geometry.safeAreaInsets,
                     inset: viewStore.config.inset
                 )
-                let contentPaddings = readerContentPaddings(
-                    safeAreaInsets: geometry.safeAreaInsets,
-                    inset: viewStore.config.inset
-                )
+                let contentPaddings = readerContentPaddings(inset: viewStore.config.inset)
                 // 正文底色只解析一次：正文层铺底与上下栏的玻璃派生共用它（唯一来源）。
                 let pageColor = pageBackgroundColor(for: viewStore.config)
                 ZStack {
                     Color(uiColor: pageColor)
                         .ignoresSafeArea()
 
-                    // 正文层：盒顶 = 安全区顶 − 外扩量、盒高 = 全屏高 − 两条内边距（U9-7）。
-                    // `contentSize` 就是这一层渲染盒的尺寸，与 `configuration.containerSize`
-                    // 逐值相同（B0-2 几何契约）。
+                    // 正文层：盒顶 = `inset.top`、盒底距屏幕底 = `inset.bottom`
+                    // （**距屏幕边缘的绝对距离**，`0` = 贴屏幕边、不避让刘海），
+                    // 盒高 = 全屏高 − 两条内边距。`contentSize` 就是这一层渲染盒的尺寸，
+                    // 与 `configuration.containerSize` 逐值相同（B0-2 几何契约）。
+                    // ⚠️ 竖向**只有这一套机制**：TextKit 侧（`PageTextView` 的
+                    // `textContainerInset` 与 `TextKitMeasuring`）竖向一律按 0，两处都算就是双倍。
                     readerContent(
                         viewStore,
                         availableWidth: contentSize.width,
@@ -268,32 +268,35 @@ struct ReaderView: View {
 private extension ReaderView {
     // MARK: - 内容
 
-    /// 正文盒的竖向两条内边距（U9-7）。
+    /// 正文盒的竖向两条内边距（2026-10-11 语义变更）。
     ///
-    /// `PageInset.top/bottom` 允许为负，语义是「**相对安全区向屏幕边缘推**的偏移量」：
-    /// 盒子要向上/向下外扩 `max(0, -inset)`，盒顶/盒底各外移同样距离
-    /// ⇒ 内边距 = `安全区 − 外扩量`，下限 0（外扩超过安全区时盒子顶到屏幕边为止）。
-    /// 正值时外扩为 0，内边距与旧实现**逐值相同** ⇒ 用户加正边距的行为完全不变。
+    /// `PageInset.top/bottom` 现在的语义是「**距屏幕边缘的绝对距离**」：
+    /// `0` = 正文贴到屏幕最边缘（**不自己适配刘海 / 灵动岛**，内容可以被缺口盖住 ——
+    /// owner 明确要这个），`78 / 30` = 距上 / 下屏幕边 78 / 30pt。
+    /// ⇒ 这里**直接用设定值**，不再牵涉安全区。
     ///
-    /// ⚠️ 负值**不能**直接进 `UITextView.textContainerInset`：`clipsToBounds` 默认 `true`，
-    /// 负 inset 只会把正文裁掉而不是往外扩。外扩因此由这里的布局兑现，
-    /// 传给 TextKit 的竖向 inset 一律 clamp 到 `>= 0`
-    /// （`PageTextView` 与 `TextKitMeasuring` 各一处，后者关系分页，漏了就与渲染错位）。
-    private func readerContentPaddings(
-        safeAreaInsets: EdgeInsets,
-        inset: PageInset
-    ) -> (top: CGFloat, bottom: CGFloat) {
-        (
-            max(0, safeAreaInsets.top - max(0, -inset.top)),
-            max(0, safeAreaInsets.bottom - max(0, -inset.bottom))
-        )
+    /// 旧语义（U9-7，已废弃）是「相对安全区向屏幕边缘推的偏移量，可为负」：
+    /// 负值在这里把盒子外扩（`max(0, 安全区 − max(0, −inset))`），正值在
+    /// `textContainerInset` 生效 —— 那是「外层管负值、内层管正值」的两段式，
+    /// 滑杆的 `0…48` 一段在外层完全是空转的。旧数据由
+    /// `VerticalInsetDefaultMigration`（key `v3`）重置为新默认。
+    ///
+    /// ## 竖向只有这一套机制
+    /// 竖向边距**全部**由这里的布局 padding 兑现：`UITextView.textContainerInset`
+    /// 与 `TextKitMeasuring` 的竖向一律按 **0** 处理（两处都算 ⇒ 边距翻倍，且分页与渲染错位）。
+    ///
+    /// ⚠️ 盒高必须与本函数**同源**（`readerContentSize` 直接调它）：写成别的等价式会在极端
+    /// 滑杆值下与渲染盒不等，分页立刻与实际渲染错位（B0-2）。
+    /// 左右两侧另由 `PageInset` 的左右边距设置负责（正值语义未变，走 `textContainerInset`）。
+    private func readerContentPaddings(inset: PageInset) -> (top: CGFloat, bottom: CGFloat) {
+        (max(0, inset.top), max(0, inset.bottom))
     }
 
-    /// 阅读正文可用的安全区尺寸（全屏减去状态栏 / 灵动岛 / Home Indicator，再按竖向边距外扩）。
+    /// 阅读正文可用的安全区尺寸（全屏减去左右安全区，再按竖向边距收上下）。
     ///
     /// 宽 = 全屏宽 − 左右安全区；高 = 全屏高 − **上面那两条内边距**
     /// —— 刻意与内边距**同源**：渲染盒的实际高度就是「全屏高 − 两条 padding」，
-    /// 写成别的等价式（如「安全区盒高 + 外扩量」）会在「外扩量 > 安全区」的极端滑杆值下
+    /// 写成别的等价式（如「安全区盒高 + 外扩量」）会在极端滑杆值下
     /// 与渲染盒不等（`max(0, …)` 已把内边距夹到 0），分页立刻与实际渲染错位（B0-2）。
     /// 左右两侧另由 `PageInset` 的左右边距设置负责（正值语义未变）。
     private func readerContentSize(
@@ -301,7 +304,7 @@ private extension ReaderView {
         safeAreaInsets: EdgeInsets,
         inset: PageInset
     ) -> CGSize {
-        let paddings = readerContentPaddings(safeAreaInsets: safeAreaInsets, inset: inset)
+        let paddings = readerContentPaddings(inset: inset)
         return CGSize(
             width: max(0, size.width - safeAreaInsets.leading - safeAreaInsets.trailing),
             height: max(0, size.height - paddings.top - paddings.bottom)

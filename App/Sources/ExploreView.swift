@@ -94,7 +94,7 @@ public struct ExploreView: View {
 
 private extension ExploreView {
     /// 分类栏：胶囊行 + 一条发丝分隔线。
-    /// 与书架的 `groupBar`（见 `BookshelfView+GroupBar.swift` 的 `groupBar(_:)`）同一套结构。
+    /// 与书架的 `groupBar`（见 `BookshelfView+GroupBar.swift` 的 `groupBar(_:downloadStore:)`）同一套结构。
     func categoryBar(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {

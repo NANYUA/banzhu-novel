@@ -24,7 +24,7 @@ import UIKit
 // 控制栏这一层**只吃横向安全区** —— 与「上一版」逐值一致（U9-7：两栏要能贴到屏幕上下边）。
 //
 // ## 玻璃语言（借参考实现的配色，不借它的布局）
-// 玻璃 = 系统 `Material` + 主题染色（用 `mask` 做渐变羽化，贴近正文一侧略减淡）
+// 玻璃 = 系统 `Material` + 系统语义底色（用 `mask` 做渐变羽化，贴近正文一侧略减淡）
 // + 0.5pt 细边缘线（朝正文那一侧，随面板圆角裁切）+ 只向正文方向偏移的柔影。
 //
 // ## 条目**以项目既有能力为准**（owner：参考代码只是视觉参考）
@@ -421,7 +421,9 @@ private struct ReaderBottomBar: View {
 /// ## 为什么必须是叠加层
 /// 呼出 / 隐藏控制栏**不能**改变正文的分页与阅读位置。它作为 `ZStack` 里与正文并列的一层
 /// （见 `ReaderView.body`），自己不占正文的布局空间 ⇒ 正文层一行都不动
-/// （`readerContentPaddings` / `readerContentSize` 未改）。
+/// （`readerContentPaddings` / `readerContentSize` 这两个函数名与它们的几何契约未变；
+/// 但**函数体**已随「上下边距换语义」改过 —— 外层直接用设定值、不再牵涉安全区，
+/// `readerContentPaddings` 现在只吃 `inset`）。
 ///
 /// ## 竖向位置：不吃安全区（U9-7）
 /// 这一层**只吃横向安全区**（由 `ReaderView.body` 施加），竖向完全由三段 `padding` 决定：
@@ -513,9 +515,13 @@ private extension AnyTransition {
 // MARK: - 与 ReaderView 的接线
 
 extension ReaderView {
-    /// 阅读页**正文底色**的唯一来源（正文层与三条面板的玻璃都用它）。
+    /// 阅读页**正文底色**的唯一来源（正文层铺底与角落 HUD 用它）。
     ///
-    /// 返回 `UIColor` 而不是 `Color`：控制栏要拿它去**解析明暗**并派生玻璃，
+    /// ⚠️ 三条控制栏面板**不再**消费它：面板已改成系统语义色（`ReaderView+ChromeStyle.swift`），
+    /// 不再跟随正文染色。本函数保留是因为 `ReaderView.swift` 仍在用它
+    /// （正文铺底 `Color(uiColor:)` 与 `readerCornerHUD(pageColor:)`）。
+    ///
+    /// 返回 `UIColor` 而不是 `Color`：调用点要拿它铺底并派生 HUD 文字色，
     /// 而 `Color` 包一层就取不到分量（`UIColor(Color)` 还会把动态色解析成当时的静态值）。
     ///
     /// 原先叫 `backgroundColor(for:)` 且是 `private`：Swift 的 `private` 是本文件级的，

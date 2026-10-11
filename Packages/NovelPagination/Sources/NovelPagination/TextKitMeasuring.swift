@@ -52,16 +52,16 @@ public struct TextKitMeasuring: TextMeasuring {
         let layoutManager = NSLayoutManager()
         storage.addLayoutManager(layoutManager)
 
-        // 一页容器（尺寸来自 configuration，减掉内边距）
+        // 一页容器（尺寸来自 configuration，减掉左右内边距）
         //
-        // 竖向 inset 必须与 `PageTextView` **同款 clamp 到 >= 0**（U9-7）：`PageInset` 的
-        // 上下默认值是负的（= 相对安全区向屏幕边缘推的偏移量），那部分外扩已经由
-        // `ReaderView` 放大 `containerSize` 兑现（盒子高了 24 + 22）。这里若再按负值
-        // 加回去，净高会多算 2 × 46pt ⇒ 每页多塞进正文，分页与实际渲染错位（B0-2）。
+        // 竖向**不再扣**（2026-10-11 语义变更）：`PageInset.top/bottom` 现在是
+        // 「距屏幕边缘的绝对距离」，已经由 `ReaderView` 的布局 padding 从
+        // `containerSize.height` 里扣掉（`readerContentSize` 与 `readerContentPaddings` 同源，
+        // B0-2 契约），`PageTextView` 的竖向 `textContainerInset` 也恒为 0
+        // ⇒ 这里若再扣一次，净高会少算 top + bottom ⇒ 每页多塞进正文，分页与实际渲染错位。
         let contentWidth = max(configuration.containerSize.width
             - configuration.inset.leading - configuration.inset.trailing, 0)
-        let contentHeight = max(configuration.containerSize.height
-            - max(0, configuration.inset.top) - max(0, configuration.inset.bottom), 0)
+        let contentHeight = max(configuration.containerSize.height, 0)
         let container = NSTextContainer(size: CGSize(width: contentWidth, height: contentHeight))
         container.lineFragmentPadding = 0
         container.heightTracksTextView = false

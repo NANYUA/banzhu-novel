@@ -36,24 +36,33 @@ struct DownloadBookCard: View {
     let onLongPress: () -> Void
 
     /// 长按**已识别**标志：在长按被识别的那一刻（按下满 0.5s，**抬手之前**）置位，
-    /// 由抬手时 Button 的 action **消费**（见 `primaryAction`）。
+    /// 由抬手时的 `primaryAction` 消费。
     ///
-    /// ⚠️ 为什么不用「最近一次长按时间 + 0.4s 窗口」（旧实现，owner 真机上没挡住）：
+    /// ## 生命周期（🔴 这是本卡最容易改坏的一处，三个时点必须都看清）
+    /// 1. **置位**：`longPressGesture` 的 `onChanged(true)` —— 按下满 0.5s 那一刻，
+    ///    **严格早于抬手**；
+    /// 2. **清零 ①**：`touchDownGesture` 的 `onChanged` —— **下一次触摸按下那一刻**，
+    ///    严格早于该次触摸的抬手；
+    /// 3. **清零 ②**：`primaryAction` 丢弃本次单点时顺手清（幂等，只是兜底）。
+    ///
+    /// ## 为什么必须有「按下沿」这个清零点（U13 缺陷的根因）
+    /// 原先只有第 3 个清零点（抬手时由 Button 的 action 消费）—— 而**长按抬手时
+    /// Button 的 action 到底会不会触发并没有保证**（长按手势是 `.simultaneousGesture`
+    /// 挂上去的，手势成功识别后 Button 的 press 手势可能被取消）。
+    /// 一旦它不触发，标志就永远停在 `true`：**之后每一次单击都被静默丢弃**
+    /// （owner 真机反馈「长按能进选择模式、单击完全没反应」，不弹窗也不进阅读页），
+    /// 而长按根本不读这个标志 ⇒ 照旧能用 —— 症状完全吻合。
+    /// 把清零点补到「下一次按下」之后，标志的存活期不再依赖「抬手时谁先跑、谁触发了」。
+    ///
+    /// ## 为什么不用「最近一次长按时间 + 0.4s 窗口」（旧实现，owner 真机上没挡住）
     /// `LongPressGesture` 的 `onEnded` 与 `Button` 的 action **都在抬手那一刻执行**，
     /// 谁先谁后没有任何保证 —— 实测 Button 先跑，时间戳还没写进去就被判成「不是长按」；
     /// 即便顺序反过来，用户按住超过 0.4s 再抬手时那个窗口本身也已经过期。
-    /// 改成「识别即置位、抬手即消费」后，判据只依赖**本次触摸有没有被识别成长按**，
-    /// 与两个回调的先后顺序、与用户按住多久都无关。
-    @State private var didRecognizeLongPress = false
-
-    /// 长按**进行中**（识别到长按之后、抬手之前）。
     ///
-    /// 与 `didRecognizeLongPress` 是**两个独立判据**，抬手时任一为真就丢弃这次单点 ——
-    /// 二者覆盖的时序不同，合起来才不依赖「`onChanged` / `onEnded` / Button action 谁先跑」：
-    /// - `@GestureState` 由 SwiftUI 在长按**识别时**置位、手势结束时**自动复位**
-    ///   （不靠我们清标志 ⇒ 不存在「标志残留、下一次短点被吞」的风险）；
-    /// - 它取的是手势自己的值 ⇒ 短点全程为 `false`，**不会误伤短点**。
-    @GestureState private var isLongPressing = false
+    /// ⚠️ 这里**刻意只有一个判据**：曾经的第二个判据 `@GestureState isLongPressing`
+    /// （「长按仍在进行」）已删除 —— 它在抬手那一刻的真假同样没有保证，却**能单独吞掉单击**；
+    /// 只留一个生命周期明确的标志，判据更严也更可推理。
+    @State private var didRecognizeLongPress = false
 
     var body: some View {
         // 两种模式共用同一个 Button（选择模式切换勾选 / 否则进阅读页），长按与它并行识别。
@@ -64,6 +73,9 @@ struct DownloadBookCard: View {
         .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
         // 非选择模式长按进选择模式、选择模式再长按退出：两个模式共用同一条手势。
         .simultaneousGesture(longPressGesture)
+        // 按下沿：每次**新触摸按下**时把长按标志清掉（U13 缺陷的修法，见 `touchDownGesture`）。
+        // 与上面那条并列识别，互不抢事件（都是 `.simultaneousGesture`）。
+        .simultaneousGesture(touchDownGesture)
         // 装饰性勾选图的语义交给 Button 的 `.isSelected` trait，避免 VoiceOver 读两遍。
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -114,8 +126,9 @@ private extension DownloadBookCard {
     ///
     /// ## 内容区高度
     /// 整块 `.frame(minHeight: DownloadCardMetrics.contentHeight)`，与总进度卡片、
-    /// 选择操作卡片**引用同一个高度**：书卡文字列比封面高（多一行作者）时三张卡仍同高
-    /// （封面 60×80 只决定封面块本身，不再决定卡高）。
+    /// 选择操作卡片**引用同一个高度**（= 80 = 封面高）：文字列（≈74pt）与封面（80）取大 ⇒
+    /// 三张卡与书架 `BookRow` 的白卡高逐值相同（80 + 内边距 12×2 = 104）。
+    /// 文字列的算式与「状态与进度条并排」的来由见 `DownloadCardMetrics.contentHeight`。
     var content: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             cover
@@ -139,14 +152,23 @@ private extension DownloadBookCard {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                ProgressView(value: summary.progress)
-                    // 进度已由上面那行文字给全（VoiceOver 读「已下载 12/30 章」），
-                    // 进度条只是视觉强化，不再重复读一遍。
-                    .accessibilityHidden(true)
+                // 进度条与状态行**并排一行**（U13）：文字列因此从 ≈82pt 压到 ≈74pt，
+                // 装得进 `contentHeight`(80)。信息一条不少 —— 进度条与状态各自都还在，
+                // 只是不再各占一整行（算式见 `DownloadCardMetrics.contentHeight`）。
+                HStack(spacing: DesignTokens.Spacing.xs) {
+                    ProgressView(value: summary.progress)
+                        // 进度已由上面那行文字给全（VoiceOver 读「已下载 12/30 章」），
+                        // 进度条只是视觉强化，不再重复读一遍。
+                        .accessibilityHidden(true)
 
-                Text(summary.status.text)
-                    .font(.caption2)
-                    .foregroundStyle(summary.status.color)
+                    Text(summary.status.text)
+                        .font(.caption2)
+                        .foregroundStyle(summary.status.color)
+                        .lineLimit(1)
+                        // 状态是短标签，先拿满自身宽度、剩下的才给进度条：
+                        // 被进度条挤成「…」会丢掉它要传达的信息（需验证 / 失败 / 已全部下载）。
+                        .layoutPriority(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -161,8 +183,8 @@ private extension DownloadBookCard {
     ///
     /// 尺寸与圆角沿用书架书卡那一套（`BookRow` 的 60×80 + `Radius.sm`），不另造一套观感。
     /// 高度引用 `DownloadCardMetrics.coverHeight`（= 80，与 `BookRow` 同值）：
-    /// 补上作者行后书卡文字列比封面高，封面若跟着长高，真封面（3:4）会在上下各留一条底色带。
-    /// 三张卡片的高度对齐改由 `contentHeight` 负责（见 `content`）。
+    /// 封面写死 80 是为了让真封面（3:4）不被拉高、上下不留底色带；
+    /// 卡片内容区高度另由 `contentHeight` 负责（两者当前同值，见 `content`）。
     var cover: some View {
         AsyncImage(url: coverURL) { phase in
             switch phase {
@@ -206,11 +228,6 @@ private extension DownloadBookCard {
     /// （都由调用方在 `onLongPress` 里切换 `selectionModeChanged`）。
     var longPressGesture: some Gesture {
         LongPressGesture(minimumDuration: 0.5)
-            .updating($isLongPressing) { isRecognized, state, _ in
-                // `state = value`（而不是恒 `true`）：按下但还没到 0.5s 时必须是 `false`，
-                // 否则短点抬手时也会被判成长按。
-                state = isRecognized
-            }
             .onChanged { isRecognized in
                 // ⚠️ 关键在时机：`onChanged` 在**按下阶段**回调（长按刚被识别、抬手之前），
                 // 而 `onEnded` 与 Button 的 action 都在抬手时执行、顺序不保证
@@ -224,13 +241,39 @@ private extension DownloadBookCard {
             }
     }
 
+    /// **按下沿**：每一次新触摸的起点，把长按标志归零。
+    ///
+    /// ## 为什么这就是顺序无关的
+    /// 一次触摸内三个时点严格有序：**按下**（本手势的 `onChanged`）→ 长按**识别**（0.5s 后，
+    /// 置位）→ **抬手**（`primaryAction` 消费）。清零点排在置位点之前、置位点排在消费点之前，
+    /// 全部发生在**同一次触摸内部**，不跨回调比较先后 ⇒
+    /// - Button 的 action 在长按抬手时**触发**：读到 `true`，丢弃这次单点（判据 ② 不回归）；
+    /// - Button 的 action **不触发**：标志也不会残留到下一次触摸（按下沿会清），
+    ///   紧接着的第一次单击读到 `false`，照常进阅读页 / 切换勾选（判据 ①）。
+    ///
+    /// ## 为什么用「零时长长按」而不是别的
+    /// 它只做一件事：在**按下那一刻**回调一次 `onChanged(true)`（与上面那条 0.5s 手势
+    /// 「识别那一刻回调」同源）。不是 `DragGesture`（那会与 `List` 的滚动手势抢识别），
+    /// 也不引 `@GestureState`（它在抬手时的真假没有保证，正是本次要除掉的东西）。
+    /// `minimumDuration: 0` ⇒ 短点与长按都会走到这里；`false` 是抬手 / 复位，直接忽略。
+    var touchDownGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0)
+            .onChanged { isRecognized in
+                guard isRecognized else { return }
+                didRecognizeLongPress = false
+            }
+    }
+
     /// 单点动作：按当前模式分派（选择模式 = 切换勾选，否则 = 进阅读页）。
     ///
-    /// 抬手时若本次触摸**已经被识别成长按**（`didRecognizeLongPress`）或长按**仍在进行**
-    /// （`isLongPressing`），就丢弃这次单点 —— 否则「长按进选择模式」会顺手把书打开
-    /// （owner 真机反馈的缺陷），或把刚切换的勾选又翻回去。
+    /// 抬手时若本次触摸**已经被识别成长按**（`didRecognizeLongPress`），就丢弃这次单点 ——
+    /// 否则「长按进选择模式」会顺手把书打开（owner 真机反馈的缺陷），
+    /// 或把刚切换的勾选又翻回去。
+    ///
+    /// ⚠️ 判据只有这一个标志，且它**不可能**残留到下一次触摸（清零点见 `touchDownGesture`）
+    /// ⇒ 单击不会被静默丢弃；标志的真假只由「本次触摸有没有被识别成长按」决定。
     func primaryAction() {
-        if didRecognizeLongPress || isLongPressing {
+        if didRecognizeLongPress {
             didRecognizeLongPress = false
             return
         }
@@ -419,27 +462,35 @@ private func firstNonEmpty(_ values: String?...) -> String? {
 enum DownloadCardMetrics {
     /// 书卡**封面块**高度（宽 60）—— 与书架 `BookRow` 的封面同尺寸，`Radius.sm` 圆角。
     ///
-    /// ⚠️ 它**不等于**卡片内容区高度（见 `contentHeight`）：补上作者行后书卡文字列比封面高，
-    /// 封面若跟着长高，真封面（3:4 = 60×80）会在上下各留一条 `Surface.inset` 底色带。
+    /// ⚠️ 它只决定封面块本身，**不是**卡片内容区高度的真相源（那是 `contentHeight`）；
+    /// 两者当前**同值 80**（U13 起封面重新成为高度来源）：真封面是 3:4 = 60×80，
+    /// 封面若被拉高就会在上下各留一条 `Surface.inset` 底色带，所以封面高度写死在这里。
     static let coverHeight: CGFloat = 80
 
     /// 卡片**内容区最小高度**（书卡 / 总进度卡片 / 选择操作卡片三处共用）。
     ///
-    /// 加上卡片内边距 `Spacing.sm`(12) × 2 后，三张白卡的高度都是 **112pt**
-    /// （列表里再套 `.downloadQueueCard()` 的 8×2 ⇒ 可见卡高 128pt）。
+    /// 加上卡片内边距 `Spacing.sm`(12) × 2 后，三张白卡的高度都是 **104pt**
+    /// （列表里再套 `.downloadQueueCard()` 的 8×2 ⇒ 可见卡高 120pt）——
+    /// **与书架书卡 `BookRow` 逐值相同**（封面 80 + `.padding(Spacing.sm)` 12×2 = 104）。
     ///
-    /// ## 为什么是 88（算式）
-    /// 书卡文字列 = 书名 `.headline`(17pt，行高 ≈20.3) + `Spacing.xxs`(4)
-    /// + 作者 `.caption`(12pt，≈14.3) + 4 + 「已下载 N/M 章」`.caption`(≈14.3) + 4
-    /// + 进度条(≈4) + 4 + 状态 `.caption2`(11pt，≈13.1) ≈ **82pt**。
-    /// 原先这里写 80（照封面高写的，那时文字列只有 ≈64pt，封面才是高度来源）——
-    /// 补一行作者会顶破 80 ⇒ 书卡比另两张高 ≈2pt。取 **88**（= 80 + `Spacing.xs`(8)）
-    /// 留 ≈6pt 余量，并让这个值与间距刻度同源。
+    /// ## 为什么是 80（算式）
+    /// 取书卡内容里**最高**的那一块：
+    /// - **封面** `.frame(width: 60, height: coverHeight)` = **80**；
+    /// - **文字列** = 书名 `.headline`(17pt，行高 ≈20.3) + `Spacing.xxs`(4)
+    ///   + 作者 `.caption`(12pt，≈14.3) + 4 + 「已下载 N/M 章」`.caption`(≈14.3) + 4
+    ///   + 「进度条 ‖ 状态」并排一行 = max(进度条 ≈4, 状态 `.caption2`(11pt，≈13.1)) ≈ 13.1
+    ///   ⇒ **≈74.0pt**。
+    /// 两者取大 = **80** ⇒ 内容区 80 + 12×2 = 104，与书架卡一致。
+    ///
+    /// ⚠️ 原先这里写 88：那时「状态」独占一行（文字列 ≈82 > 封面 80），
+    /// 书卡白卡高因此是 112 而书架卡是 104 —— owner 反馈的「下载界面卡片大小和书架的卡片
+    /// 大小不一致」就是这 8pt。压回 80 的前提是把文字列压进 80：U13 把**状态行与进度条并排**
+    /// （信息一条不少：书名 / 作者 / 已下载 N/M 章 / 进度条 / 状态**全都还在**）。
     ///
     /// ⚠️ 同高的判据是「三处内容都 `.frame(minHeight: contentHeight)`」——
     /// 书卡文字列一旦长过它（超大 Dynamic Type 等）就会重新把书卡顶高，这是刻意的
     /// （宁可让内容不被裁掉，也不钉死高度把字切掉）。
-    static let contentHeight: CGFloat = 88
+    static let contentHeight: CGFloat = 80
 
     /// 总进度卡片右列（百分比 + 「暂停全部」）的固定宽度。
     ///

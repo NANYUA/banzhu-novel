@@ -24,16 +24,51 @@ private enum ReaderPageScrubberMetrics {
     /// 0.7 —— 常驻页码文字的**降一档**前景不透明度。
     ///
     /// ## 为什么用 `foreground.opacity(...)` 而不是 `.secondary`
-    /// 传进来的前景色是按**染色后玻璃**的亮度派生的（`ReaderChromeDerivation.foreground`），
+    /// 传进来的前景色是按**面板底色**的亮度派生的（`ReaderChromeDerivation.foreground`），
     /// 可能与**应用外观**相反（「深色外观 + 浅色底」时前景是黑的）；而 `.secondary` 跟的是
     /// 应用外观 —— 那种组合下会给出「浅色底 + 浅灰字」，直接不可读。
     ///
     /// ## 0.7 的推导（⚠️ **估算值，需真机复核**）
-    /// 前景只有黑 / 白两档，0.7 叠在玻璃上仍在 `apple-design-2` §6 的 4.5:1 之上：
-    /// 深色玻璃 #3C3C3F（相对亮度 ≈ 0.046）上 70% 白 ≈ **6.3:1**；
-    /// 浅色玻璃（亮度 ≈ 0.84）上 70% 黑 ≈ **7.0:1**。
+    /// 前景只有黑 / 白两档，0.7 叠在面板底色上仍远在 `apple-design-2` §6 的 4.5:1 之上：
+    /// 深色面板 #1C1C1E（相对亮度 ≈ 0.012）上 70% 白 ⇒ **≈ 8.9:1**；
+    /// 浅色面板 #F2F2F7（相对亮度 ≈ 0.891）上 70% 黑 ⇒ **≈ 8.1:1**。
     /// 它与栏内**禁用态**的 0.35 是两个语义（那个是「不可用」，这里是「次要」）。
     static let pageLabelOpacity: Double = 0.7
+
+    /// 0.8 —— 页码文字的**最小缩放比例**（`minimumScaleFactor`）。
+    ///
+    /// 页码位数多（「第 128 页」+「共 256 页」）或 Dynamic Type 大字号时，这一行宁可**缩字**，
+    /// 也不换行、更不把滑块挤到 `minSliderWidth` 以下。0.8 是「还看得清」与「少占宽」的折中：
+    /// 再往下缩（如 0.6）小字就接近不可读，不如让它截断（完整页码仍由 `Slider` 的
+    /// `.accessibilityValue` 播报）。
+    static let pageLabelMinScale: CGFloat = 0.8
+
+    /// 120 —— 滑块的**最小宽度下限**。
+    ///
+    /// ## 为什么需要
+    /// 面板高度必须与上栏 / 下栏一致 ⇒ 页码文字只能与滑块**同排**（见 `ReaderPageScrubber`
+    /// 的「布局」），两者在同一行争宽度。不设下限时，长章的三 / 四位数页码会把滑块压到拖不动。
+    ///
+    /// ## 120 的推导（375pt 宽机型 —— 可运行 iOS 17 的最窄机型）
+    /// 375 − 2×`panelOuterMargin`(16) = 343 − 2×`barInnerPadding`(12) = 319
+    /// − 2×44（两个跳章按钮的 44pt 命中区）= 231
+    /// − 2×`Spacing.xs`(8)（进度条两侧给拇指外伸留的空白）= **215pt** 分给「滑块 + 页码文字」。
+    ///
+    /// 页码两段 `.caption2`（11pt）按「汉字 1em = 11pt、数字 ≈ 0.6em = 6.6pt、空格 ≈ 0.26em = 2.9pt」
+    /// 估（⚠️ **估算值，需真机复核**），两段之间再加 `Spacing.xxs`(4)：
+    /// - 三位数：「第 128 页」≈ 47.6 +「共 256 页」≈ 47.6 + 4 ≈ **99pt** ⇒ 滑块本可拿 116pt；
+    /// - 四位数：「第 1024 页」≈ 54.2 ×2 + 4 ≈ **112pt** ⇒ 滑块只剩 103pt。
+    ///
+    /// 取 **120** 后：三位数时页码缩到 ≈ 0.96，四位数时缩到 ≈ 0.85（仍 ≥ 0.8 ⇒ 不截断）
+    /// —— 两种常见情况都既保住滑块、又不丢字。
+    ///
+    /// ## 兜不住时会发生什么（不留「滑块被挤成 0 宽」的隐患）
+    /// 这一条面板的**硬最小宽度** = 44 +（8 + 120 + ≈15）+ 44 + 2×12 + 2×16 ≈ **295pt**
+    /// （≈15pt 是页码文字截断成「…」时的下限）⇒ 比最窄的 iOS 17 机型（320pt）还窄，
+    /// 结构上**不可能溢出**屏幕。再窄的情况（大字号 AX + 四位数页码）依次降级为：
+    /// ① 页码文字按 `pageLabelMinScale` 缩到 0.8；② 仍不够则 `lineLimit(1)` **截断**页码文字。
+    /// 滑块任何情况下都 ≥ 120pt。
+    static let minSliderWidth: CGFloat = 120
 }
 
 // MARK: - 本章页码进度条
@@ -57,6 +92,12 @@ private enum ReaderPageScrubberMetrics {
 /// `onEditingChanged(false)` 时调**一次** `onCommit()`（把当前位置落盘一次），
 /// 并清空本地拖动值 ⇒ 之后显示值重新由 `pageIndex` 驱动。
 ///
+/// ## 布局：**单行**（滑块 + 常驻页码同排）
+/// 面板高度必须与上栏 / 下栏**逐值一致**（12 + 44 + 12 = 68pt）⇒ 这一条只能有一行内容：
+/// 常驻页码与滑块**同一行**（旧版是「滑块一行 + 页码一行」的 `VStack`，比另两条高约 17pt）。
+/// 宽度不够时由 `ReaderPageScrubberMetrics.minSliderWidth` 兜底 —— 让页码文字先缩放、再截断，
+/// 滑块不会被挤没（推导见那个常量）。
+///
 /// ## 降级（由调用方负责）
 /// `pageCount <= 1`（单页章 / 正文还没排完）时本视图**不渲染**（调用方放回 `Spacer`）：
 /// 单页章没有「拖到第几页」这回事，置灰一个永远拖不动的控件比不显示更糟。
@@ -69,7 +110,7 @@ struct ReaderPageScrubber: View {
     let pageIndex: Int
     /// 本章总页数（调用方保证 > 1）。
     let pageCount: Int
-    /// 前景色（来自 `ReaderChromeStyle.foreground`，已按染色后玻璃的亮度派生）。
+    /// 前景色（来自 `ReaderChromeStyle.foreground`，已按面板底色的亮度派生）。
     let foreground: Color
     /// 拖到第 N 页（0 基）——**高频**调用；实现方只迁移位置、不落盘。
     var onJump: (Int) -> Void
@@ -82,7 +123,7 @@ struct ReaderPageScrubber: View {
     @State private var lastSentPage: Int?
 
     var body: some View {
-        VStack(spacing: DesignTokens.Spacing.xxs) {
+        HStack(spacing: DesignTokens.Spacing.xs) {
             Slider(
                 value: value,
                 in: 0 ... Double(max(0, pageCount - 1)),
@@ -92,7 +133,15 @@ struct ReaderPageScrubber: View {
             .tint(foreground)
             // `Slider` 固有高度约 31pt，低于 HIG 的 44pt 触控下限（`apple-design-2` §9）⇒ 补足。
             // 44 的唯一来源是 `ReaderChromeMetrics.minTouchTarget`，不在这里另写一个数。
-            .frame(minHeight: ReaderChromeMetrics.minTouchTarget)
+            //
+            // 宽度下限是**硬下限**（见 `ReaderPageScrubberMetrics.minSliderWidth`）：
+            // 它比 `layoutPriority` 可靠 —— 滑块是「给多少吃多少」的弹性视图，若给它更高的
+            // layout priority，它会先吃掉整行提案，反而把页码文字压成「…」；
+            // 显式 minWidth 则只保证「滑块不被压到 120pt 以下」，宽度够时页码仍拿满自己的理想宽度。
+            .frame(
+                minWidth: ReaderPageScrubberMetrics.minSliderWidth,
+                minHeight: ReaderChromeMetrics.minTouchTarget
+            )
             .accessibilityLabel("本章进度")
             .accessibilityValue(spokenPageText)
 
@@ -108,21 +157,28 @@ struct ReaderPageScrubber: View {
         Int((scrubbingValue ?? Double(pageIndex)).rounded())
     }
 
-    /// 常驻页码行：小字、比前景色降一档（理由见 `ReaderPageScrubberMetrics.pageLabelOpacity`）。
+    /// 常驻页码（与滑块**同一行**）：小字、比前景色降一档
+    /// （理由见 `ReaderPageScrubberMetrics.pageLabelOpacity`）。
     ///
     /// 字号用**文本样式** `.caption2`（默认内容尺寸 11pt，HIG 标签栏文字标准），随 Dynamic Type
     /// 缩放 —— 不用固定字号 `Font.system(size:)`（大字号无障碍设置下会被裁）。
+    /// `.font` 施加在这个 `HStack` 上即可：它与 `.lineLimit` / `.minimumScaleFactor` 一样
+    /// 走环境向子 `Text` 传播（`.caption2` 是既有写法，不新增第二种施加方式）。
+    ///
+    /// 宽度不够时**先缩字、再截断**（`pageLabelMinScale` / `lineLimit(1)`），绝不换行 ——
+    /// 换行会把这一条顶高，三条面板就不再同高（见 `ReaderChapterJumpBar` 的几何注释）。
     ///
     /// 对 VoiceOver 隐藏：这两段文字是**视觉**补充，语义已由 `Slider` 的
-    /// `.accessibilityValue` 播报；不隐藏会被读成两遍。
+    /// `.accessibilityValue` 播报（截断时也仍播报完整页码）；不隐藏会被读成两遍。
     private var pageLabel: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: DesignTokens.Spacing.xxs) {
             Text("第 \(displayPageIndex + 1) 页")
-            Spacer(minLength: 0)
             Text("共 \(pageCount) 页")
         }
         .font(.caption2)
         .foregroundStyle(foreground.opacity(ReaderPageScrubberMetrics.pageLabelOpacity))
+        .lineLimit(1)
+        .minimumScaleFactor(ReaderPageScrubberMetrics.pageLabelMinScale)
         .accessibilityHidden(true)
     }
 
@@ -184,9 +240,10 @@ struct ReaderPageJump {
 /// ## 几何
 /// - **宽度**：与上栏 / 下栏同宽 —— 三者都在 `ReaderChromeOverlay` 的同一个 `VStack` 里，
 ///   共用同一份左右安全区内缩与 `ReaderChromeMetrics.panelOuterMargin`。
-/// - **高度**：**比上下栏高一档**。内容行（44）与上下各 12 内边距与上下栏同源，但中间多了
-///   进度条下面那一行常驻页码（`Spacing.xxs` + `.caption2` ≈ 17pt）⇒ 默认内容尺寸下约 85pt
-///   （上下栏 68pt）。这是「常驻一行页码」这条需求的必然结果；Dynamic Type 长大时三条一起长。
+/// - **高度**：与上栏 / 下栏**逐值相同** —— 内容行 44（`ReaderChromeMetrics.minTouchTarget`）
+///   + 上下各 `panelVerticalPadding`(12) = **68pt**。常驻页码已并入同一行
+///   （见 `ReaderPageScrubber` 的「布局」），不再多占一行；旧版是「滑块 + 页码」两行 ⇒ 约 85pt，
+///   比另两条高约 17pt。Dynamic Type 长大时三条一起长（页码不再是额外的固定增量）。
 /// - **位置**：紧贴下栏上方，中间留 `DesignTokens.Spacing.xs`(8pt) 的空隙 ——
 ///   两条面板**各自独立**（各有自己的 0.5pt 边缘线与柔影），8pt 间隙让「这是另一条」一眼可辨。
 ///
