@@ -197,15 +197,14 @@ final class ReaderChapterPanSlotTests: XCTestCase {
         XCTAssertTrue(store.state.nextText.isEmpty, "远侧作废：正文不留（旧值是别的章）")
         XCTAssertTrue(store.state.nextPages.isEmpty, "远侧作废：分页不留")
 
-        // 远侧由链式预加载取回来（第 3 章），近侧也会被重新确认一遍。
+        // 远侧由链式预加载取回来（第 3 章）—— 它是真变化，带断言闭包；
+        // 近侧（第 1 章）已经在槽位里（上面搬过去的）⇒ 预加载结果逐值相同、状态不变
+        // ⇒ 不带断言闭包（带闭包时 TCA 会要求状态真的变了）。
         await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
             $0.nextText = Self.thirdText
             $0.nextPages = thirdPages
         }
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = firstPages
-        }
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
         await store.finish()
         XCTAssertEqual(store.state.nextChapter?.path, Self.third.path, "远侧最终是第 3 章，不是旧值")
     }
@@ -253,10 +252,9 @@ final class ReaderChapterPanSlotTests: XCTestCase {
         XCTAssertTrue(store.state.previousText.isEmpty, "远侧作废：正文不留（旧值是别的章）")
         XCTAssertTrue(store.state.previousPages.isEmpty, "远侧作废：分页不留")
 
-        await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
-            $0.nextText = Self.thirdText
-            $0.nextPages = thirdPages
-        }
+        // 近侧（第 3 章）已经在槽位里（上面搬过去的）⇒ 预加载结果逐值相同、状态不变
+        // ⇒ 不带断言闭包；远侧（第 1 章）是真变化，带断言闭包。
+        await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText))
         await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
             $0.previousText = Self.firstText
             $0.previousPages = firstPages

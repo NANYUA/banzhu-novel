@@ -146,10 +146,9 @@ final class ReaderChapterAdvanceTests: XCTestCase {
             $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         // 反向链式：换到第 2 章那一刻，reducer 也把它的上一章（第 1 章）接上了。
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
-        }
+        // ⚠️ 这一份与上面**搬过来的**逐值相同 ⇒ reducer 收到后状态不变 ⇒ **不带断言闭包**
+        // （带闭包时 TCA 会要求状态真的变了）。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
         await store.finish()
 
         XCTAssertEqual(store.state.chapterPath, Self.second.path)
@@ -325,11 +324,9 @@ extension ReaderChapterAdvanceTests {
             $0.nextText = Self.thirdText
             $0.nextPages = expectedPages(chapter: Self.third, text: Self.thirdText)
         }
-        // 反向链式：同一刻也把新的上一章（第 1 章）接上了。
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
-        }
+        // 反向链式：同一刻也把新的上一章（第 1 章）接上了 —— 它已经在槽位里（上面搬过去的），
+        // 这一份是逐值相同的确认 ⇒ 状态不变 ⇒ 不带断言闭包。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
     }
 
     /// 换到第 2 章后，reducer 自己把**新的**下一章（第 3 章）与**新的**上一章（第 1 章）
@@ -386,11 +383,9 @@ extension ReaderChapterAdvanceTests {
             $0.previousText = Self.secondText
             $0.previousPages = secondPages
         }
-        // 第 3 章是最后一章（没有下一章），但上一章（第 2 章）要重新接上。
-        await store.receive(.previousChapterLoaded(Self.second.path, Self.secondText)) {
-            $0.previousText = Self.secondText
-            $0.previousPages = secondPages
-        }
+        // 第 3 章是最后一章（没有下一章），但上一章（第 2 章）要重新接上 —— 它已经在槽位里
+        // （上面搬过去的），这一份是逐值相同的确认 ⇒ 状态不变 ⇒ 不带断言闭包。
+        await store.receive(.previousChapterLoaded(Self.second.path, Self.secondText))
 
         // 末章：到章尾再换 ⇒ 换章 action 不动，也不再有预加载结果。
         await advanceToLastPage(store, pages: thirdPages)
@@ -446,11 +441,9 @@ extension ReaderChapterAdvanceTests {
             $0.previousText = Self.firstText
             $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
-        // 反向链式：换章后也把新章的上一章接上（这条不是缓存调用，计数不受影响）。
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
-        }
+        // 反向链式：换章后也把新章的上一章接上（这条不是缓存调用，计数不受影响）；
+        // 它已经在槽位里（上面搬过去的）⇒ 状态不变 ⇒ 不带断言闭包。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
         await store.finish()
 
         let requests = await recorder.allRequests()

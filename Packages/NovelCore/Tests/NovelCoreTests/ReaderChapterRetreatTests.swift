@@ -156,11 +156,9 @@ final class ReaderChapterRetreatTests: XCTestCase {
             $0.nextText = Self.secondText
             $0.nextPages = expectedPages(chapter: Self.second, text: Self.secondText)
         }
-        // 反向链式：退到第 1 章后，它的下一章（第 2 章）重新接上。
-        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
-            $0.nextText = Self.secondText
-            $0.nextPages = expectedPages(chapter: Self.second, text: Self.secondText)
-        }
+        // 反向链式：退到第 1 章后，它的下一章（第 2 章）重新接上 —— 它已经在槽位里
+        // （上面搬过去的）⇒ 这一份逐值相同、状态不变 ⇒ 不带断言闭包。
+        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText))
         await store.finish()
 
         XCTAssertEqual(store.state.chapterPath, Self.first.path)
@@ -279,11 +277,9 @@ extension ReaderChapterRetreatTests {
             $0.nextText = Self.thirdText
             $0.nextPages = expectedPages(chapter: Self.third, text: Self.thirdText)
         }
-        // 链式（反向）：它的下一章（第 3 章）先重新接上。
-        await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText)) {
-            $0.nextText = Self.thirdText
-            $0.nextPages = expectedPages(chapter: Self.third, text: Self.thirdText)
-        }
+        // 链式（反向）：它的下一章（第 3 章）先重新接上 —— 已经在槽位里（上面搬过去的）
+        // ⇒ 这一份逐值相同、状态不变 ⇒ 不带断言闭包。
+        await store.receive(.nextChapterLoaded(Self.third.path, Self.thirdText))
         // 链式：退到第 2 章那一刻就重新声明了它的上一章（第 1 章）并重新预加载。
         let firstPages = await receivePrevious(store, chapter: Self.first, text: Self.firstText)
         await store.finish()
@@ -318,9 +314,12 @@ extension ReaderChapterRetreatTests {
         await receivePrevious(store, chapter: Self.first, text: Self.firstText)
         XCTAssertEqual(store.state.previousChapter?.path, Self.first.path, "前置条件：旧的上一章是第 1 章")
 
-        // 从目录直接跳到第 3 章：第 1 章那份预加载结果必须同时被清掉。
+        // 从目录直接跳到第 3 章：第 1 章那份预加载结果必须同时被清掉（`load` 的断言闭包
+        // 锁住这一步）；刚离开的第 2 章已经被直接搬进这一侧 ⇒ 下面这一份预加载结果与它
+        // 逐值相同、**状态不变** ⇒ 不带断言闭包（带闭包时 TCA 会要求状态真的变了）。
         await load(store, chapter: Self.third, text: Self.thirdText)
-        let secondPages = await receivePrevious(store, chapter: Self.second, text: Self.secondText)
+        let secondPages = expectedPages(chapter: Self.second, text: Self.secondText)
+        await store.receive(.previousChapterLoaded(Self.second.path, Self.secondText))
         await store.finish()
 
         XCTAssertEqual(store.state.chapterPath, Self.third.path)
@@ -358,10 +357,8 @@ extension ReaderChapterRetreatTests {
             $0.nextText = Self.secondText
             $0.nextPages = expectedPages(chapter: Self.second, text: Self.secondText)
         }
-        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
-            $0.nextText = Self.secondText
-            $0.nextPages = expectedPages(chapter: Self.second, text: Self.secondText)
-        }
+        // 这一份与上面**搬过来的**逐值相同 ⇒ 状态不变 ⇒ 不带断言闭包。
+        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText))
         await store.finish()
 
         let requests = await recorder.allRequests()

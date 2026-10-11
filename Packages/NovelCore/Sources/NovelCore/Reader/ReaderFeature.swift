@@ -447,7 +447,11 @@ public extension ReaderFeature.State {
         if normalizedText.hasPrefix(normalizedTitle) {
             return body
         }
-        return normalizedTitle + "\n\n" + body
+        // 拼章名时用**去掉首尾空白**的那份（`normalizedText`，不是 `body`）：
+        // 正文末尾的换行 / 空白会撑出一个整页空白的末页（排版口径第 1 条），
+        // 也会把「末尾空白」漏进渲染 —— 回归见
+        // `ParagraphIndentTests.testdisplayText仍去末尾空白且拼上章名`。
+        return normalizedTitle + "\n\n" + normalizedText
     }
 
     var displayText: String {

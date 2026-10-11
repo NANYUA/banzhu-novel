@@ -129,10 +129,8 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         let firstPages = expectedPages(chapter: Self.first, text: Self.firstText)
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = firstPages
-        }
+        // 这一份与上面**搬过来的**逐值相同 ⇒ 状态不变 ⇒ 不带断言闭包。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
         return firstPages
     }
 
@@ -163,10 +161,8 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
         }
         // 链式：换到第 2 章（末章）后，新的上一章（第 1 章）接上；没有下一章可接。
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
-        }
+        // ⚠️ 它已经在槽位里（上面搬过去的）⇒ 这一份逐值相同、状态不变 ⇒ 不带断言闭包。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
         await store.finish()
 
         XCTAssertFalse(store.state.isLoading, "走预加载就绪那条路：全程不转圈")
@@ -215,10 +211,8 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.nextText = Self.thirdText
             $0.nextPages = expectedPages(chapter: Self.third, text: Self.thirdText)
         }
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = firstPages
-        }
+        // 它已经在槽位里（上面搬过去的）⇒ 这一份逐值相同、状态不变 ⇒ 不带断言闭包。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
         await store.finish()
 
         XCTAssertEqual(store.state.chapterPath, Self.second.path)
@@ -275,10 +269,9 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.text = Self.secondText
             $0.isLoading = false
         }
-        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText)) {
-            $0.previousText = Self.firstText
-            $0.previousPages = expectedPages(chapter: Self.first, text: Self.firstText)
-        }
+        // 兜底路径也把「刚离开那一章」搬进了这一侧（见上面那条闭包）⇒ 这一份预加载结果
+        // 与它逐值相同、状态不变 ⇒ 不带断言闭包。
+        await store.receive(.previousChapterLoaded(Self.first.path, Self.firstText))
         await store.finish()
 
         XCTAssertFalse(store.state.isLoading)
@@ -319,10 +312,8 @@ final class ReaderChapterJumpTests: XCTestCase {
             $0.nextPages = secondPages
         }
         // 链式：回到第 1 章后，下一章（第 2 章）重新接上；第 1 章没有上一章。
-        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText)) {
-            $0.nextText = Self.secondText
-            $0.nextPages = secondPages
-        }
+        // ⚠️ 它已经在槽位里（上面搬过去的）⇒ 这一份逐值相同、状态不变 ⇒ 不带断言闭包。
+        await store.receive(.nextChapterLoaded(Self.second.path, Self.secondText))
         await store.finish()
 
         XCTAssertEqual(store.state.chapterPath, Self.first.path)
