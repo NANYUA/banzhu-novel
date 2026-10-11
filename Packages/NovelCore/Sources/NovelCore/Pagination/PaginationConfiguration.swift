@@ -213,13 +213,14 @@ public struct PaginationConfiguration: Equatable, Sendable {
 
     /// 上栏面板**上边缘距屏幕顶**的距离（pt）。设置项「上标签上边距」。
     ///
-    /// **绝对值语义**（owner 2026-10-11 口径）：
+    /// **绝对值语义**（owner 2026-10-11 第二版口径）：
     /// - `0` = 上栏面板贴到屏幕最上边（**不避让灵动岛 / 状态栏**，面板会被缺口盖住
     ///   —— 这正是 owner 要的默认值，⛔ 别当成 bug 改回去）；
-    /// - **负值** = 面板继续**移出屏幕上边**（`-70` = 再往上 70pt，一部分露在屏幕外）；
-    /// - 正值 = 距屏幕顶的绝对距离。
+    /// - 正值 = 距屏幕顶的绝对距离，上限 `70`。
     ///
-    /// 范围 `-70 ... 70`、默认 `0`（设置页 `NumberInputRow` 的 `range` 与这里同值）。
+    /// 范围 `0 ... 70`、默认 `0`（设置页 `NumberInputRow` 的 `range` 与这里同值）。
+    /// ⚠️ 旧版本曾允许负值（面板移出屏幕边缘）—— owner 已改口径**不要负值**，
+    /// 历史负值由 `ReadingSettings.mergedConfiguration(containerSize:)` 收成 `0`。
     ///
     /// ⚠️ 类型**必须**保持 `Optional`：`nil` = 老数据里没有这个 key（**不是**「自动」——
     /// 「自动」机制已删）⇒ 由 `ReadingSettings.mergedConfiguration(containerSize:)` 按 `0` 兜底。
@@ -232,13 +233,14 @@ public struct PaginationConfiguration: Equatable, Sendable {
 
     /// 下栏面板**下边缘距屏幕底**的距离（pt）。设置项「下标签下边距」。
     ///
-    /// **绝对值语义**：
+    /// **绝对值语义**（owner 2026-10-11 第二版口径）：
     /// - `0` = 下栏面板贴到屏幕最下边（**不避让 Home Indicator**）；
-    /// - **负值** = 面板继续**移出屏幕下边**（`-70` = 再往下 70pt，一部分露在屏幕外）；
-    /// - 正值 = 距屏幕底的绝对距离。
+    /// - 正值 = 距屏幕底的绝对距离，上限 `70`。
     ///
-    /// 范围 `-70 ... 70`、默认 `0`。默认值必须与 `ReadingSettings.bottomBarInset` **同源**
+    /// 范围 `0 ... 70`、默认 `0`。默认值必须与 `ReadingSettings.bottomBarInset` **同源**
     /// （`ReadingSettingsStoreTests` 有一条「两处默认值同源」的锚点测试）。
+    /// ⚠️ 旧版本曾允许负值（面板移出屏幕下边）—— owner 已改口径**不要负值**，
+    /// 历史负值由 `ReadingSettings.mergedConfiguration(containerSize:)` 收成 `0`。
     ///
     /// **只影响渲染**：不进 `affectsPagination`（理由同上）。
     public var bottomBarInset: CGFloat

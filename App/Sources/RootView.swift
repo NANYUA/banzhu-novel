@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import NovelCore
+import NovelEngine
 import SwiftUI
 
 /// App 入口界面。
@@ -49,6 +50,11 @@ struct RootView: View {
         GuardFeature()
     }
 
+    /// 最近一次**由设置页按钮触发**的验证结果（`GuardCoordinator.requestPass` 的返回值）。
+    /// 只作设置页的行内反馈 —— 验证会话本身的真相仍在 `GuardCoordinator` / `guardStore`，
+    /// 这里不新建第二份业务状态（「正在验证」直接读 `guardStore` 的 `isPresented`）。
+    @State private var lastGuardOutcome: Bool?
+
     var body: some View {
         WithViewStore(guardStore, observe: \.isPresented) { viewStore in
             TabView(selection: $selectedTab) {
@@ -95,11 +101,26 @@ struct RootView: View {
                 // U5-4：「下载」不再是底栏的一项 —— 入口搬进了书架的固定「本地」分组
                 // （`BookshelfView` 在 `showsLocalGroup` 时复用整页 `DownloadQueueView`）。
                 // ⚠️ `downloadStore` 仍然要传给书架 / 书城 / 搜索，只是不再单独占一个 tab。
-                SiteSettingsView(store: siteStore)
-                    .tag(RootTab.settings)
-                    .tabItem {
-                        Label("设置", systemImage: "gearshape")
+                SiteSettingsView(
+                    store: siteStore,
+                    guardIsPresented: viewStore.state,
+                    lastGuardOutcome: lastGuardOutcome,
+                    onManualGuard: {
+                        // 与网络层命中盾时**同一条入口**：`SiteFeature` 的 `SiteRouter`
+                        // 里 `guardPass` 也是调 `GuardCoordinator.requestPass`
+                        // ⇒ 同一个事件流、同一个 `.requested` action，不另造第二条触发路径。
+                        // 站点地址取引擎当前生效的 host（与真实请求同一份来源），不在这里再拼一份。
+                        lastGuardOutcome = nil
+                        Task { @MainActor in
+                            let siteURL = await NovelEngine.shared.currentHost()
+                            lastGuardOutcome = await GuardCoordinator.shared.requestPass(siteURL: siteURL)
+                        }
                     }
+                )
+                .tag(RootTab.settings)
+                .tabItem {
+                    Label("设置", systemImage: "gearshape")
+                }
             }
             // owner 2026-10-11 口径：**选择模式不常驻** —— 切 tab 就退出（两种模式一起退）。
             //

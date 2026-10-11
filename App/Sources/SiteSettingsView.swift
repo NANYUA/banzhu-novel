@@ -6,6 +6,19 @@ import SwiftUI
 struct SiteSettingsView: View {
     let store: StoreOf<SiteFeature>
 
+    /// 盾页是否正在展示（`GuardFeature.State.isPresented`）：直接复用既有状态做「正在验证」反馈，
+    /// 不在本页复制一份。
+    let guardIsPresented: Bool
+
+    /// 最近一次**由本页按钮触发**的验证是否通过（`GuardCoordinator.requestPass` 的返回值）。
+    let lastGuardOutcome: Bool?
+
+    /// 「手动过验证」的触发能力：由 `RootView` 注入（全局 `guardStore` 在它那里）。
+    /// 内部走的是**与网络层命中盾时完全相同**的那条入口 —— `GuardCoordinator.requestPass`
+    /// （`SiteFeature.SiteRouter` 的 `guardPass` 同样调它）⇒ 本页不建第二个 store，
+    /// 也就不会出现两个验证会话 / 两份 Cookie 写入。
+    let onManualGuard: () -> Void
+
     @State private var newHost = ""
 
     var body: some View {
@@ -14,6 +27,7 @@ struct SiteSettingsView: View {
                 Form {
                     navigationSection(viewStore)
                     hostSection(viewStore)
+                    manualGuardSection(viewStore)
 
                     if let notice = viewStore.notice {
                         Section {
@@ -114,6 +128,52 @@ struct SiteSettingsView: View {
         }
     }
 
+    /// 「验证」节：随时主动触发一次人机验证，不必等盾页自己弹出来。
+    ///
+    /// 触发能力由 `RootView` 注入（`onManualGuard`），落到 `GuardCoordinator.requestPass`
+    /// —— 与网络层命中盾、盾页弹窗是**同一条路径**；本页只负责发起与展示状态。
+    private func manualGuardSection(
+        _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
+    ) -> some View {
+        let isAvailable = !guardIsPresented && viewStore.settings.currentHostValue != nil
+        return Section {
+            Button {
+                onManualGuard()
+            } label: {
+                HStack(spacing: DesignTokens.Spacing.sm) {
+                    if guardIsPresented {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityHidden(true)
+                    } else {
+                        Image(systemName: "checkmark.shield")
+                            .accessibilityHidden(true)
+                    }
+                    Text("手动过验证")
+                    Spacer()
+                }
+                // 自定义 `ButtonStyle` 不会自己变灰（同 `DownloadSelectionCard` 的口径）：
+                // 不可用时整行换次级色，避免「看着能点却没反应」。
+                .foregroundStyle(isAvailable ? Color.primary : Color.secondary)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableCardButtonStyle(
+                shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+            ))
+            .disabled(!isAvailable)
+            .accessibilityLabel(isAvailable ? "手动过验证" : "手动过验证，不可用")
+        } header: {
+            Text("验证")
+        } footer: {
+            if viewStore.settings.currentHostValue == nil {
+                Text("请先在下方配置并选择一个域名。")
+            } else if let outcome = lastGuardOutcome {
+                Text(outcome ? "验证已通过。" : "验证未通过。")
+            }
+        }
+    }
+
     /// 域名列表本体：默认收起，收起态只展示「当前选中的那条 host」；
     /// 展开后才显示完整列表（可切换 / 删除）。
     private func hostListSection(
@@ -175,6 +235,9 @@ struct SiteSettingsView: View {
     SiteSettingsView(
         store: Store(initialState: SiteFeature.State()) {
             SiteFeature()
-        }
+        },
+        guardIsPresented: false,
+        lastGuardOutcome: nil,
+        onManualGuard: {}
     )
 }

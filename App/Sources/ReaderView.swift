@@ -204,6 +204,12 @@ struct ReaderView: View {
                         .padding(.trailing, geometry.safeAreaInsets.trailing)
                     }
                 }
+                // 加载中正文层不挂手势（见 `readerContent` 的占位分支）⇒ 整屏点击无处可去。
+                // 这一层只在「加载中且无正文」时接管（判据在 `chromeToggleTapFallback`），
+                // 正文排出来后立即失效：中央点击习惯与平移翻页手势都不受影响。
+                .chromeToggleTapFallback(viewStore: viewStore) {
+                    setChromeVisible(!isChromeVisible)
+                }
                 .task {
                     viewStore.send(.loadSavedSettings(contentSize))
                     viewStore.send(
@@ -330,7 +336,7 @@ private extension ReaderView {
     private func readerContent(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         availableWidth: CGFloat,
-        availableHeight _: CGFloat
+        availableHeight: CGFloat
     ) -> some View {
         if viewStore.isLoading, viewStore.text.isEmpty {
             ProgressView("加载中…")
@@ -346,8 +352,27 @@ private extension ReaderView {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
             }
+            // 失败态的出口：上下栏（含「返回」）此时可能还没呼出，而页面上只有「重试」。
+            // 点击层垫在 CUV **之下** ⇒ 点按钮被上层接住，只有点空白处才呼出 / 收起上下栏。
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        setChromeVisible(!isChromeVisible)
+                    }
+            }
         } else {
             pageContent(viewStore, availableWidth: availableWidth)
+                // 正文层**显式**钉到内容盒（`availableHeight` 不再弃用）：盒 = `readerContentSize`
+                // 的派生值 = `configuration.containerSize`（B0-2），不再靠 `.frame(maxHeight:.infinity)`
+                // 撑。`.clipped()` 是「正文盒之下不许出现正文」的**结构性**兜底 —— 非滚动
+                // `UITextView` 的固有高 = 内容高，SwiftUI 给它的 frame 可能比盒高（owner 真机复测
+                // 「正文内容还是会越过下边距标线」就是这条路）：钉到盒 + 裁到盒，正文才出不去。
+                // `alignment: .topLeading`：即使某帧 frame 比盒高（尺寸同步前的瞬时），也从盒顶起排、
+                // 只往下越（被 `.clipped()` 裁掉），不会居中把正文顶出盒子顶部。
+                .frame(width: availableWidth, height: availableHeight, alignment: .topLeading)
+                .clipped()
         }
     }
 

@@ -31,8 +31,10 @@ struct PageTextView: UIViewRepresentable {
         // 文本容器宽 = frame.width − textContainerInset 左右：显式钉住，不吃 UIKit 默认值。
         textView.textContainer.widthTracksTextView = true
         // 视图盒之外**一律不画**：正文盒（= 下边距的线）之下不许出现正文。
-        // 高度那半由 `PageBoxTextView` 钉住容器兑现，这里是最后一道兜底。
+        // 高度那半由 `PageBoxTextView` 封顶到分页盒兑现，这里是最后一道兜底。
         textView.clipsToBounds = true
+        // 容器高的**上限**（= 分页盒高）：见 `pinTextContainerToBounds()` 的说明。
+        textView.pageBoxHeight = configuration.containerSize.height
         return textView
     }
 
@@ -54,12 +56,13 @@ struct PageTextView: UIViewRepresentable {
         uiView.isScrollEnabled = false
         uiView.textContainer.lineFragmentPadding = 0
         // 上面关掉了 `isScrollEnabled`（UITextView 会因此重配文本容器），此处重新钉一次宽度不变量。
-        // 高度**也钉**（下方 `textContainerInset` 之后那次 `pinTextContainerToBounds()`，
-        // 尺寸变化那条路径由 `PageBoxTextView.layoutSubviews` 兜住）：不钉时 UITextView 会
-        // **按内容自己撑高**文本容器，排版盒可能**高于**一页的正文盒 ⇒ 正文被排到正文盒底边
-        // （= 下边距的线）之外。owner 真机反馈「下边距的线外也会有正文文本」就是这条路径的结果。
-        // ⚠️ 旧注释（「高度不钉：容器高由 UITextView 自己维护；手动设定属未验证改动」）已被该反馈推翻：
-        // 现在有验证了 —— 不钉就出界，钉住才有「正文恒在正文盒内」这个不变量。⛔ 别再退回不钉。
+        // 高度**封顶到分页盒**（下方 `pinTextContainerToBounds()`）：容器高 = min(bounds − 竖向 inset,
+        // `containerSize.height`)。owner 真机复测「正文内容还是会越过下边距标线」证明**只钉
+        // `bounds.height` 不够** —— 非滚动 `UITextView` 的固有高 = **内容高**，SwiftUI 给它的 frame
+        // 可能比正文盒高 ⇒ `bounds` 本身就是那个出界的盒，钉在它上面等于没钉（`clipsToBounds` 也
+        // 救不了：正文在视图**内**，只是视图比盒高）⇒ 上限必须取**度量侧排版用的同一个高**。
+        // ⚠️ 旧注释（「高度不钉：手动设定属未验证改动」）已被两轮真机反馈推翻：不封顶就出界。
+        // ⛔ 别再退回不钉，也别只钉 `bounds.height`。
         uiView.textContainer.widthTracksTextView = true
         // 竖向 inset 恒为 **0**（2026-10-11 语义变更）：`PageInset.top/bottom` 现在是
         // 「**距屏幕边缘的绝对距离**」（`0` = 贴屏幕边、不避让刘海），由 `ReaderView` 的布局
@@ -74,9 +77,10 @@ struct PageTextView: UIViewRepresentable {
             bottom: 0,
             right: configuration.inset.trailing
         )
-        // 钉容器高度 = 视图盒高 − 竖向 inset（竖向恒 0）⇒ 容器高 = 一页的正文盒高，
-        // 与 `TextKitMeasuring` 度量时用的 `configuration.containerSize.height` 是同一个值。
-        // 必须在 `textContainerInset` **之后**算，否则用的是上一份 inset。
+        // 容器高的**上限** = 分页盒高（`configuration.containerSize.height`，= 边框标线所在盒的高
+        // = `TextKitMeasuring` 排版用的同一个高）。必须在 `textContainerInset` **之后**钉，
+        // 否则用的是上一份 inset。
+        uiView.pageBoxHeight = configuration.containerSize.height
         uiView.pinTextContainerToBounds()
         uiView.backgroundColor = configuration.backgroundStyle.uiColor(
             custom: configuration.customBackgroundColor,
@@ -90,10 +94,11 @@ struct PageTextView: UIViewRepresentable {
     /// 不实现本方法时宽度可能与父级可用盒不等（宽出来时，文本容器跟着变宽 → 每行左右越界被屏边裁掉）。
     /// 返回提案后 `frame.width` 恒等于父级可用宽，与 `TextKitMeasuring` 度量用的
     /// `configuration.containerSize.width` 是同一个值（B0-2 几何契约）。
-    /// 高度同理：返回的盒高就是父级可用高（= `configuration.containerSize.height`，
-    /// 与 `TextKitMeasuring` 的容器高同源）；`PageBoxTextView` 把文本容器**钉在这个高度**上，
-    /// 正文因此排不出这个盒 —— 下边距的线外不再出现正文（owner 真机反馈，见该类的文档注释）。
-    /// 提案未指定尺寸的场合（首次测量）用 `containerSize` 兜底，保证与度量盒同源。
+    /// 高度同理：返回的盒高 = 父级可用高 = `configuration.containerSize.height`（`ReaderView`
+    /// 那层的 `.frame(width:height:)` 已把可用盒钉成分页盒）⇒ 与 `TextKitMeasuring` 的容器高同源。
+    /// ⚠️ 这里**不做** `min(提案, 盒)` 的封顶：那会在「配置尺寸还没同步过来」的首帧把盒缩小
+    /// （配置默认 320×480）⇒ 页面被居中缩小、首帧闪一下。出界那半由**盒级 `.clipped()`** 兜
+    /// （见 `ReaderView.readerContent`）与 `PageBoxTextView` 的**容器封顶**兜，不靠这里。
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView _: PageBoxTextView,
@@ -166,34 +171,48 @@ struct PageTextView: UIViewRepresentable {
     }
 }
 
-/// 正文盒 `UITextView`：把**文本容器**钉死在视图盒内（高度这半；宽度那半由
+/// 正文盒 `UITextView`：把**文本容器**钉死在正文盒内（高度这半；宽度那半由
 /// `widthTracksTextView` 维护，见 `PageTextView.makeUIView`）。
 ///
-/// ## 为什么必须钉高度（owner 真机反馈）
-/// owner 打开阅读设置里的「正文边框标识」后看到：**下边距的线外也会有正文文本**。
-/// 根因是高度这半一直没钉 —— 关掉 `isScrollEnabled` 后 `UITextView` 会**按内容自己撑高**
-/// 文本容器，排版盒因此可能**高于**一页的正文盒 ⇒ 正文被排到正文盒底边（= 下边距的线）之下。
-/// 旧注释「高度不钉 / 手动设定属未验证改动」已被这条真机反馈推翻：**不钉就是出界**。
+/// ## 为什么容器高要**封顶到分页盒**（owner 真机两轮反馈）
+/// - 第一轮只把容器高钉到 `bounds.height`（「视图盒高」）：真机复测**没生效**。原因是这条
+///   等式的前提「`bounds` == 正文盒」**不成立** —— 非滚动 `UITextView` 的固有高度是**内容高**，
+///   SwiftUI 给它的 frame 可能比正文盒高 ⇒ `bounds.height` 本身就是那个「出界的盒」，钉在它
+///   上面等于没钉；`clipsToBounds` 也救不了（正文在**视图内**，只是视图比盒高）。
+/// - 本版把上限取成**分页盒**：`min(bounds − 竖向 inset, configuration.containerSize.height)`。
+///   `containerSize.height` 就是 `TextKitMeasuring` 排版用的那个高（= 边框标线所在盒的高），
+///   TextKit 因此**不会在盒底之下生成行** ⇒ 无论 frame 多大，正文都排不出正文盒。
+/// - 「最后一行的越盒部分」由 `ReaderView.readerContent` 那层的 `.frame(...).clipped()` 裁掉
+///   （盒级裁剪，与标线同源）—— 两层合起来才是**结构性**保证。
 ///
-/// ## 为什么钉在 `layoutSubviews` 里（而不是只在 `updateUIView` 里设一次）
+/// ## 为什么在 `layoutSubviews` 里钉（而不是只在 `updateUIView` 里设一次）
 /// `updateUIView` 在**内容未变**时直接 return（见它的 `guard contentChanged`），而 frame 会随
 /// 字号 / 边距 / 容器尺寸变化 —— 这条「只变尺寸、不变内容」的路径不经过它。`layoutSubviews`
 /// 是 frame 落定后 UIKit 必然调用的钩子，两条路径都由它兜住；`updateUIView` 里也在
 /// `textContainerInset` 之后显式调一次，让「内容变化」那条路径不依赖后续的布局回调。
 final class PageBoxTextView: UITextView {
+    /// 分页时用的正文盒高（`PaginationConfiguration.containerSize.height`）：
+    /// 文本容器高的**上限**。由 `PageTextView` 在 `makeUIView` / `updateUIView` 里写入。
+    var pageBoxHeight: CGFloat = 0
+
     override func layoutSubviews() {
         super.layoutSubviews()
         pinTextContainerToBounds()
     }
 
-    /// 容器高 = 视图 bounds 高 − `textContainerInset` 竖向（本 App 恒 0，见 `PageTextView.updateUIView`）。
+    /// 容器高 = `min(视图 bounds 高 − textContainerInset 竖向, 分页盒高)`（竖向 inset 本 App 恒 0）。
     ///
     /// 只改**高度**：宽度那半仍由 `widthTracksTextView = true` 维护（= `TextKitMeasuring` 的
     /// `containerSize.width − inset.leading − inset.trailing`，同源，⛔ 别在这里碰宽度）。
     /// 高度**只在需要时**写一次：避免在 `layoutSubviews` 里无条件写容器尺寸引发二次布局。
     func pinTextContainerToBounds() {
         textContainer.heightTracksTextView = false
-        let height = max(bounds.height - textContainerInset.top - textContainerInset.bottom, 0)
+        // 每轮重申：`clipsToBounds` 是最后一道兜底，别被 UIKit 重配容器时清掉。
+        clipsToBounds = true
+        var height = max(bounds.height - textContainerInset.top - textContainerInset.bottom, 0)
+        if pageBoxHeight > 0 {
+            height = min(height, pageBoxHeight)
+        }
         guard textContainer.size.height != height else { return }
         var size = textContainer.size
         size.height = height

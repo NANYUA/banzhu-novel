@@ -28,14 +28,17 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     public var inset: PageInset
     /// 角落标签距屏幕左右边缘的距离。`nil` = 老数据里没有这个 key ⇒ 按 `16`（= `Spacing.md`）。
     public var hudHorizontalInset: CGFloat?
-    /// 上栏面板上边缘距屏幕顶的距离（绝对值语义，`0` = 贴屏幕最边缘，**负值** = 移出屏幕上边）。
-    /// 默认 `0`。`nil` = **老数据里没有这个 key**（不是「自动」—— 「自动」机制已按 owner 口径删除）
+    /// 上栏面板上边缘距屏幕顶的距离（绝对值语义，`0` = 贴屏幕最边缘）。范围 `0 ... 70`，默认 `0`。
+    /// ⚠️ 曾经允许负值（面板移出屏幕上边）—— owner 2026-10-11 第二版口径**不要负值**：
+    /// 设置页不再产出负值，**历史负值由 `mergedConfiguration(containerSize:)` 收成 `0`**。
+    /// `nil` = **老数据里没有这个 key**（不是「自动」—— 「自动」机制已按 owner 口径删除）
     /// ⇒ 由 `mergedConfiguration(containerSize:)` 按 `0` 兜底。
     /// ⚠️ **必须保持 `Optional`**：改成非 Optional 会让老用户那份 JSON 解码失败、整份设置静默归零
     /// （见类型注释与 `ReadingSettingsStoreTests` 的守门用例）。
     public var topBarInset: CGFloat?
-    /// 下栏面板下边缘距屏幕底的距离（绝对值语义，`0` = 贴屏幕最边缘，**负值** = 移出屏幕下边）。
-    /// 默认 `0`。`nil` = 老数据里没有这个 key ⇒ 按 `0` 兜底。
+    /// 下栏面板下边缘距屏幕底的距离（绝对值语义，`0` = 贴屏幕最边缘）。范围 `0 ... 70`，默认 `0`。
+    /// ⚠️ 同上：历史负值由 `mergedConfiguration(containerSize:)` 收成 `0`。
+    /// `nil` = 老数据里没有这个 key ⇒ 按 `0` 兜底。
     public var bottomBarInset: CGFloat?
     /// 是否在阅读页上叠一层「书籍正文边框标识」（正文盒四周的红色虚线）。
     /// `nil` = 老数据里没有这个 key（**不是**「关掉」）⇒ 按新默认 `false`（默认不显示）。
@@ -159,11 +162,12 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             // `nil` = 老数据里没有这个 key ⇒ 16（= `DesignTokens.Spacing.md`，与改造前的硬编码同值）。
             hudHorizontalInset: hudHorizontalInset ?? 16,
             // `nil` = 老数据里没有这个 key ⇒ 0（贴屏幕最上边；「自动」机制已删）。
-            // ⚠️ 这里**不做** `max(0, …)` 夹取：负值是有效值（面板移出屏幕上边）。
-            topBarInset: topBarInset ?? 0,
+            // ⚠️ `max(0, …)` 是**历史负值的收口点**：旧版本曾允许 `-70 ... 70`，owner 已改口径
+            // 「不要负值、最小值 0」⇒ 老数据里的负值在这里被夹成 `0`（字段本身仍是 `Optional`）。
+            topBarInset: max(0, topBarInset ?? 0),
             // `nil` = 老数据里没有这个 key ⇒ 0（与 `PaginationConfiguration` 的默认值同源）。
-            // ⚠️ 同上：负值有效（面板移出屏幕下边），不夹取。
-            bottomBarInset: bottomBarInset ?? 0,
+            // ⚠️ 同上：历史负值同样在这里收口到 `0`。
+            bottomBarInset: max(0, bottomBarInset ?? 0),
             // `nil` = 老数据里没有这个 key ⇒ `false`（默认不显示边框；老版本本来就没有这个功能）。
             showsTextAreaBorder: showsTextAreaBorder ?? false
         )

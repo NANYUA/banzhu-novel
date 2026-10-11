@@ -14,9 +14,10 @@ import XCTest
 /// - 两个新字段（首行缩进开关 / 标签边距）的**老数据兼容**：缺 key 的旧 JSON 仍能解码
 ///   （新字段一律 `Optional` 的原因），且 `nil` 由 `mergedConfiguration` 按新默认兜底。
 ///
-/// 2026-10-11（上下标签边距改默认值 + 删「自动」档）再追加一条：
-/// 「上 / 下标签边距」的默认值从「自动（`nil`）/ 8」改成 **`0`**，范围 `-70 ... 70`
-/// ⇒ 新装读 `0`、旧 JSON 缺 key 也兜 `0`、**负值经落盘往返不丢**（⑫），
+/// 2026-10-11（上下标签边距改默认值 + 删「自动」档）再追加两条：
+/// 「上 / 下标签边距」的默认值从「自动（`nil`）/ 8」改成 **`0`**、范围 **`0 ... 70`**
+/// ⇒ 新装读 `0`、旧 JSON 缺 key 也兜 `0`；**旧版本允许过的负值在合并处被收成 `0`**（⑫）、
+/// 新口径的合法两端 `0` / `70` 往返不丢（⑬），
 /// 且 `ReadingSettings()` 与 `PaginationConfiguration` 两处默认值仍然同源（⑧ 锁的就是 `0`）。
 ///
 /// ## 隔离
@@ -233,7 +234,8 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertEqual(merged.firstLineHeadIndent, 0)
         XCTAssertEqual(merged.hudHorizontalInset, 48)
         XCTAssertEqual(merged.topBarInset, 40)
-        // `0` 是**有效值**（贴屏幕最边缘），不能被 `?? 0` 当成「缺字段」换掉（⑫ 再锁负值）。
+        // `0` 是**有效值**（贴屏幕最边缘），不能被 `?? 0` 当成「缺字段」换掉
+        // （历史负值收口见 ⑫，两端往返见 ⑬）。
         XCTAssertEqual(merged.bottomBarInset, 0)
         // `true` 同样不能被 `?? false` 兜底吃掉（否则「开了又自己关」）。
         XCTAssertTrue(merged.showsTextAreaBorder)
@@ -302,13 +304,14 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertFalse(merged.showsTextAreaBorder)
     }
 
-    /// ⑫ 新装默认值 = `0`（贴屏幕最边缘），且范围下限 `-70` **经落盘往返不丢**。
+    /// ⑫ 新装默认值 = `0`（贴屏幕最边缘），且**旧版本存过的负值在合并处被收成 `0`**。
     ///
-    /// 锁的失效模式（owner 口径「范围 −70…70、负值要真的能用」）：只要哪一层写了
-    /// `max(0, …)` 或 `?? 8` 这类夹取，负值就会被悄悄吃成 `0` —— 设置页框里能输 `-70`，
-    /// 回到阅读页面板却仍贴在屏幕边，用户只会觉得「设置没生效」。
-    /// 这里锁**落盘 → 解码 → 合并**这条链路（App 层设置页的 `range` 由 ⑧ 的默认值一起锁）。
-    func test上下标签边距默认为零且负值经往返不丢() throws {
+    /// 锁的失效模式（owner 2026-10-11 第二版口径「不要负值、最小值改为 0」）：
+    /// 曾经交付过一版允许 `-70 ... 70`，owner 很可能已经在真机上设过负值 —— 若合并处不做
+    /// `max(0, …)` 收口，历史负值会继续生效（面板跑到屏幕外），与「最小值 0」的口径相悖。
+    /// 这里锁**落盘 → 解码 → 合并**这条链路：编码 / 解码原样保留（整结构比对），
+    /// **合并时**必须把负值收成 `0`。
+    func test上下标签边距默认为零且历史负值被收成零() throws {
         // 新装：`ReadingSettings()` = 没有任何已存数据时的默认值。
         XCTAssertEqual(ReadingSettings().topBarInset, 0)
         XCTAssertEqual(ReadingSettings().bottomBarInset, 0)
@@ -319,11 +322,31 @@ final class ReadingSettingsStoreTests: XCTestCase {
 
         let data = try JSONEncoder().encode(stored)
         let decoded = try JSONDecoder().decode(ReadingSettings.self, from: data)
+        // 编码 / 解码不夹取：负值原样落盘、原样读回（收口发生在合并，不在编解码）。
+        XCTAssertEqual(decoded, stored)
+
+        let merged = decoded.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
+        // ⚠️ 收口点在这里：历史负值 ⇒ 0（`mergedConfiguration` 的 `max(0, …)`）。
+        XCTAssertEqual(merged.topBarInset, 0)
+        XCTAssertEqual(merged.bottomBarInset, 0)
+    }
+
+    /// ⑬ 新口径的合法两端（`0` 与 `70`）经「落盘 → 解码 → 合并」往返**不丢**。
+    ///
+    /// 锁的失效模式：`max(0, …)` 收口写歪（比如把 `70` 也吞掉、或把 `0` 当成「缺字段」
+    /// 换成别的默认值）⇒ 用户设的两端值丢失。
+    func test上下标签边距两端往返不丢() throws {
+        var stored = ReadingSettings()
+        stored.topBarInset = 70
+        stored.bottomBarInset = 0
+
+        let data = try JSONEncoder().encode(stored)
+        let decoded = try JSONDecoder().decode(ReadingSettings.self, from: data)
         // 往返不该动别的字段（整结构比对，与 ① ⑩ 同一手法）。
         XCTAssertEqual(decoded, stored)
 
         let merged = decoded.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
-        XCTAssertEqual(merged.topBarInset, -70)
-        XCTAssertEqual(merged.bottomBarInset, -70)
+        XCTAssertEqual(merged.topBarInset, 70)
+        XCTAssertEqual(merged.bottomBarInset, 0)
     }
 }

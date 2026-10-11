@@ -168,15 +168,16 @@ struct ReaderSettingsView: View {
         // 标签边距（owner 2026-10-11）：三个角落标签（左上书名 / 章节名、左下电量、右下页码）
         // **共用**这一个值，只调它们距屏幕左 / 右边缘的距离 —— 垂直位置不受它影响。
         NumberInputRow(title: "标签边距", value: hudInsetBinding, range: 0 ... 64, step: 2, focus: $focusedField)
-        // 上标签 / 下标签边距（owner 2026-10-11）：控制栏三条面板**贴屏幕上下边**的程度。
+        // 上标签 / 下标签边距（owner 2026-10-11 第二版口径）：控制栏三条面板**贴屏幕上下边**的程度。
         // 语义与正文边距一致 ——「距**屏幕边缘**的绝对距离」，`0` = 面板贴到屏幕最上 / 最下边
         // （**不避让灵动岛 / Home Indicator**，面板可以被缺口盖住 —— owner 明确要这个默认值，
         // ⛔ 别当成 bug 改回去）。
-        // 范围 `-70 ... 70`、默认 `0`、步长 2：**负值**让面板继续移出屏幕边缘
-        // （上栏向上移出、下栏向下移出），正值是距屏幕边缘的绝对距离。
+        // 范围 `0 ... 70`、默认 `0`、步长 2：`0` 就是**下限**（贴屏幕最边缘）。
+        // ⚠️ 曾经允许过负值（面板移出屏幕边缘）—— owner 已改口径「不要负值」：设置页不再产出负值，
+        // 老数据里的历史负值由 `mergedConfiguration` 收成 `0`。
         // 没有「自动档」（自动机制已删）：两个框各读各的设置值，`nil`（老数据缺 key）显示 0。
-        NumberInputRow(title: "上标签上边距", value: topBarInsetBinding, range: -70 ... 70, step: 2, focus: $focusedField)
-        NumberInputRow(title: "下标签下边距", value: bottomBarInsetBinding, range: -70 ... 70, step: 2, focus: $focusedField)
+        NumberInputRow(title: "上标签上边距", value: topBarInsetBinding, range: 0 ... 70, step: 2, focus: $focusedField)
+        NumberInputRow(title: "下标签下边距", value: bottomBarInsetBinding, range: 0 ... 70, step: 2, focus: $focusedField)
     }
 
     // MARK: - 阅读
@@ -421,17 +422,18 @@ private extension ReaderSettingsView {
         )
     }
 
-    /// 上标签上边距（owner 2026-10-11）：**上栏面板上边缘距屏幕顶的绝对距离**，
-    /// 范围 `-70 ... 70`、默认 `0`、步长 2（两端都精确可达）。
+    /// 上标签上边距（owner 2026-10-11 第二版口径）：**上栏面板上边缘距屏幕顶的绝对距离**，
+    /// 范围 `0 ... 70`、默认 `0`、步长 2（默认与两端都精确可达）。
     ///
     /// `0` = 面板贴屏幕最上边（**不避让灵动岛 / 状态栏** —— owner 明确要这个默认值，
-    /// ⛔ 别当成 bug 改回去）；**负值** = 面板继续移出屏幕上边（`-70` = 再往上 70pt）。
+    /// ⛔ 别当成 bug 改回去）。**下限就是 `0`**：负值已按 owner 口径废弃，
+    /// 老数据里的历史负值由 `mergedConfiguration` 收成 `0`。
     ///
     /// ## 为什么 `get` 里有一个 `?? 0`
     /// `configuration.topBarInset` 是 `CGFloat?`：`nil` = **老数据里没有这个 key**
     /// （「自动」机制已删，`nil` 不再是「自动」）⇒ 显示 `0`，与
     /// `ReadingSettings.mergedConfiguration(containerSize:)` 的兜底同值。
-    /// ⚠️ 只在 `get` 里兜底：`set` 写的是用户输入的那个数（**负值原样写回，不夹取**）。
+    /// ⚠️ 只在 `get` 里兜底：`set` 写的是用户输入的那个数（范围 `0 ... 70`，由 `NumberInputRow` 夹取）。
     var topBarInsetBinding: Binding<CGFloat> {
         Binding(
             get: { configuration.topBarInset ?? 0 },
@@ -443,11 +445,11 @@ private extension ReaderSettingsView {
         )
     }
 
-    /// 下标签下边距（owner 2026-10-11）：**下栏面板下边缘距屏幕底的距离**，
-    /// 范围 `-70 ... 70`、默认 `0`、步长 2。
+    /// 下标签下边距（owner 2026-10-11 第二版口径）：**下栏面板下边缘距屏幕底的距离**，
+    /// 范围 `0 ... 70`、默认 `0`、步长 2。
     ///
-    /// `0` = 面板贴屏幕最下边（**不避让 Home Indicator**）；**负值** = 面板继续移出屏幕下边
-    /// （`-70` = 再往下 70pt）。
+    /// `0` = 面板贴屏幕最下边（**不避让 Home Indicator**）。**下限就是 `0`**：
+    /// 负值已按 owner 口径废弃，老数据里的历史负值由 `mergedConfiguration` 收成 `0`。
     /// `configuration.bottomBarInset` 是非可选 `CGFloat` ⇒ 框里直接读写，不需要兜底。
     /// ⚠️ 它只动**下栏面板的下边缘**；跳章条与下栏之间的 8pt 间隙不跟它走。
     var bottomBarInsetBinding: Binding<CGFloat> {
