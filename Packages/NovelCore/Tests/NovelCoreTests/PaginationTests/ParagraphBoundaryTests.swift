@@ -57,8 +57,13 @@ final class ParagraphBoundaryTests: XCTestCase {
     }
 
     func test第一段长度按UTF16码元计() {
-        // 😀 占 2 个码元 + "x" 1 个 + "\n" 1 个 = 4（Character 个数只有 3）
-        XCTAssertEqual(ParagraphBoundary.firstParagraphUTF16Length(in: "😀x\ny"), 4)
-        XCTAssertEqual("😀x\ny".count, 3)
+        // 切片 = 第一段 "😀x\n" + 第二段 "y"。
+        // 第一段逐字符数：😀 占 1 个 Character / 2 个 UTF-16 码元，x 占 1 / 1，换行占 1 / 1
+        // ⇒ Character 个数 = 1 + 1 + 1 = 3，而码元数 = 2 + 1 + 1 = 4（两者**不等**，这就是坑）。
+        let firstParagraph = "😀x\n"
+        XCTAssertEqual(firstParagraph.count, 3)
+        XCTAssertEqual(firstParagraph.utf16.count, 4)
+        // 换行之后的 "y" 属于第二段、不计入 ⇒ 结果 = 第一段自身的码元数
+        XCTAssertEqual(ParagraphBoundary.firstParagraphUTF16Length(in: firstParagraph + "y"), 4)
     }
 }
