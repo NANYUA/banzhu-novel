@@ -28,11 +28,14 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     public var inset: PageInset
     /// 角落标签距屏幕左右边缘的距离。`nil` = 老数据里没有这个 key ⇒ 按 `16`（= `Spacing.md`）。
     public var hudHorizontalInset: CGFloat?
-    /// 上栏面板上边缘距屏幕顶的距离（绝对值语义，`0` = 贴屏幕最边缘）。
-    /// `nil` = **自动**（跟随安全区，由 App 层解析）—— 老数据里没有这个 key 也落在这里，
-    /// 而「自动」正是改造前的行为 ⇒ **不需要迁移 key**。
+    /// 上栏面板上边缘距屏幕顶的距离（绝对值语义，`0` = 贴屏幕最边缘，**负值** = 移出屏幕上边）。
+    /// 默认 `0`。`nil` = **老数据里没有这个 key**（不是「自动」—— 「自动」机制已按 owner 口径删除）
+    /// ⇒ 由 `mergedConfiguration(containerSize:)` 按 `0` 兜底。
+    /// ⚠️ **必须保持 `Optional`**：改成非 Optional 会让老用户那份 JSON 解码失败、整份设置静默归零
+    /// （见类型注释与 `ReadingSettingsStoreTests` 的守门用例）。
     public var topBarInset: CGFloat?
-    /// 下栏面板下边缘距屏幕底的距离（绝对值语义）。`nil` = 老数据里没有这个 key ⇒ 按 `8`（= `Spacing.xs`）。
+    /// 下栏面板下边缘距屏幕底的距离（绝对值语义，`0` = 贴屏幕最边缘，**负值** = 移出屏幕下边）。
+    /// 默认 `0`。`nil` = 老数据里没有这个 key ⇒ 按 `0` 兜底。
     public var bottomBarInset: CGFloat?
     /// 是否在阅读页上叠一层「书籍正文边框标识」（正文盒四周的红色虚线）。
     /// `nil` = 老数据里没有这个 key（**不是**「关掉」）⇒ 按新默认 `false`（默认不显示）。
@@ -59,8 +62,8 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         isFirstLineIndentOn: Bool? = true,
         inset: PageInset = PageInset(),
         hudHorizontalInset: CGFloat? = 16,
-        topBarInset: CGFloat? = nil,
-        bottomBarInset: CGFloat? = 8,
+        topBarInset: CGFloat? = 0,
+        bottomBarInset: CGFloat? = 0,
         showsTextAreaBorder: Bool? = false,
         backgroundStyle: ReadingBackgroundStyle = .white,
         customBackgroundColor: ReadingColor = .defaultCustomBackground,
@@ -129,7 +132,8 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     /// 用当前页面容器尺寸合并出完整分页配置。
     ///
     /// 新增的 `Optional` 字段在这里按新默认兜底（老数据里没有它们的 key，见类型注释）：
-    /// 首行缩进 `nil` ⇒ **打开**（owner 口径），标签边距 `nil` ⇒ `16`，边框开关 `nil` ⇒ **关**。
+    /// 首行缩进 `nil` ⇒ **打开**（owner 口径），标签边距 `nil` ⇒ `16`，
+    /// 上 / 下标签边距 `nil` ⇒ `0`（贴屏幕最边缘），边框开关 `nil` ⇒ **关**。
     public func mergedConfiguration(containerSize: CGSize) -> PaginationConfiguration {
         PaginationConfiguration(
             containerSize: containerSize,
@@ -154,10 +158,12 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             appearanceMode: appearanceMode,
             // `nil` = 老数据里没有这个 key ⇒ 16（= `DesignTokens.Spacing.md`，与改造前的硬编码同值）。
             hudHorizontalInset: hudHorizontalInset ?? 16,
-            // `nil` = 老数据里没有这个 key，**也** = 用户选了「自动」⇒ 原样传 nil，由 App 层按安全区解析。
-            topBarInset: topBarInset,
-            // `nil` = 老数据里没有这个 key ⇒ 8（= `DesignTokens.Spacing.xs`，与改造前的固定值同值）。
-            bottomBarInset: bottomBarInset ?? 8,
+            // `nil` = 老数据里没有这个 key ⇒ 0（贴屏幕最上边；「自动」机制已删）。
+            // ⚠️ 这里**不做** `max(0, …)` 夹取：负值是有效值（面板移出屏幕上边）。
+            topBarInset: topBarInset ?? 0,
+            // `nil` = 老数据里没有这个 key ⇒ 0（与 `PaginationConfiguration` 的默认值同源）。
+            // ⚠️ 同上：负值有效（面板移出屏幕下边），不夹取。
+            bottomBarInset: bottomBarInset ?? 0,
             // `nil` = 老数据里没有这个 key ⇒ `false`（默认不显示边框；老版本本来就没有这个功能）。
             showsTextAreaBorder: showsTextAreaBorder ?? false
         )

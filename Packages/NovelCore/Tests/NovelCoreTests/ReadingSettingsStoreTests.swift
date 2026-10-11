@@ -14,6 +14,11 @@ import XCTest
 /// - 两个新字段（首行缩进开关 / 标签边距）的**老数据兼容**：缺 key 的旧 JSON 仍能解码
 ///   （新字段一律 `Optional` 的原因），且 `nil` 由 `mergedConfiguration` 按新默认兜底。
 ///
+/// 2026-10-11（上下标签边距改默认值 + 删「自动」档）再追加一条：
+/// 「上 / 下标签边距」的默认值从「自动（`nil`）/ 8」改成 **`0`**，范围 `-70 ... 70`
+/// ⇒ 新装读 `0`、旧 JSON 缺 key 也兜 `0`、**负值经落盘往返不丢**（⑫），
+/// 且 `ReadingSettings()` 与 `PaginationConfiguration` 两处默认值仍然同源（⑧ 锁的就是 `0`）。
+///
 /// ## 隔离
 /// 一律用独立 suite 的 `UserDefaults`（`UserDefaults(suiteName:)`），`tearDown` 里清干净 ——
 /// **绝不碰 `.standard`**：那是真机 / 模拟器上用户的真实阅读设置。
@@ -189,7 +194,8 @@ final class ReadingSettingsStoreTests: XCTestCase {
 
     /// ⑥ 老数据（几个新字段都是 `nil`）经 `mergedConfiguration` 兜底：
     /// 首行缩进**打开**（owner 口径「默认打开」）、标签边距 `16`（= `Spacing.md`）、
-    /// 上栏边距**保持 `nil`**（= 自动，由 App 层按安全区解析）、下栏边距 `8`（= `Spacing.xs`）、
+    /// 上 / 下标签边距都兜 **`0`**（贴屏幕最边缘 —— 「自动」档已按 owner 口径删除，
+    /// `nil` 只剩「老数据里没有这个 key」这一个含义）、
     /// 正文边框标识**关**（老版本没有这个功能，默认不显示）。
     func test老数据的新字段按新默认兜底() {
         var legacy = ReadingSettings()
@@ -204,9 +210,9 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertTrue(merged.isFirstLineIndentOn)
         XCTAssertEqual(merged.firstLineHeadIndent, legacy.fontSize * 2)
         XCTAssertEqual(merged.hudHorizontalInset, 16)
-        // ⚠️ `nil` 不等于「0」：它是「自动」，所以这里**必须**仍是 nil。
-        XCTAssertNil(merged.topBarInset)
-        XCTAssertEqual(merged.bottomBarInset, 8)
+        // ⚠️ 旧数据缺 key ⇒ `0`（**不是** `nil`：`nil` 的「自动」语义已删，也不是 8）。
+        XCTAssertEqual(merged.topBarInset, 0)
+        XCTAssertEqual(merged.bottomBarInset, 0)
         // 边框开关 `nil` ⇒ `false`（**不是**「打开」）：老用户不该突然看到一圈红线。
         XCTAssertFalse(merged.showsTextAreaBorder)
     }
@@ -227,7 +233,7 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertEqual(merged.firstLineHeadIndent, 0)
         XCTAssertEqual(merged.hudHorizontalInset, 48)
         XCTAssertEqual(merged.topBarInset, 40)
-        // `0` 是**有效值**（贴屏幕最边缘），不能被 `?? 8` 兜底吃掉。
+        // `0` 是**有效值**（贴屏幕最边缘），不能被 `?? 0` 当成「缺字段」换掉（⑫ 再锁负值）。
         XCTAssertEqual(merged.bottomBarInset, 0)
         // `true` 同样不能被 `?? false` 兜底吃掉（否则「开了又自己关」）。
         XCTAssertTrue(merged.showsTextAreaBorder)
@@ -247,9 +253,11 @@ final class ReadingSettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings.showsTextAreaBorder, configuration.showsTextAreaBorder)
         XCTAssertEqual(configuration.hudHorizontalInset, 16)
         XCTAssertTrue(configuration.isFirstLineIndentOn)
-        // ⚠️ 上栏默认是 `nil`（自动）—— 不是某个具体数字；下栏默认 8。
-        XCTAssertNil(configuration.topBarInset)
-        XCTAssertEqual(configuration.bottomBarInset, 8)
+        // ⚠️ 上下标签边距的默认值都必须是 `0`（贴屏幕最边缘）—— 「自动」档已删，
+        // 所以这里不再有「默认是 nil」这回事；两处一旦漂开就会出现
+        // 「从没动过设置，但阅读页与设置页读数不同」。
+        XCTAssertEqual(configuration.topBarInset, 0)
+        XCTAssertEqual(configuration.bottomBarInset, 0)
         // 边框标识默认**关**（`ReadingSettings()` 的 `false` 与配置的同源，见上一行断言）。
         XCTAssertFalse(configuration.showsTextAreaBorder)
         // 缩进宽度由开关与字号派生（不单独落盘）。
@@ -292,5 +300,30 @@ final class ReadingSettingsStoreTests: XCTestCase {
 
         let merged = settings.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
         XCTAssertFalse(merged.showsTextAreaBorder)
+    }
+
+    /// ⑫ 新装默认值 = `0`（贴屏幕最边缘），且范围下限 `-70` **经落盘往返不丢**。
+    ///
+    /// 锁的失效模式（owner 口径「范围 −70…70、负值要真的能用」）：只要哪一层写了
+    /// `max(0, …)` 或 `?? 8` 这类夹取，负值就会被悄悄吃成 `0` —— 设置页框里能输 `-70`，
+    /// 回到阅读页面板却仍贴在屏幕边，用户只会觉得「设置没生效」。
+    /// 这里锁**落盘 → 解码 → 合并**这条链路（App 层设置页的 `range` 由 ⑧ 的默认值一起锁）。
+    func test上下标签边距默认为零且负值经往返不丢() throws {
+        // 新装：`ReadingSettings()` = 没有任何已存数据时的默认值。
+        XCTAssertEqual(ReadingSettings().topBarInset, 0)
+        XCTAssertEqual(ReadingSettings().bottomBarInset, 0)
+
+        var stored = ReadingSettings()
+        stored.topBarInset = -70
+        stored.bottomBarInset = -70
+
+        let data = try JSONEncoder().encode(stored)
+        let decoded = try JSONDecoder().decode(ReadingSettings.self, from: data)
+        // 往返不该动别的字段（整结构比对，与 ① ⑩ 同一手法）。
+        XCTAssertEqual(decoded, stored)
+
+        let merged = decoded.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
+        XCTAssertEqual(merged.topBarInset, -70)
+        XCTAssertEqual(merged.bottomBarInset, -70)
     }
 }

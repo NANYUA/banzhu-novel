@@ -20,9 +20,9 @@ import UIKit
 // 上栏 / 下栏 / 跳章条都是**浮在正文之上的圆角面板**：左右各留 `Spacing.md`(16) 边距、
 // 不贴屏幕上下边，形状是 `RoundedRectangle(cornerRadius: Radius.lg)`。
 // 竖向位置由 `ReaderChromeOverlay` 的三段 `padding` 决定（上栏吃
-// `ReaderView.topBarPadding(safeAreaInsets:inset:)` —— 自动值由安全区推导、用户可在设置页
-// 覆盖为「距屏幕顶的绝对距离」；下栏吃 `bottomBarInset`；跳章条与下栏之间固定 `Spacing.xs`），
-// 控制栏这一层**只吃横向安全区** —— U9-7：三条面板要能贴到屏幕上下边。
+// `ReaderView.topBarPadding(inset:)` —— 设置页的「上标签上边距」，默认 0 = 贴屏幕顶、
+// 负值 = 移出屏幕顶；下栏吃 `bottomBarInset`；跳章条与下栏之间固定 `Spacing.xs`），
+// 控制栏这一层**只吃横向安全区** —— U9-7：三条面板要能贴到屏幕上下边（甚至移出屏幕）。
 //
 // ## 玻璃语言（借参考实现的配色，不借它的布局）
 // 玻璃 = 系统 `Material` + 系统语义底色（**无渐变羽化** ⇒ 三条面板逐像素同色，
@@ -412,20 +412,20 @@ private struct ReaderBottomBar: View {
 /// ## 竖向位置：不吃安全区（U9-7）
 /// 这一层**只吃横向安全区**（由 `ReaderView.body` 施加），竖向完全由三段 `padding` 决定：
 /// - 上栏 `.padding(.top, topPadding)` —— `topPadding` 由
-///   `ReaderView.topBarPadding(safeAreaInsets:inset:)` 算好传入：**自动**时是安全区推导值
-///   （比安全区**更贴屏幕顶**，标题字形仍落在灵动岛下沿以下），用户可在设置页覆盖为
-///   「上栏上边缘距屏幕顶的**绝对距离**」（`0` = 贴屏幕最上边，不避让灵动岛）；
+///   `ReaderView.topBarPadding(inset:)` 算好传入（设置页的「上标签上边距」）：`0` = 上栏
+///   上边缘贴屏幕最上边（**不避让灵动岛 / 状态栏**，面板会被缺口盖住 —— owner 明确要这个
+///   默认值），**负值** = 面板继续移出屏幕上边（`.padding` 的负值不夹取，面板被推到容器外）；
 /// - 下栏 `.padding(.bottom, bottomBarInset)` —— 下栏下边缘距屏幕底的距离，同一条 owner 口径
-///   （`0` = 贴屏幕最下边，不避让 Home Indicator；默认 8 = `Spacing.xs`，与改前逐值相同）；
+///   （`0` = 贴屏幕最下边、**负值** = 移出屏幕下边，均不避让 Home Indicator；默认 `0`）；
 /// - 跳章条 `.padding(.bottom, Spacing.xs)` —— 这是**跳章条与下栏之间的固定 8pt 间隙**，
 ///   **不**跟 `bottomBarInset` 走：下栏整体下移时跳章条跟着一起走，两条面板的间距不变。
 struct ReaderChromeOverlay: View {
     let style: ReaderChromeStyle
     let chapterTitle: String
-    /// 上栏的上边缘距屏幕顶的距离（由 `ReaderView.topBarPadding(safeAreaInsets:inset:)` 算好传入）。
+    /// 上栏的上边缘距屏幕顶的距离（`ReaderView.topBarPadding(inset:)` 算好传入；默认 `0` = 贴屏幕最上边，负值 = 移出屏幕上边）。
     let topPadding: CGFloat
     /// 下栏面板的下边缘距屏幕底的距离（= `PaginationConfiguration.bottomBarInset`，
-    /// 设置页「下标签下边距」滑杆，`0…90`）。
+    /// 设置页「下标签下边距」，`-70 ... 70`、默认 `0`）。
     let bottomBarInset: CGFloat
     /// 相邻章节（`ReaderFeature.State` 的派生属性）：`nil` = 到边界，跳章条据此置灰。
     let previousChapter: ChapterItem?

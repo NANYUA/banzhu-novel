@@ -23,7 +23,15 @@
 3. 设置里的「正文边框标识」在阅读页画出正文盒边界（红色虚线），几何与正文层
    **同一份来源**（不另算 padding）。
 
-阅读设置里的数值项一律用 `NumberInputRow`（`− 数字框 +`，可键入），不再用 `Slider`。
+阅读设置里的数值项一律用 `NumberInputRow`（`− 数字框 +`，可键入），不再用 `Slider`，也不再用
+`Stepper`（「预缓存」也已换过来）。数值框是**固定宽度**（`NumberInputMetrics`，按「最宽 4 个字形」
+算出、随 Dynamic Type 缩放）；键盘上只有**一份**「完成」——挂在设置页的 `@FocusState` 上，
+⛔ 行内不要再各挂一份 `.toolbar(placement: .keyboard)`（10 份堆叠会同时出现多个「完成」并导致卡顿）。
+
+阅读页两条控制栏的竖向边距（上标签上边距 / 下标签下边距）默认 **0**、范围 **−70…70**，
+**没有「自动档」**：`0` = 面板贴屏幕最边缘（上栏会被刘海/状态栏压住，这是 owner 口径、不是 bug），
+负值 = 面板移出屏幕边缘。`ReadingSettings` 里那两个字段仍是 `Optional`（`nil` = 老数据 ⇒ 按 0），
+⛔ 不要改成非 Optional（会让老用户整份设置解码失败）。
 
 ## 技术栈
 
@@ -118,7 +126,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   ├── NovelEngine/                 # 纯逻辑层（9 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（50 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（51 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
@@ -130,7 +138,8 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   │   │   │                        #   DownloadSettingsStore（下载设置持久化）/ DownloadNetworkMonitor
 │   │   │   ├── Reader/              # ReaderFeature（+ChapterTransition 相邻章切换）/ ReaderLoader /
 │   │   │   │                        #   ChapterCacheStore / ReadingSettingsStore /
-│   │   │   │                        #   ReadingProgressStore / PagePanTracking / SlideTracking …
+│   │   │   │                        #   ReadingProgressStore / PagePanTracking / SlideTracking /
+│   │   │   │                        #   ParagraphIndentStripper（行首空白归一化）…
 │   │   │   ├── Pagination/          # Paginator / TextCursor / TextMeasuring / PageRange /
 │   │   │   │                        #   ParagraphBoundary（段落边界判据，度量与渲染共用）
 │   │   │   ├── Site/                # SiteFeature / SiteStore / NavigationRenderer

@@ -16,13 +16,6 @@ private struct ReaderFontOption {
 struct ReaderSettingsView: View {
     let configuration: PaginationConfiguration
     let precacheCount: Int
-    /// 上栏「自动」边距在**本机**的值（= `ReaderView.autoTopBarPadding(safeAreaInsets:)` 的结果，
-    /// 由阅读页算好传入：刘海 / 灵动岛机型 ≈ 25pt、无刘海机型 = 8pt）。
-    ///
-    /// 只用于**显示**：`configuration.topBarInset == nil`（自动）时「上标签上边距」滑杆停在这里，
-    /// 否则会停在 `0` 而面板其实在 25pt 处 —— 用户一碰滑杆面板就会跳。
-    /// ⚠️ 它**不是**设置值：用户一拖动，`topBarInsetBinding` 就把显式值写进 `configuration`。
-    let autoTopBarInset: CGFloat
     let onPrecacheCountChange: (Int) -> Void
     let onChange: (PaginationConfiguration) -> Void
 
@@ -33,6 +26,13 @@ struct ReaderSettingsView: View {
     /// `.preferredColorScheme` 传到这个 sheet，所以这里拿到的是阅读页**实际生效**的外观，
     /// 而不是裸的系统外观。
     @Environment(\.colorScheme) private var colorScheme
+
+    /// 当前聚焦的数值行（身份 = `NumberInputRow.title`，本页 11 处标题互不相同）。
+    ///
+    /// 键盘工具栏「完成」把焦点置 `nil` 即收起键盘并提交草稿 —— **全页只有这一处工具栏**
+    /// （见 `body` 的 `.toolbar`）。改造前是**每一行**各挂一份（10 份堆叠）：既冒出 10 个
+    /// 「完成」，聚焦时装配 10 份工具栏也正是「打开输入框调边距很卡」的根因。
+    @FocusState private var focusedField: String?
 
     /// 字体白名单：默认系统字体（SF Pro），另给几个适合中文正文阅读的字体族。
     /// 不用 `UIFont.familyNames`，避免把 Roboto / Inter 等第三方字体灌进 Picker。
@@ -66,6 +66,13 @@ struct ReaderSettingsView: View {
                         dismiss()
                     }
                 }
+                // 数字键盘（`.numberPad` / `.decimalPad`）**没有 return 键** ⇒ 失焦是唯一的提交
+                // 路径，键盘上必须给一个「完成」。**只有这一处**：焦点置 `nil`，正在编辑的那一行
+                // 由 `NumberInputRow` 的 `.onChange(of: isEditing)` 提交草稿（不是每敲一个字符就写设置）。
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") { focusedField = nil }
+                }
             }
         }
     }
@@ -84,10 +91,10 @@ struct ReaderSettingsView: View {
             // 四条数值项改输入式控件（`NumberInputRow`）：可点 `−` / `+` 微调、也可直接键入。
             // 「字间距」步长 0.5 ⇒ 该控件按**带小数**处理：`.decimalPad` 键盘 + 保留一位小数
             // （旧写法 `Int(...)` 会把小数截断，显示与设置值不符）。
-            NumberInputRow(title: "字号", value: binding(\.fontSize), range: 12 ... 30, step: 1)
-            NumberInputRow(title: "行距", value: binding(\.lineSpacing), range: 0 ... 20, step: 1)
-            NumberInputRow(title: "段间距", value: binding(\.paragraphSpacing), range: 0 ... 30, step: 2)
-            NumberInputRow(title: "字间距", value: binding(\.characterSpacing), range: -1 ... 5, step: 0.5)
+            NumberInputRow(title: "字号", value: binding(\.fontSize), range: 12 ... 30, step: 1, focus: $focusedField)
+            NumberInputRow(title: "行距", value: binding(\.lineSpacing), range: 0 ... 20, step: 1, focus: $focusedField)
+            NumberInputRow(title: "段间距", value: binding(\.paragraphSpacing), range: 0 ... 30, step: 2, focus: $focusedField)
+            NumberInputRow(title: "字间距", value: binding(\.characterSpacing), range: -1 ... 5, step: 0.5, focus: $focusedField)
 
             Toggle("字体加粗", isOn: binding(\.isBold))
             Toggle("字体倾斜", isOn: binding(\.isItalic))
@@ -147,10 +154,10 @@ struct ReaderSettingsView: View {
         // `0` = 正文贴到屏幕最边缘（**不自己适配刘海**），上 `0…200`、下 `0…120`。
         // 两个控件**各改各的**（旧实现那一个滑杆同时写 `top` 与 `bottom`，已删）。
         // 步长 2：默认 78 / 30 与两端都能精确取到（`0/30/78/120/200` 全是偶数）。
-        NumberInputRow(title: "上边距", value: topInsetBinding, range: 0 ... 200, step: 2)
-        NumberInputRow(title: "下边距", value: bottomInsetBinding, range: 0 ... 120, step: 2)
+        NumberInputRow(title: "上边距", value: topInsetBinding, range: 0 ... 200, step: 2, focus: $focusedField)
+        NumberInputRow(title: "下边距", value: bottomInsetBinding, range: 0 ... 120, step: 2, focus: $focusedField)
         // 左右边距（U1-8）：下限仍守 8pt、默认 24pt 由 `PageInset` 的默认值给 —— 本次未改。
-        NumberInputRow(title: "左右边距", value: horizontalInsetBinding, range: 8 ... 48, step: 4)
+        NumberInputRow(title: "左右边距", value: horizontalInsetBinding, range: 8 ... 48, step: 4, focus: $focusedField)
         // 正文边框标识（owner 2026-10-11）：打开后**阅读页**的正文盒四周出现红色虚线，
         // 标的就是「当前这三条边距下正文真正能排到的范围」。
         // 放在三条正文边距（上 / 下 / 左右）的**紧后面**：它是同一个「正文盒」主题的
@@ -160,14 +167,16 @@ struct ReaderSettingsView: View {
         Toggle("正文边框标识", isOn: binding(\.showsTextAreaBorder))
         // 标签边距（owner 2026-10-11）：三个角落标签（左上书名 / 章节名、左下电量、右下页码）
         // **共用**这一个值，只调它们距屏幕左 / 右边缘的距离 —— 垂直位置不受它影响。
-        NumberInputRow(title: "标签边距", value: hudInsetBinding, range: 0 ... 64, step: 2)
+        NumberInputRow(title: "标签边距", value: hudInsetBinding, range: 0 ... 64, step: 2, focus: $focusedField)
         // 上标签 / 下标签边距（owner 2026-10-11）：控制栏三条面板**贴屏幕上下边**的程度。
         // 语义与正文边距一致 ——「距**屏幕边缘**的绝对距离」，`0` = 面板贴到屏幕最上 / 最下边
-        // （**不避让灵动岛 / Home Indicator**，面板可以被缺口盖住 —— owner 明确要这个）。
-        // 范围 `0 ... 90`、步长 2：两条面板各 68pt 高、再往上就要与正文抢位置了。
-        // 「上标签上边距」的**自动**档值来自本机安全区（见 `autoTopBarInset`）。
-        NumberInputRow(title: "上标签上边距", value: topBarInsetBinding, range: 0 ... 90, step: 2)
-        NumberInputRow(title: "下标签下边距", value: bottomBarInsetBinding, range: 0 ... 90, step: 2)
+        // （**不避让灵动岛 / Home Indicator**，面板可以被缺口盖住 —— owner 明确要这个默认值，
+        // ⛔ 别当成 bug 改回去）。
+        // 范围 `-70 ... 70`、默认 `0`、步长 2：**负值**让面板继续移出屏幕边缘
+        // （上栏向上移出、下栏向下移出），正值是距屏幕边缘的绝对距离。
+        // 没有「自动档」（自动机制已删）：两个框各读各的设置值，`nil`（老数据缺 key）显示 0。
+        NumberInputRow(title: "上标签上边距", value: topBarInsetBinding, range: -70 ... 70, step: 2, focus: $focusedField)
+        NumberInputRow(title: "下标签下边距", value: bottomBarInsetBinding, range: -70 ... 70, step: 2, focus: $focusedField)
     }
 
     // MARK: - 阅读
@@ -179,12 +188,18 @@ struct ReaderSettingsView: View {
             // ⇒ 改字号不再需要在这里手动同步缩进值。
             Toggle("首行缩进", isOn: binding(\.isFirstLineIndentOn))
 
-            Stepper(
+            // 预缓存章数（owner 2026-10-11）：与其余数值项**同一个控件**（可点 `−` / `+`、也可键入），
+            // 不再用系统 `Stepper` —— 那样这一行的控件宽度与观感都跟其他行不一致。
+            // 单位「章」写进标题：数字已经进了框里，标题必须自带单位才读得懂
+            // ⇒ 控件**不需要**新增「单位后缀」参数（没有第二个调用点，别做一次性抽象）。
+            // 上限取 `ReaderFeature.maxPrecacheCount`（真实上限的唯一来源，不另写 20）。
+            NumberInputRow(
+                title: "预缓存（章）",
                 value: precacheCountBinding,
-                in: 0 ... ReaderFeature.maxPrecacheCount
-            ) {
-                Text("预缓存 \(precacheCount) 章")
-            }
+                range: 0 ... CGFloat(ReaderFeature.maxPrecacheCount),
+                step: 1,
+                focus: $focusedField
+            )
 
             Picker("夜间模式", selection: binding(\.appearanceMode)) {
                 ForEach(ReadingAppearanceMode.allCases, id: \.self) { mode in
@@ -346,10 +361,14 @@ private extension ReaderSettingsView {
         )
     }
 
-    var precacheCountBinding: Binding<Int> {
+    /// 预缓存章数（`ReaderFeature.State.precacheCount`；`0 ... maxPrecacheCount` 的 clamp 在 reducer 里）。
+    ///
+    /// **语义与改造前逐字一致**：读 `precacheCount`、写 `onPrecacheCountChange` ——
+    /// 只是把类型换成 `NumberInputRow` 要的 `CGFloat`（步长 1、下限 0 ⇒ `rounded()` 取整无损）。
+    var precacheCountBinding: Binding<CGFloat> {
         Binding(
-            get: { precacheCount },
-            set: { onPrecacheCountChange($0) }
+            get: { CGFloat(precacheCount) },
+            set: { onPrecacheCountChange(Int($0.rounded())) }
         )
     }
 
@@ -390,7 +409,7 @@ private extension ReaderSettingsView {
     ///
     /// 默认 16 = `DesignTokens.Spacing.md`，与改造前 `ReaderCornerHUD` 里硬编码的那个值同值
     /// ⇒ 默认观感逐值不变。它**只改左右**（`ReaderCornerHUD` 的一条 `.padding(.horizontal)`），
-    /// 垂直位置仍由 `topBarPadding` / `bottomBarInset` 决定（与控制栏面板同源，见 `readerCornerHUD`）。
+    /// 垂直位置仍由 `topBarPadding(inset:)` / `bottomBarInset` 决定（与控制栏面板同源，见 `readerCornerHUD`）。
     var hudInsetBinding: Binding<CGFloat> {
         Binding(
             get: { configuration.hudHorizontalInset },
@@ -403,16 +422,19 @@ private extension ReaderSettingsView {
     }
 
     /// 上标签上边距（owner 2026-10-11）：**上栏面板上边缘距屏幕顶的绝对距离**，
-    /// 范围 `0 ... 90`、步长 2（自动值 25 / 8 都是整数，拖到两端也精确可达）。
+    /// 范围 `-70 ... 70`、默认 `0`、步长 2（两端都精确可达）。
     ///
-    /// ## 为什么 `get` 里有一个 `?? autoTopBarInset`
-    /// `configuration.topBarInset` 是 `CGFloat?`：`nil` = **自动**（由本机安全区推导）。
-    /// 滑杆显示不了 `nil`，所以自动档显示本机自动值（阅读页算好传进来的 `autoTopBarInset`）。
-    /// ⚠️ 只在 `get` 里兜底：`set` **只写用户拖出来的那个数**，一拖就变成显式值、
-    /// 不再跟随安全区 —— 这正是 owner 要的「绝对距离」语义。
+    /// `0` = 面板贴屏幕最上边（**不避让灵动岛 / 状态栏** —— owner 明确要这个默认值，
+    /// ⛔ 别当成 bug 改回去）；**负值** = 面板继续移出屏幕上边（`-70` = 再往上 70pt）。
+    ///
+    /// ## 为什么 `get` 里有一个 `?? 0`
+    /// `configuration.topBarInset` 是 `CGFloat?`：`nil` = **老数据里没有这个 key**
+    /// （「自动」机制已删，`nil` 不再是「自动」）⇒ 显示 `0`，与
+    /// `ReadingSettings.mergedConfiguration(containerSize:)` 的兜底同值。
+    /// ⚠️ 只在 `get` 里兜底：`set` 写的是用户输入的那个数（**负值原样写回，不夹取**）。
     var topBarInsetBinding: Binding<CGFloat> {
         Binding(
-            get: { configuration.topBarInset ?? autoTopBarInset },
+            get: { configuration.topBarInset ?? 0 },
             set: { newValue in
                 var next = configuration
                 next.topBarInset = newValue
@@ -422,12 +444,11 @@ private extension ReaderSettingsView {
     }
 
     /// 下标签下边距（owner 2026-10-11）：**下栏面板下边缘距屏幕底的距离**，
-    /// 范围 `0 ... 90`、步长 2。
+    /// 范围 `-70 ... 70`、默认 `0`、步长 2。
     ///
-    /// 默认 8 = `DesignTokens.Spacing.xs`，与改造前 `ReaderChromeOverlay` 里那个硬编码的
-    /// `.padding(.bottom, Spacing.xs)` 同值 ⇒ 默认观感逐值不变。
-    /// 与上栏不同，它**没有「自动」档**（底部固定 8pt 就够，不需要按安全区推导）
-    /// ⇒ `configuration.bottomBarInset` 是非可选 `CGFloat`，滑杆直接读写。
+    /// `0` = 面板贴屏幕最下边（**不避让 Home Indicator**）；**负值** = 面板继续移出屏幕下边
+    /// （`-70` = 再往下 70pt）。
+    /// `configuration.bottomBarInset` 是非可选 `CGFloat` ⇒ 框里直接读写，不需要兜底。
     /// ⚠️ 它只动**下栏面板的下边缘**；跳章条与下栏之间的 8pt 间隙不跟它走。
     var bottomBarInsetBinding: Binding<CGFloat> {
         Binding(

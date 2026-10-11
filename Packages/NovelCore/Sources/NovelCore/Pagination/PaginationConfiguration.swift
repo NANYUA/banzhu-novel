@@ -211,25 +211,34 @@ public struct PaginationConfiguration: Equatable, Sendable {
     /// **只影响渲染**：不进 `affectsPagination` ⇒ 拖这个滑杆不重排正文、不动阅读位置。
     public var hudHorizontalInset: CGFloat
 
-    /// 上栏面板**上边缘距屏幕顶**的距离（pt）。
+    /// 上栏面板**上边缘距屏幕顶**的距离（pt）。设置项「上标签上边距」。
     ///
-    /// **绝对值语义**：`0` = 贴屏幕最边缘（**不避让灵动岛**，owner 口径）。
+    /// **绝对值语义**（owner 2026-10-11 口径）：
+    /// - `0` = 上栏面板贴到屏幕最上边（**不避让灵动岛 / 状态栏**，面板会被缺口盖住
+    ///   —— 这正是 owner 要的默认值，⛔ 别当成 bug 改回去）；
+    /// - **负值** = 面板继续**移出屏幕上边**（`-70` = 再往上 70pt，一部分露在屏幕外）；
+    /// - 正值 = 距屏幕顶的绝对距离。
     ///
-    /// `nil` = **自动**：由 App 层按安全区解析成 `max(Spacing.xs, 安全区top − 34)`
-    /// —— 那正是各机型的「当前自动值」（灵动岛机型约 25pt、无刘海机型 8pt）。
-    /// ⚠️ 所以**默认 `nil` 就等于改造前的行为**，不需要迁移 key。
-    /// ⚠️ 为什么「自动」必须留在 App 层：NovelCore 拿不到安全区（那是 UIKit / SwiftUI 的事）。
+    /// 范围 `-70 ... 70`、默认 `0`（设置页 `NumberInputRow` 的 `range` 与这里同值）。
     ///
-    /// **只影响渲染**：不进 `affectsPagination` ⇒ 拖这个滑杆不重排正文、不动阅读位置
+    /// ⚠️ 类型**必须**保持 `Optional`：`nil` = 老数据里没有这个 key（**不是**「自动」——
+    /// 「自动」机制已删）⇒ 由 `ReadingSettings.mergedConfiguration(containerSize:)` 按 `0` 兜底。
+    /// 改成非 Optional 会让老用户那份 JSON **解码失败、整份设置静默归零**
+    /// （见 `ReadingSettings` 的类型注释与 `ReadingSettingsStoreTests` 的守门用例）。
+    ///
+    /// **只影响渲染**：不进 `affectsPagination` ⇒ 改这个设置不重排正文、不动阅读位置
     /// （控制栏是叠加层，不占正文布局）。
     public var topBarInset: CGFloat?
 
-    /// 下栏面板**下边缘距屏幕底**的距离（pt）。
+    /// 下栏面板**下边缘距屏幕底**的距离（pt）。设置项「下标签下边距」。
     ///
-    /// **绝对值语义**：`0` = 贴屏幕最边缘。
+    /// **绝对值语义**：
+    /// - `0` = 下栏面板贴到屏幕最下边（**不避让 Home Indicator**）；
+    /// - **负值** = 面板继续**移出屏幕下边**（`-70` = 再往下 70pt，一部分露在屏幕外）；
+    /// - 正值 = 距屏幕底的绝对距离。
     ///
-    /// 默认 `8` = App 层尺度令牌 `DesignTokens.Spacing.xs`（NovelCore 不能 import SwiftUI /
-    /// `DesignTokens`，故此处写同值）—— 那个值就是改造前的固定值 ⇒ **默认行为零变化**。
+    /// 范围 `-70 ... 70`、默认 `0`。默认值必须与 `ReadingSettings.bottomBarInset` **同源**
+    /// （`ReadingSettingsStoreTests` 有一条「两处默认值同源」的锚点测试）。
     ///
     /// **只影响渲染**：不进 `affectsPagination`（理由同上）。
     public var bottomBarInset: CGFloat
@@ -272,8 +281,8 @@ public struct PaginationConfiguration: Equatable, Sendable {
         pageTurnAnimation: PageTurnAnimation = .none,
         appearanceMode: ReadingAppearanceMode = .system,
         hudHorizontalInset: CGFloat = 16,
-        topBarInset: CGFloat? = nil,
-        bottomBarInset: CGFloat = 8,
+        topBarInset: CGFloat? = 0,
+        bottomBarInset: CGFloat = 0,
         showsTextAreaBorder: Bool = false
     ) {
         self.containerSize = containerSize

@@ -21,7 +21,7 @@ import Foundation
 /// 把换行并到上一页末尾，渲染上不可见（不改变上一页的可见内容），守恒律 ①② 依然成立。
 ///
 /// 只吞**换行**（`Character.isNewline`，即 `\n` / `\r` 等），**不吞空格**：
-/// 首行缩进来自段落属性 `firstLineHeadIndent`，吞空格会吃掉正文里可能存在的缩进。
+/// 行首空白由上游归一化（`ParagraphIndentStripper`，见 `ReaderFeature.State.displayText`），这里只管换行 —— 吞空格就成了第二套缩进口径。
 ///
 /// ### 已知限制
 /// 若整段文本的**第一个**字符就是换行，第一页无法把开头的换行「并给上一页」

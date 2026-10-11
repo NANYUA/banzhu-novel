@@ -185,7 +185,7 @@ extension ReaderView {
     /// 它也因此**不进** `if isChromeVisible`（常显，不受控制栏显隐影响，也没有显隐动画）。
     ///
     /// 外留边刻意与控制栏同一套 ⇒ 控制栏一呼出就正好盖住它：上边距由调用方传入**同一个**
-    /// `topBarPadding(safeAreaInsets:inset:)` 的结果（在这里重算一份就成了第二套定位来源，日后必然
+    /// `topBarPadding(inset:)` 的结果（在这里重算一份就成了第二套定位来源，日后必然
     /// 漂移），下 = 调用方传入的 `bottomBarInset`（下栏面板底边距屏幕底的距离，
     /// **同一个** `PaginationConfiguration.bottomBarInset`），左右 = 安全区 + **「标签边距」设置项**
     /// （`PaginationConfiguration.hudHorizontalInset`，设置页那个 0…64 的滑杆；
