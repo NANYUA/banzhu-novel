@@ -15,7 +15,8 @@ import UIKit
 /// 1. 取 `text[from...]`（剩余全部文字）
 /// 2. 按 configuration 构建带样式的 attributed string（字号/行距/内边距）
 /// 3. 建一个尺寸 = configuration.containerSize 的 `NSTextContainer`
-/// 4. `NSLayoutManager` 排版后，`glyphRange(for:)` 得到本页能装下的范围
+/// 4. `NSLayoutManager` 排版后，`glyphRange(for:)` 得到本页能装下的范围，再**逐行回退**掉
+///    「底边越出容器底」的那一行（`trimmedGlyphRange`）—— 那一行属于下一页，不是本页被裁
 /// 5. 把该范围的 **UTF-16 长度**换算成 **Character 个数**后返回
 ///    （与 `PageRange.length`、`Paginator` 游标的单位一致；见 H1 与 `TextCursor`）
 public struct TextKitMeasuring: TextMeasuring {
@@ -83,8 +84,18 @@ public struct TextKitMeasuring: TextMeasuring {
         container.lineBreakMode = .byWordWrapping
         layoutManager.addTextContainer(container)
 
-        // 全量排版后，取本容器覆盖的字符范围
-        let glyphRange = layoutManager.glyphRange(for: container)
+        // 全量排版后，取本容器覆盖的字符范围。
+        //
+        // ⚠️ `glyphRange(for:)` 的「装得下」= **行片段起点**落在容器内：起点在容器内、底边**越出**
+        // 容器底的那一行**也会被算进本页**（TextKit 不把一行拆到两个容器）。渲染侧容器高与这里
+        // 逐值相同 ⇒ 这一行在真机上就是「下半行被正文盒裁掉」
+        // （owner 第三轮反馈：「超过下边距边框线的正文文字会被直接截断，应该换页展示才对」）。
+        // ⇒ 逐行回退到**墨迹完整落在容器内**的那一行为止，越出的那一行自然落到下一页。
+        let glyphRange = trimmedGlyphRange(
+            layoutManager.glyphRange(for: container),
+            in: layoutManager,
+            containerHeight: contentHeight
+        )
         let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
 
         // H1：`charRange.length` 是 **UTF-16 码元**数，而本协议的游标是 **Character**
@@ -110,5 +121,43 @@ public struct TextKitMeasuring: TextMeasuring {
         style.paragraphSpacing = configuration.paragraphSpacing
         style.firstLineHeadIndent = firstLineHeadIndent
         return style
+    }
+
+    /// 行片段底边与容器底之间允许的浮点容差（pt）：见 `trimmedGlyphRange`。
+    ///
+    /// 半个点在 @2x / @3x 屏上都不可见，用来避免「刚好放得下」的一行被浮点取整误差退掉。
+    private static let fitTolerance: CGFloat = 0.5
+
+    /// 把 `glyphRange` 逐行回退到「**墨迹完整**落在容器高之内」的那一行为止。
+    ///
+    /// ## 为什么需要它（owner 真机第三轮反馈）
+    /// `NSTextContainer` 的高度只是**行片段起点**的上限：起点在容器内、底边越出容器底的那一行
+    /// 依然会被 `glyphRange(for:)` 算进本页。渲染侧用的是同一个容器高 ⇒ 那一行必然被正文盒
+    /// 裁掉下半行。退掉它，它就成为下一页的第一行 —— 这正是「装不下的内容自然换页」。
+    ///
+    /// ## 判据为什么用 `lineFragmentUsedRect` 而不是 `lineFragmentRect`
+    /// 前者是**墨迹**矩形，后者含 `lineSpacing` 的行距留白。用后者会把「行距越过容器底、字还在
+    /// 容器内」的一行也退掉 ⇒ 白丢一行（正文盒底部多出一行空白）。
+    ///
+    /// - Returns: 回退后的字形范围；一行都放不下时返回长度 0（`Paginator` 有「强制 1 个字符」
+    ///   的防死循环保护，见 `Paginator.paginate`）。
+    private func trimmedGlyphRange(
+        _ glyphRange: NSRange,
+        in layoutManager: NSLayoutManager,
+        containerHeight: CGFloat
+    ) -> NSRange {
+        var range = glyphRange
+        while range.length > 0 {
+            var lineRange = NSRange()
+            let used = layoutManager.lineFragmentUsedRect(
+                forGlyphAt: NSMaxRange(range) - 1,
+                effectiveRange: &lineRange
+            )
+            guard used.maxY > containerHeight + Self.fitTolerance else { break }
+            let kept = lineRange.location - range.location
+            guard kept > 0 else { return NSRange(location: range.location, length: 0) }
+            range = NSRange(location: range.location, length: kept)
+        }
+        return range
     }
 }

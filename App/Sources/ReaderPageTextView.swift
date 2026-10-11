@@ -63,6 +63,9 @@ struct PageTextView: UIViewRepresentable {
         // 救不了：正文在视图**内**，只是视图比盒高）⇒ 上限必须取**度量侧排版用的同一个高**。
         // ⚠️ 旧注释（「高度不钉：手动设定属未验证改动」）已被两轮真机反馈推翻：不封顶就出界。
         // ⛔ 别再退回不钉，也别只钉 `bounds.height`。
+        // ⚠️ 但封顶**只管住「渲染容器不比度量容器高」**：`NSTextContainer` 的高度只是行片段**起点**
+        // 的上限，起点在盒内、底边越出的那一行照样会被排出来 ⇒ 那一行必须由**度量侧退行**处理
+        // （`TextKitMeasuring.trimmedGlyphRange`），见 `PageBoxTextView` 的文档注释。
         uiView.textContainer.widthTracksTextView = true
         // 竖向 inset 恒为 **0**（2026-10-11 语义变更）：`PageInset.top/bottom` 现在是
         // 「**距屏幕边缘的绝对距离**」（`0` = 贴屏幕边、不避让刘海），由 `ReaderView` 的布局
@@ -97,8 +100,9 @@ struct PageTextView: UIViewRepresentable {
     /// 高度同理：返回的盒高 = 父级可用高 = `configuration.containerSize.height`（`ReaderView`
     /// 那层的 `.frame(width:height:)` 已把可用盒钉成分页盒）⇒ 与 `TextKitMeasuring` 的容器高同源。
     /// ⚠️ 这里**不做** `min(提案, 盒)` 的封顶：那会在「配置尺寸还没同步过来」的首帧把盒缩小
-    /// （配置默认 320×480）⇒ 页面被居中缩小、首帧闪一下。出界那半由**盒级 `.clipped()`** 兜
-    /// （见 `ReaderView.readerContent`）与 `PageBoxTextView` 的**容器封顶**兜，不靠这里。
+    /// （配置默认 320×480）⇒ 页面被居中缩小、首帧闪一下。
+    /// 「末行越盒」的根因在**度量侧**（`TextKitMeasuring.trimmedGlyphRange` 逐行回退，那一行落到
+    /// 下一页）；`PageBoxTextView` 的容器封顶与 `ReaderView.readerContent` 的 `.clipped()` 只是兜底。
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView _: PageBoxTextView,
@@ -180,10 +184,12 @@ struct PageTextView: UIViewRepresentable {
 ///   SwiftUI 给它的 frame 可能比正文盒高 ⇒ `bounds.height` 本身就是那个「出界的盒」，钉在它
 ///   上面等于没钉；`clipsToBounds` 也救不了（正文在**视图内**，只是视图比盒高）。
 /// - 本版把上限取成**分页盒**：`min(bounds − 竖向 inset, configuration.containerSize.height)`。
-///   `containerSize.height` 就是 `TextKitMeasuring` 排版用的那个高（= 边框标线所在盒的高），
-///   TextKit 因此**不会在盒底之下生成行** ⇒ 无论 frame 多大，正文都排不出正文盒。
-/// - 「最后一行的越盒部分」由 `ReaderView.readerContent` 那层的 `.frame(...).clipped()` 裁掉
-///   （盒级裁剪，与标线同源）—— 两层合起来才是**结构性**保证。
+///   `containerSize.height` 就是 `TextKitMeasuring` 排版时用的那个高（= 边框标线所在盒的高）
+///   ⇒ 渲染容器**不会比度量容器高**，不会多排正文。
+/// - ⚠️ 但「容器不超高」**不等于**「没有一行越盒」：`NSTextContainer` 的高度只是行片段**起点**的
+///   上限，起点在盒内、底边越出的那一行仍会被排出来（owner 第三轮反馈「正文被直接截断」就是它）。
+///   根因修在**度量侧**（`TextKitMeasuring.trimmedGlyphRange` 逐行回退 ⇒ 那一行落到下一页）；
+///   本类的容器封顶与 `ReaderView.readerContent` 的 `.clipped()` 只作**最后兜底**。
 ///
 /// ## 为什么在 `layoutSubviews` 里钉（而不是只在 `updateUIView` 里设一次）
 /// `updateUIView` 在**内容未变**时直接 return（见它的 `guard contentChanged`），而 frame 会随
