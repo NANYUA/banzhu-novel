@@ -184,4 +184,105 @@ final class BookshelfLocalGroupTests: XCTestCase {
         XCTAssertTrue(store.state.visibleRows.isEmpty)
         await store.finish()
     }
+
+    // MARK: - 选择模式不常驻（owner 2026-10-11 口径）
+
+    /// **切分组 = 进入另一个页面** ⇒ 编辑（选择）模式必须退出、已选必须清空。
+    ///
+    /// ## 为什么钉在这里
+    /// 旧行为是「`.groupSelected` / `.localGroupSelected` 都不碰 `isEditing`」——
+    /// 于是长按进编辑态后切个分组，编辑态**跟着过去**（分组栏右边还挂着「完成」、批量工具栏还在），
+    /// 看上去像「选择模式被常驻了」。owner 真机口径：**任何离开当前页面的动作都退出选择模式**。
+    ///
+    /// ⚠️ 视图层还有**另一半**（下载选择模式住在 `DownloadFeature`，书架 reducer 够不到）——
+    /// 那一半在 `BookshelfView+GroupBar.swift` 的 `groupChips` 与 `BookshelfView` 的 `.onDisappear` 里，
+    /// 本文件覆盖不到，只能靠真机 / UI 层验证。
+    func test编辑态下切分组会退出编辑态并清空已选() async {
+        let groupID = UUID()
+        let store = TestStore(
+            initialState: BookshelfFeature.State(
+                rows: [Self.makeRow(bookPath: "/1/", groupID: groupID)],
+                isEditing: true,
+                selectedBookPaths: ["/1/"]
+            )
+        ) {
+            BookshelfFeature()
+        }
+
+        await store.send(.localGroupSelected) {
+            $0.showsLocalGroup = true
+            $0.selectedGroupID = nil
+            $0.isEditing = false
+            $0.selectedBookPaths = []
+        }
+        XCTAssertFalse(store.state.isEditing, "切分组后必须已退出编辑态")
+        XCTAssertTrue(store.state.selectedBookPaths.isEmpty, "退出编辑态必须连带清空已选")
+        await store.finish()
+    }
+
+    /// 同一条口径的另一半：`.groupSelected` 也要退出（从「本地」切回「全部」/ 切到某个书组）。
+    func test编辑态下切回全部也会退出编辑态() async {
+        let groupID = UUID()
+        let store = TestStore(
+            initialState: BookshelfFeature.State(
+                rows: [Self.makeRow(bookPath: "/1/", groupID: groupID)],
+                selectedGroupID: groupID,
+                isEditing: true,
+                selectedBookPaths: ["/1/"]
+            )
+        ) {
+            BookshelfFeature()
+        }
+
+        await store.send(.groupSelected(nil)) {
+            $0.selectedGroupID = nil
+            $0.isEditing = false
+            $0.selectedBookPaths = []
+        }
+        XCTAssertFalse(store.state.isEditing, "切回「全部」同样要退出编辑态")
+        await store.finish()
+    }
+
+    /// 反向守卫：**没在编辑态**时切分组不该多出状态变化（幂等，且不能把 `isEditing` 写成别的值）。
+    func test非编辑态切分组不产生额外状态变化() async {
+        let groupID = UUID()
+        let store = TestStore(
+            initialState: BookshelfFeature.State(rows: [Self.makeRow(bookPath: "/1/", groupID: groupID)])
+        ) {
+            BookshelfFeature()
+        }
+
+        await store.send(.groupSelected(groupID)) {
+            $0.selectedGroupID = groupID
+        }
+        XCTAssertFalse(store.state.isEditing)
+        await store.finish()
+    }
+
+    /// **点的是当前分组**同样要退出编辑态 —— 这条是「复位必须放在幂等 guard **之前**」的直接判据。
+    ///
+    /// 若把复位写在 guard 之后，那条 guard 会先 `return .none`，用户在编辑态下点同一个分组就**退不出来**。
+    func test编辑态下点当前分组也会退出编辑态() async {
+        let groupID = UUID()
+        let store = TestStore(
+            initialState: BookshelfFeature.State(
+                rows: [Self.makeRow(bookPath: "/1/", groupID: groupID)],
+                selectedGroupID: groupID,
+                isEditing: true,
+                selectedBookPaths: ["/1/"]
+            )
+        ) {
+            BookshelfFeature()
+        }
+
+        // 分组没变（幂等 guard 命中）⇒ 期望态里**没有** `selectedGroupID` 的变化，但编辑态必须退。
+        await store.send(.groupSelected(groupID)) {
+            $0.isEditing = false
+            $0.selectedBookPaths = []
+        }
+        XCTAssertEqual(store.state.selectedGroupID, groupID, "点当前分组不该改动分组本身")
+        XCTAssertFalse(store.state.isEditing, "点当前分组同样要退出编辑态")
+        XCTAssertTrue(store.state.selectedBookPaths.isEmpty)
+        await store.finish()
+    }
 }

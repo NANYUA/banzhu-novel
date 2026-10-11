@@ -145,6 +145,10 @@ public struct BookshelfFeature: Reducer {
                 return .none
 
             case let .groupSelected(groupID):
+                // owner 2026-10-11 口径：**选择模式不常驻** —— 切分组就退出编辑态。
+                // ⚠️ 必须放在下面那条幂等 guard **之前**：点的是当前分组时那条 guard 会 `return .none`，
+                // 若把复位放在它之后，用户在编辑态下点**同一个**分组就退不出来。
+                exitEditing(&state)
                 // 判据里带上 `showsLocalGroup`：从「本地」切回「全部」时 `groupID` 与
                 // `selectedGroupID` 都是 `nil`，只看后者会把这一下当成重复点击吞掉。
                 guard groupID != state.selectedGroupID || state.showsLocalGroup else { return .none }
@@ -153,6 +157,8 @@ public struct BookshelfFeature: Reducer {
                 return .none
 
             case .localGroupSelected:
+                // 同一条口径：切到「本地」也先退编辑态，再走幂等 guard（理由同上）。
+                exitEditing(&state)
                 // 幂等：已经在本地分组上（书组选中也已清空）时不再改动状态。
                 if state.showsLocalGroup, state.selectedGroupID == nil {
                     return .none
@@ -263,8 +269,8 @@ public struct BookshelfFeature: Reducer {
                 state.rows.removeAll { removed.contains($0.bookPath) }
                 state.selectedBookPaths.subtract(removed)
                 if state.rows.isEmpty {
-                    state.isEditing = false
-                    state.selectedBookPaths = []
+                    // 书架空了 ⇒ 留在编辑态没有意义（复用同一个「退出选择模式」的定义）。
+                    exitEditing(&state)
                 }
                 return .none
 
@@ -407,6 +413,25 @@ public extension BookshelfFeature {
             return !visiblePaths.isEmpty && visiblePaths.isSubset(of: selectedBookPaths)
         }
     }
+}
+
+// MARK: - State 辅助
+
+/// 退出书架编辑（选择）态：**置 `isEditing = false` 并清空已选**。
+///
+/// ## 为什么收成一个函数（owner 2026-10-11 口径：**选择模式不常驻**）
+/// 「选择模式」不是一种可以一直挂着的状态：**任何离开当前页面的动作都应当退出它**
+/// —— 切分组、切 tab、进阅读页 / 详情页。这些动作分散在 reducer 与视图层（`BookshelfView`），
+/// 若各自写一遍「`isEditing = false` + `selectedBookPaths = []`」，就迟早会漏掉一处、或者只清一半。
+/// 收成一处后，「退出选择模式」这件事只有一个定义。
+///
+/// ⚠️ **幂等**：已经是退出态时再调一次不改变任何东西（两个赋值都是写同样的值）⇒
+/// `.onChange(of: selectedTab)` 那种可能反复触发的路径可以放心调，也不会让 TestStore 多出状态变更。
+/// ⚠️ **调用位置有讲究**：两个分组动作里它必须排在**幂等 guard 之前** ——
+/// 点的是当前分组时那条 guard 会 `return .none`，排在它后面就退不出来（见两个 case 里的注释）。
+private func exitEditing(_ state: inout BookshelfFeature.State) {
+    state.isEditing = false
+    state.selectedBookPaths = []
 }
 
 // MARK: - Effect 辅助

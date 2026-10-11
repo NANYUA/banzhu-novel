@@ -55,10 +55,12 @@ extension BookshelfView {
                     // ① **书架编辑态**的「完成」出口（owner 第十轮第 3 条）：原先是导航栏**左上角**
                     // 的一个文字按钮，现搬到分组栏最右边、用同一套胶囊样式。语义逐字不变。
                     //
-                    // ⚠️ `!showsLocalGroup` **不能省**（U9-8 的回归护栏）：`.groupSelected` /
-                    // `.localGroupSelected` 都**不重置** `isEditing`（`BookshelfFeature.swift:147-162`），
-                    // 而本地分组装的是下载任务、不是书目 ⇒ 本地态归下面那条分支管。
-                    // ⇒ 省掉它，本地分组会**同时**长出两个「完成」。
+                    // ⚠️ `!showsLocalGroup` **仍然不能省**（U9-8 的回归护栏）：
+                    // ① 2026-10-11 起切分组会**退出编辑态**（`exitEditing`，owner 口径「选择模式不常驻」）
+                    //    ⇒ 正常路径下本地态本来就不会再有 `isEditing`；
+                    // ② 但本地态归下面那条分支管（**下载**选择模式），两条判据互斥 ——
+                    //    留着它，「本地分组永不渲染书架那个『完成』」这条不变量就**不依赖**那条新行为（双保险）。
+                    // ⇒ 省掉它，本地分组仍有可能**同时**长出两个「完成」。
                     if viewStore.isEditing, !viewStore.showsLocalGroup {
                         selectionDoneChip {
                             viewStore.send(.editModeChanged(false))
@@ -113,6 +115,10 @@ extension BookshelfView {
             .padding(.trailing, DesignTokens.Spacing.md)
     }
 
+    /// 分组胶囊行（含末尾的「+」）。
+    ///
+    /// ⚠️ 本函数**不**负责「切分组 ⇒ 退出下载选择模式」那条口径：它由 `BookshelfView` 里
+    /// **唯一一处** `.onChange(of: showsLocalGroup)` 兑现（在这里给每个胶囊各写一次会变成三处真相）。
     private func groupChips(
         _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
     ) -> some View {

@@ -169,6 +169,21 @@ struct BookshelfView: View {
                 // `.navigationBar` 与上面的 `.tabBar` 是两个独立的 `ToolbarPlacement`；
                 // 这里不再对 `.navigationBar` 做可见性声明（默认可见即所要的效果）。
                 .onAppear { viewStore.send(.onAppear) }
+                // owner 2026-10-11 口径：**选择模式不常驻** —— 离开「本地」分组（= 下载队列）就退出下载选择模式。
+                //
+                // ## 为什么是「离开本地」而不是「点某个胶囊」
+                // 下载选择模式只在「本地」分组里有意义。用「分组状态本身的变化」当判据，
+                // 就**只有这一处**真相：给每个胶囊各写一次会变成三处，且漏掉「从别处切回全部」等路径。
+                //
+                // ## 为什么书架编辑态不在这里退
+                // 那个状态住在 `BookshelfFeature`，由 reducer 在 `.groupSelected` / `.localGroupSelected`
+                // 里自己退（见 `exitEditing`）—— reducer 能做的事不要搬到视图层。
+                //
+                // 幂等：`applySelectionMode(false)` 在已经是退出态时不改变任何状态（见 `DownloadFeature+Selection`）。
+                .onChange(of: viewStore.showsLocalGroup) { _, showsLocal in
+                    guard !showsLocal else { return }
+                    downloadStore.send(.selectionModeChanged(false))
+                }
                 // 单点书卡 ⇒ **直接进阅读页**（owner 需求：书架 / 本地 / 分组都不再进详情页）。
                 // 详情页入口改在阅读页右上角「更多」里；目标与准备链路见 `BookshelfView+Reader.swift`。
                 .navigationDestination(isPresented: $isShowingReader) {
@@ -176,7 +191,8 @@ struct BookshelfView: View {
                 }
                 // 从阅读页回来时重拉一次书架：`lastReadAt` / `上次读到` / 未读章数
                 // 都是刚刚读出来的新值，不重拉就会停在旧快照上。
-                // `.onAppear` 幂等且不重置编辑态（见 `BookshelfFeature`），重发安全。
+                // `.onAppear` 幂等、且**不会**退出编辑态（只有「切分组」与「切 tab」才退出，
+                // 见 `exitEditing` 与 `RootView` 的 `.onChange(of: selectedTab)`），重发安全。
                 .onChange(of: isShowingReader) { _, isShowing in
                     guard !isShowing else { return }
                     viewStore.send(.onAppear)
@@ -257,9 +273,11 @@ private extension BookshelfView {
     func toolbarContent(
         _ viewStore: ViewStore<BookshelfFeature.State, BookshelfFeature.Action>
     ) -> some ToolbarContent {
-        // 🔴 `!viewStore.showsLocalGroup` 是 U9-8 的回归护栏，纯 View 层，**不要**改成动 reducer：
-        // `.groupSelected` / `.localGroupSelected` 都**不重置** `isEditing`（`BookshelfFeature.swift:147-162`），
-        // 而批量工具栏的唯一渲染条件就是 `isEditing`。U9-8 之前这里没暴露，只因
+        // 🔴 `!viewStore.showsLocalGroup` 是 U9-8 的回归护栏，纯 View 层，**不要**去掉 ——
+        // 批量工具栏的唯一渲染条件就是 `isEditing`。
+        // ⚠️ 2026-10-11 起切分组会**退出编辑态**（`exitEditing`，owner 口径「选择模式不常驻」）
+        // ⇒ 正常路径下本地态已经不会有 `isEditing`；这条护栏仍要留着（双保险，不依赖那条新行为）。
+        // U9-8 之前这里没暴露，只因
         // `body` 里那条 `.toolbar(showsLocalGroup ? .hidden : .visible, for: .navigationBar)`
         // 把整条导航栏连工具栏一起藏掉了；U9-8 撤掉那条之后，本地分组（= 下载队列）会
         // 长出「全选 / 整本下载 / 移入分组 / 删除」——本地分组装的是下载任务、不是书目，

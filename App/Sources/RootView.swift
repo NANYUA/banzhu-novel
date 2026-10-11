@@ -9,7 +9,22 @@ import SwiftUI
 ///
 /// U5-4：底栏的「下载」入口摘掉，下载队列改为书架里的固定「本地」分组
 /// （`BookshelfView` → `State.showsLocalGroup` → 复用 `DownloadQueueView`）。
+/// 四个 tab 的**类型化**标识。
+///
+/// 用枚举而不是 `Int` 索引：① 以后在中间插一个 tab 不会让选中项错位；
+/// ② `.onChange(of: selectedTab)` 的判据读起来就是「切了 tab」，不是「某个数字变了」。
+private enum RootTab: Hashable {
+    case bookshelf
+    case explore
+    case search
+    case settings
+}
+
 struct RootView: View {
+    /// 当前 tab。`TabView(selection:)` 需要一个绑定 —— 它也是「切 tab」这条口径的判据来源
+    /// （见 `body` 里 `.onChange(of: selectedTab)`）。
+    @State private var selectedTab: RootTab = .bookshelf
+
     @State private var bookshelfStore = Store(initialState: BookshelfFeature.State()) {
         BookshelfFeature()
     }
@@ -36,8 +51,9 @@ struct RootView: View {
 
     var body: some View {
         WithViewStore(guardStore, observe: \.isPresented) { viewStore in
-            TabView {
+            TabView(selection: $selectedTab) {
                 BookshelfView(store: bookshelfStore, downloadStore: downloadStore)
+                    .tag(RootTab.bookshelf)
                     .tabItem {
                         Label("书架", systemImage: "books.vertical")
                     }
@@ -54,6 +70,7 @@ struct RootView: View {
                         bookshelfStore.send(.booksDeleted([bookPath]))
                     }
                 )
+                .tag(RootTab.explore)
                 .tabItem {
                     Label("书城", systemImage: "square.grid.2x2")
                 }
@@ -70,6 +87,7 @@ struct RootView: View {
                         bookshelfStore.send(.booksDeleted([bookPath]))
                     }
                 )
+                .tag(RootTab.search)
                 .tabItem {
                     Label("搜索", systemImage: "magnifyingglass")
                 }
@@ -78,9 +96,25 @@ struct RootView: View {
                 // （`BookshelfView` 在 `showsLocalGroup` 时复用整页 `DownloadQueueView`）。
                 // ⚠️ `downloadStore` 仍然要传给书架 / 书城 / 搜索，只是不再单独占一个 tab。
                 SiteSettingsView(store: siteStore)
+                    .tag(RootTab.settings)
                     .tabItem {
                         Label("设置", systemImage: "gearshape")
                     }
+            }
+            // owner 2026-10-11 口径：**选择模式不常驻** —— 切 tab 就退出（两种模式一起退）。
+            //
+            // ## 为什么挂在 `TabView` 上、而不是某个 tab 内部
+            // 挂在容器上，「离开」与「回来」两侧都覆盖；挂在某个 tab 的 `.onAppear` / `.onDisappear` 里
+            // 就只能覆盖那一侧，而且以后加 tab 还得记得补一遍。
+            //
+            // ## 为什么两种模式都要发
+            // 书架编辑态住在 `BookshelfFeature`、下载选择模式住在 `DownloadFeature`（两个独立 store），
+            // 而这一层**两个 store 都有** ⇒ 跨 feature 的收口点就在这里。
+            // 两个 action 都**幂等**（`editModeChanged` 有 `guard isEditing != state.isEditing`；
+            // `applySelectionMode(false)` 同理）⇒ 不在选择模式时切 tab 不产生任何状态变更。
+            .onChange(of: selectedTab) { _, _ in
+                bookshelfStore.send(.editModeChanged(false))
+                downloadStore.send(.selectionModeChanged(false))
             }
             // §6：品牌强调色集中定义在 `AppTheme`，这里一次性注入环境，
             // 系统控件（`.borderedProminent` 填充、分段控件、开关、搜索框、
