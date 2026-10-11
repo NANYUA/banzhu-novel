@@ -35,6 +35,8 @@ struct PageTextView: UIViewRepresentable {
         textView.clipsToBounds = true
         // 容器高的**上限**（= 分页盒高）：见 `pinTextContainerToBounds()` 的说明。
         textView.pageBoxHeight = configuration.containerSize.height
+        // ⚠️ 仅诊断用（`ReaderPageDiagnostics`）：分页盒的**宽**，浮层要拿它跟 bounds 宽对比。
+        textView.pageBoxWidth = configuration.containerSize.width
         return textView
     }
 
@@ -84,6 +86,8 @@ struct PageTextView: UIViewRepresentable {
         // = `TextKitMeasuring` 排版用的同一个高）。必须在 `textContainerInset` **之后**钉，
         // 否则用的是上一份 inset。
         uiView.pageBoxHeight = configuration.containerSize.height
+        // ⚠️ 仅诊断用（删诊断时连同 `captureDiagnostics()` 一起删）。
+        uiView.pageBoxWidth = configuration.containerSize.width
         uiView.pinTextContainerToBounds()
         uiView.backgroundColor = configuration.backgroundStyle.uiColor(
             custom: configuration.customBackgroundColor,
@@ -201,9 +205,17 @@ final class PageBoxTextView: UITextView {
     /// 文本容器高的**上限**。由 `PageTextView` 在 `makeUIView` / `updateUIView` 里写入。
     var pageBoxHeight: CGFloat = 0
 
+    /// ⚠️ 仅诊断用（`ReaderPageDiagnostics`）：分页盒的**宽**，与 `pageBoxHeight` 同一来源。
+    /// 删诊断时连同 `captureDiagnostics()` 一起删。
+    var pageBoxWidth: CGFloat = 0
+
     override func layoutSubviews() {
         super.layoutSubviews()
         pinTextContainerToBounds()
+        // ⚠️ 仅诊断用（删诊断时连同 `captureDiagnostics()` 一起删）。
+        if ReaderPageDiagnostics.isEnabled {
+            captureDiagnostics()
+        }
     }
 
     /// 容器高 = `min(视图 bounds 高 − textContainerInset 竖向, 分页盒高)`（竖向 inset 本 App 恒 0）。
@@ -223,5 +235,50 @@ final class PageBoxTextView: UITextView {
         var size = textContainer.size
         size.height = height
         textContainer.size = size
+    }
+
+    /// ⚠️ 仅诊断用：把这一帧的实测值写进 `ReaderPageDiagnostics.snapshot`（只读 TextKit 查询，
+    /// 不触发布局；删诊断时整个方法删掉）。
+    ///
+    /// `glyphsInContainer < glyphCount` 是**最关键**的一行：本页切片有字形没排进容器 ⇒
+    /// 要么容器比分页盒矮、要么分页盒本身比渲染盒高 —— 浮层一屏就能看明白。
+    func captureDiagnostics() {
+        // 走 `textContainer.layoutManager`（可选）而不是 `UITextView.layoutManager`（隐式解包）：
+        // 万一这个 textView 是 TextKit 2 支撑的，前者返回 nil（诊断直接跳过）而后者会崩。
+        guard let manager = textContainer.layoutManager else { return }
+        let glyphCount = manager.numberOfGlyphs
+        let inContainer = manager.glyphRange(for: textContainer).length
+        var lineCount = 0
+        var lastUsed: CGFloat = 0
+        var lastFragment: CGFloat = 0
+        var index = 0
+        while index < glyphCount {
+            var lineRange = NSRange()
+            let used = manager.lineFragmentUsedRect(forGlyphAt: index, effectiveRange: &lineRange)
+            let fragment = manager.lineFragmentRect(forGlyphAt: index, effectiveRange: nil)
+            lineCount += 1
+            lastUsed = used.maxY
+            lastFragment = fragment.maxY
+            let next = NSMaxRange(lineRange)
+            if next <= index {
+                break
+            }
+            index = next
+        }
+        ReaderPageDiagnostics.snapshot = ReaderPageDiagnostics.Snapshot(
+            configWidth: pageBoxWidth,
+            configHeight: pageBoxHeight,
+            boundsWidth: bounds.width,
+            boundsHeight: bounds.height,
+            containerWidth: textContainer.size.width,
+            containerHeight: textContainer.size.height,
+            glyphCount: glyphCount,
+            glyphsInContainer: inContainer,
+            lineCount: lineCount,
+            textLength: textStorage.length,
+            lastLineUsedMaxY: lastUsed,
+            lastLineFragmentMaxY: lastFragment,
+            lastLineOverflow: max(lastUsed, lastFragment) - textContainer.size.height
+        )
     }
 }

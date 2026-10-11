@@ -210,6 +210,8 @@ struct ReaderView: View {
                 .chromeToggleTapFallback(viewStore: viewStore) {
                     setChromeVisible(!isChromeVisible)
                 }
+                // ⚠️ 临时诊断浮层（删诊断时删本行 + 删 `ReaderPageDiagnostics.swift`）。
+                .readerPageDiagnostics(page: viewStore.currentPageIndex, pageCount: viewStore.pages.count)
                 .task {
                     viewStore.send(.loadSavedSettings(contentSize))
                     viewStore.send(
@@ -219,11 +221,14 @@ struct ReaderView: View {
                 // 监听「安全区可用盒」而不是 `geometry.size`：翻转 / 分屏 / 换机型改的是 `size`，
                 // 而通话或录屏状态栏、外接键盘导致的 Home Indicator 变化**只改 `safeAreaInsets`**
                 // —— 后者原先漏监听，安全区变了却不重新分页（H2）。
-                // 两者都会改变 `contentSize`，所以统一派生值触发即可，不必挂两个 onChange。
+                // 两者都会改变 `contentSize`，所以统一派生值触发即可。
                 // 藏掉状态栏（U9-3b）同样会改 `contentSize`，也走这条路径重新分页。
                 .onChange(of: contentSize) { _, newSize in
                     viewStore.send(.containerSizeChanged(newSize))
                 }
+                // 配置一变也回写布局盒：`containerSize` 是配置里的**拷贝**，会被 `.settingsLoaded` /
+                // `.configChanged` 用过期值覆写，而上面那条只在**尺寸变化**时才修；`!=` 守卫 ⇒ 不自激。
+                .onChange(of: viewStore.config) { _, _ in viewStore.send(.containerSizeChanged(contentSize)) }
             }
             .navigationTitle("")
             .navigationBarBackButtonHidden(true)
