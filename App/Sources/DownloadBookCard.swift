@@ -126,7 +126,8 @@ private extension DownloadBookCard {
     ///
     /// ## 内容区高度
     /// 整块 `.frame(minHeight: DownloadCardMetrics.contentHeight)`，与总进度卡片、
-    /// 选择操作卡片**引用同一个高度**（= 80 = 封面高）：文字列（≈74pt）与封面（80）取大 ⇒
+    /// 选择操作卡片**引用同一个高度**（= 80 = 封面高）：文字列（≈72.8pt，算式见
+    /// `DownloadCardMetrics.contentHeight`）与封面（80）取大 ⇒
     /// 三张卡与书架 `BookRow` 的白卡高逐值相同（80 + 内边距 12×2 = 104）。
     /// 文字列的算式与「状态与进度条并排」的来由见 `DownloadCardMetrics.contentHeight`。
     var content: some View {
@@ -148,12 +149,15 @@ private extension DownloadBookCard {
                         .lineLimit(1)
                 }
 
+                // 字号档位与书架 `BookRow` 的第 3 行（「上次读到…」）对齐：都是 `.caption2`。
+                // ⚠️ 它同时是文字列高度算式的一项（见 `DownloadCardMetrics.contentHeight`），改字号要同步改那个算式。
                 Text("已下载 \(summary.finishedCount)/\(summary.tasks.count) 章")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                // 进度条与状态行**并排一行**（U13）：文字列因此从 ≈82pt 压到 ≈74pt，
-                // 装得进 `contentHeight`(80)。信息一条不少 —— 进度条与状态各自都还在，
+                // 进度条与状态行**并排一行**（U13）：文字列因此从 ≈82pt 压到 ≈74pt；
+                // 第十轮再把「已下载 N/M 章」从 `.caption` 降到 `.caption2`（与 `BookRow` 第 3 行同档）
+                // ⇒ 现值 ≈72.8pt，装得进 `contentHeight`(80)。信息一条不少 —— 进度条与状态各自都还在，
                 // 只是不再各占一整行（算式见 `DownloadCardMetrics.contentHeight`）。
                 HStack(spacing: DesignTokens.Spacing.xs) {
                     ProgressView(value: summary.progress)
@@ -173,8 +177,10 @@ private extension DownloadBookCard {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(minHeight: DownloadCardMetrics.contentHeight)
-        .padding(.horizontal, DesignTokens.Spacing.sm)
-        .padding(.vertical, DesignTokens.Spacing.sm)
+        // 一套 12pt 四边内边距（与 `BookRow` 的 `.padding(Spacing.sm)` 同值）。
+        // ⚠️ 别在这里再加第二套（例如为了「上下多一点」补一条 `.padding(.vertical, _)`）：
+        // 白卡高 = 80 + 12×2 = 104 是本页与书架对齐的判据（见 `DownloadCardMetrics.contentHeight`）。
+        .padding(DesignTokens.Spacing.sm)
         .contentShape(Rectangle())
     }
 
@@ -469,23 +475,26 @@ enum DownloadCardMetrics {
 
     /// 卡片**内容区最小高度**（书卡 / 总进度卡片 / 选择操作卡片三处共用）。
     ///
-    /// 加上卡片内边距 `Spacing.sm`(12) × 2 后，三张白卡的高度都是 **104pt**
-    /// （列表里再套 `.downloadQueueCard()` 的 8×2 ⇒ 可见卡高 120pt）——
-    /// **与书架书卡 `BookRow` 逐值相同**（封面 80 + `.padding(Spacing.sm)` 12×2 = 104）。
+    /// ## 最终几何：与书架卡 `BookRow` **逐值相同**（owner 第十轮第 4 条）
+    /// - **白卡高** = 内容 80 + 内边距 `Spacing.sm`(12) × 2 = **104pt**（`BookRow` 封面 80 + 12×2 = 104）；
+    /// - **行高** = 104 + 行内边距 8 + 8 = **120pt**（书架列表 `.listRowInsets(top: 8, bottom: 8)` 同值）；
+    /// - **行内边距** = 8 / 16 / 8 / 16（`downloadQueueRow()` 的默认值 = 书架列表同值）。
+    /// ⇒ 两侧的白卡与行**都**对齐；**内边距只有一套 12pt、卡面只有一层**（见 `downloadQueueCard()`）。
     ///
     /// ## 为什么是 80（算式）
     /// 取书卡内容里**最高**的那一块：
     /// - **封面** `.frame(width: 60, height: coverHeight)` = **80**；
     /// - **文字列** = 书名 `.headline`(17pt，行高 ≈20.3) + `Spacing.xxs`(4)
-    ///   + 作者 `.caption`(12pt，≈14.3) + 4 + 「已下载 N/M 章」`.caption`(≈14.3) + 4
-    ///   + 「进度条 ‖ 状态」并排一行 = max(进度条 ≈4, 状态 `.caption2`(11pt，≈13.1)) ≈ 13.1
-    ///   ⇒ **≈74.0pt**。
+    ///   + 作者 `.caption`(12pt，≈14.3) + 4 + 「已下载 N/M 章」`.caption2`(11pt，≈13.1) + 4
+    ///   + 「进度条 ‖ 状态」并排一行 = max(进度条 ≈4, 状态 `.caption2`(≈13.1)) ≈ 13.1
+    ///   ⇒ **≈72.8pt**（「已下载」那一行从 `.caption` 降到 `.caption2`，与 `BookRow` 第 3 行同档）。
     /// 两者取大 = **80** ⇒ 内容区 80 + 12×2 = 104，与书架卡一致。
     ///
-    /// ⚠️ 原先这里写 88：那时「状态」独占一行（文字列 ≈82 > 封面 80），
-    /// 书卡白卡高因此是 112 而书架卡是 104 —— owner 反馈的「下载界面卡片大小和书架的卡片
-    /// 大小不一致」就是这 8pt。压回 80 的前提是把文字列压进 80：U13 把**状态行与进度条并排**
+    /// ⚠️ 历史：这里曾写 **88**（那时「状态」独占一行，文字列 ≈82 > 封面 80 ⇒ 白卡 112）；
+    /// 压回 80 的前提是把文字列压进 80：U13 把**状态行与进度条并排**
     /// （信息一条不少：书名 / 作者 / 已下载 N/M 章 / 进度条 / 状态**全都还在**）。
+    /// ⚠️ 又：`downloadQueueCard()` 原先给的是「横向 12 + 竖向 8」且行内边距 `top: 0`，
+    /// 那会让**已经自画卡面**的书卡再套一层 ⇒ 白卡 112、横向 24 —— 第十轮一并改掉。
     ///
     /// ⚠️ 同高的判据是「三处内容都 `.frame(minHeight: contentHeight)`」——
     /// 书卡文字列一旦长过它（超大 Dynamic Type 等）就会重新把书卡顶高，这是刻意的
@@ -530,16 +539,27 @@ extension View {
 
     /// 卡面（`Surface.card` + `Radius.sm`）：书卡、提示条、汇总卡共用。
     ///
+    /// ## 几何口径：与书架卡 `BookRow` **逐值相同**（owner 第十轮第 4 条）
+    /// 内边距 **`Spacing.sm`(12) 四边一套** + 卡面 + 行内边距 **8 / 16 / 8 / 16**
+    /// （`downloadQueueRow()` 的默认值）—— 与 `BookRow` 的 `.padding(Spacing.sm)` 加
+    /// 书架列表的 `.listRowInsets(top: 8, leading: 16, bottom: 8, trailing: 16)` 逐值对应。
+    ///
+    /// ⚠️ 原先这里是「横向 12 + **竖向 8**」且行内边距 `top: 0` ⇒ 白卡 112pt、行高 112 + 8 = 120pt，
+    /// 而书架卡是白卡 104pt、行高 120pt —— **白卡差 8pt**，owner 反馈的「下载界面卡片大小和书架的
+    /// 卡片大小不一致」就是它。改成 12 四边 + 行内边距 8/16/8/16 后两侧白卡都是 104pt、行高都是 120pt。
+    ///
+    /// ⚠️ **调用方自己已经画了卡面的，只能调 `downloadQueueRow()`**（例如书卡 —— 它
+    /// `cardLabel` 里已有一层 `Surface.card`）⇒ 再套本方法就会**双层卡面 + 双层 12pt 内边距**。
+    ///
     /// 原先还带 `topRounded` / `bottomRounded`（用来把同一 `Section` 内相邻的**章节行**
     /// 拼成一张卡）；逐章行删掉后没有消费者，那两个参数与
     /// `downloadQueueSectionHeaderCard()` 一并删除。
     func downloadQueueCard() -> some View {
-        padding(.horizontal, DesignTokens.Spacing.sm)
-            .padding(.vertical, DesignTokens.Spacing.xs)
+        padding(DesignTokens.Spacing.sm)
             .background(
                 AppTheme.Surface.card,
                 in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
             )
-            .downloadQueueRow(top: 0, bottom: DesignTokens.Spacing.xs)
+            .downloadQueueRow()
     }
 }

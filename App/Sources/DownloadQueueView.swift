@@ -137,8 +137,8 @@ struct DownloadQueueView: View {
     /// 向上滑动 … 作为上栏，下方已下载的书籍从这个上栏的下方走」⇒ 现在与 `List` **并列**放进
     /// `VStack`，滚动内容从卡片下沿之下开始。⚠️ 不用「`List` 内的吸顶 Section header」：header 的
     /// 横向内缩规则与行不同源、卡片会与书卡左右对不齐；放 `List` 外则由 `pinnedHeader` 的
-    /// `.padding(.horizontal, Spacing.md)` 显式给出，与书卡行 `.listRowInsets`（`.downloadQueueCard()`
-    /// → `.downloadQueueRow()`）**同一个令牌**。
+    /// `.padding(.horizontal, Spacing.md)` 显式给出，与书卡行的 `.downloadQueueRow()`（即书架列表那套
+    /// `.listRowInsets`）**同一个令牌**。
     private func queueList(
         _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
     ) -> some View {
@@ -195,6 +195,10 @@ struct DownloadQueueView: View {
                 summaryCard(viewStore)
             }
         }
+        // ⚠️ 上边距取 `Spacing.xs`(8)：owner 第十轮第 4 条要求「进度卡片的位置与**全部页**默认状态下
+        // 第一本书的上边距相同」，而那个值就是书架列表的 `.listRowInsets(top: Spacing.xs)`
+        // （见 `BookshelfView.shelfList`）。横向 `Spacing.md`(16) 与书卡的行内边距同源。
+        .padding(.top, DesignTokens.Spacing.xs)
         .padding(.horizontal, DesignTokens.Spacing.md)
     }
 
@@ -322,7 +326,11 @@ struct DownloadQueueView: View {
                 viewStore.send(.selectionModeChanged(!viewStore.isSelecting))
             }
         )
-        .downloadQueueCard()
+        // ⚠️ 只给**行内边距**（8 / 16 / 8 / 16），**不再套 `.downloadQueueCard()`**：
+        // 书卡自己的 `cardLabel` 已经画了一层 `Surface.card` 卡面、`content` 也已带 12pt 内边距
+        // ⇒ 再套一次就是**第二层卡面 + 第二套 12pt 内边距**（白卡会变成 112、横向 24）。
+        // 第十轮第 4 条要求「与书架卡逐值相同」，所以这里只补书架列表那套 `.listRowInsets`。
+        .downloadQueueRow()
     }
 }
 

@@ -185,20 +185,25 @@ extension ReaderView {
     /// 它也因此**不进** `if isChromeVisible`（常显，不受控制栏显隐影响，也没有显隐动画）。
     ///
     /// 外留边刻意与控制栏同一套 ⇒ 控制栏一呼出就正好盖住它：上边距由调用方传入**同一个**
-    /// `topBarPadding(safeAreaInsets:)` 的结果（在这里重算一份就成了第二套定位来源，日后必然
-    /// 漂移），下 = `Spacing.xs`（下栏面板底边），左右 = 安全区 + **「标签边距」设置项**
+    /// `topBarPadding(safeAreaInsets:inset:)` 的结果（在这里重算一份就成了第二套定位来源，日后必然
+    /// 漂移），下 = 调用方传入的 `bottomBarInset`（下栏面板底边距屏幕底的距离，
+    /// **同一个** `PaginationConfiguration.bottomBarInset`），左右 = 安全区 + **「标签边距」设置项**
     /// （`PaginationConfiguration.hudHorizontalInset`，设置页那个 0…64 的滑杆；
     /// 默认 16 = `Spacing.md`，与硬编码时代逐值相同）。
     ///
     /// ⚠️ 三个标签**共用**那一个左右值（一条 `.padding(.horizontal)` 同时管住左上 / 左下 / 右下）；
-    /// **垂直位置不受它影响** —— 上仍走 `topBarPadding`、下仍走 `Spacing.xs`。
+    /// **垂直位置不受它影响** —— 上仍走 `topBarPadding`、下仍走 `bottomBarInset`。
+    ///
+    /// ⚠️ 上下两条**必须**与对应面板的边距同源：HUD 与控制栏落在同样两个角上，
+    /// 面板被抬高 / 压低而 HUD 不动，控制栏一呼出就盖不住它（左下 / 右下标签会露出来）。
     ///
     /// 整层不参与正文布局、不占正文空间、不改任何 `padding` / `frame` / 分页参数。
     func readerCornerHUD(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         pageColor: UIColor,
         safeAreaInsets: EdgeInsets,
-        topPadding: CGFloat
+        topPadding: CGFloat,
+        bottomPadding: CGFloat
     ) -> some View {
         ReaderCornerHUD(
             topText: cornerHUDTopText(viewStore),
@@ -214,7 +219,7 @@ extension ReaderView {
         .padding(.trailing, safeAreaInsets.trailing)
         .padding(.horizontal, viewStore.config.hudHorizontalInset)
         .padding(.top, topPadding)
-        .padding(.bottom, DesignTokens.Spacing.xs)
+        .padding(.bottom, bottomPadding)
     }
 
     /// 左上角标签文字（owner 口径）：**章节第一页**显示书名，其余页显示章节名。

@@ -55,9 +55,9 @@ struct DownloadSelectionCard: View {
             deleteAction
             retryFailedAction
         }
-        // 与总进度卡片、书卡同高：内容区 `contentHeight`(80) + 内边距 12×2 + `.downloadQueueCard()` 的 8×2。
+        // 与总进度卡片、书卡同高：内容区 `contentHeight`(80) + `.downloadQueueCard()` 的
+        // 12pt 内边距 ×2（⚠️ 该修饰器**独家**提供这套内边距，这里不再叠一层，否则白卡 128）。
         .frame(minHeight: DownloadCardMetrics.contentHeight)
-        .padding(DesignTokens.Spacing.sm)
         .downloadQueueCard()
     }
 }

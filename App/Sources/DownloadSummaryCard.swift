@@ -13,8 +13,11 @@ import SwiftUI
 /// 现搬进右列、紧跟百分比下方。
 ///
 /// ## 尺寸与书卡对齐
-/// 内容区 `DownloadCardMetrics.contentHeight`(80) + 内边距 `Spacing.sm`(12) × 2，
-/// 再套 `.downloadQueueCard()`（与书卡同一个卡片装饰）⇒ 与书卡、选择卡片同高。
+/// 内容区 `DownloadCardMetrics.contentHeight`(80) + `.downloadQueueCard()` **自带**的内边距
+/// `Spacing.sm`(12) × 2 ⇒ 白卡 **104pt**，与书架 `BookRow`、下载页书卡、选择卡片同高。
+/// ⚠️ 那套 12pt 由 `.downloadQueueCard()` **独家**提供，这里（以及选择卡片）都**不再自己加**
+/// —— 再叠一层就是白卡 128（第十轮第 4 条：与书架卡逐值相同）。
+/// 注：书卡不走 `.downloadQueueCard()`（它自己画了卡面），只调 `.downloadQueueRow()`。
 ///
 /// ⚠️ 它**不再是 `List` 里的 `Section` 行**：卡片被搬出 `List`、与 `List` **并列常驻上栏**，
 /// 由 `DownloadQueueView.pinnedHeader` 渲染 —— 与选择模式的 `DownloadSelectionCard`
@@ -64,7 +67,10 @@ struct DownloadSummaryCard: View {
             .frame(width: progressColumnWidth)
         }
         .frame(minHeight: DownloadCardMetrics.contentHeight)
-        .padding(DesignTokens.Spacing.sm)
+        // ⚠️ 这里**不再自己加 12pt 内边距**：`.downloadQueueCard()` 已经带了一套
+        // `Spacing.sm`（见 `DownloadBookCard.swift` 里该修饰器的文档块）。
+        // 第十轮第 4 条要求「与书架卡逐值相同」，而书架卡只有**一层** 12pt
+        // ⇒ 自己再加一层会让白卡变成 128（104 + 24），与书卡对不齐。
         .downloadQueueCard()
     }
 }

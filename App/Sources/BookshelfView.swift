@@ -247,13 +247,12 @@ private extension BookshelfView {
         // 长出「全选 / 整本下载 / 移入分组 / 删除」——本地分组装的是下载任务、不是书目，
         // 这些批量操作在语义上根本不成立，而且「全选」的判据 `visibleRows` 在本地态也拿不到书。
         // 因此渲染条件补上 `!showsLocalGroup`：与 reducer 里「本地与书组互斥」的不变量同向。
+        //
+        // ⚠️ 这个判据现在**只**管右边那个批量操作菜单：原先与它成对的「完成」按钮
+        // （`ToolbarItem(placement: .topBarLeading)`）已按 owner 第十轮第 3 条**搬到分组栏最右边**
+        // （`BookshelfView+GroupBar.swift` 的 `selectionDoneChip`，判据 `isEditing && !showsLocalGroup`
+        // 与这里同源）。⇒ 导航栏左上角**不再**有「完成」，别再往这里加回去。
         if viewStore.isEditing, !viewStore.showsLocalGroup {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("完成") {
-                    viewStore.send(.editModeChanged(false))
-                }
-            }
-
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     selectAllMenuItem(viewStore)

@@ -210,6 +210,29 @@ public struct PaginationConfiguration: Equatable, Sendable {
     /// **只影响渲染**：不进 `affectsPagination` ⇒ 拖这个滑杆不重排正文、不动阅读位置。
     public var hudHorizontalInset: CGFloat
 
+    /// 上栏面板**上边缘距屏幕顶**的距离（pt）。
+    ///
+    /// **绝对值语义**：`0` = 贴屏幕最边缘（**不避让灵动岛**，owner 口径）。
+    ///
+    /// `nil` = **自动**：由 App 层按安全区解析成 `max(Spacing.xs, 安全区top − 34)`
+    /// —— 那正是各机型的「当前自动值」（灵动岛机型约 25pt、无刘海机型 8pt）。
+    /// ⚠️ 所以**默认 `nil` 就等于改造前的行为**，不需要迁移 key。
+    /// ⚠️ 为什么「自动」必须留在 App 层：NovelCore 拿不到安全区（那是 UIKit / SwiftUI 的事）。
+    ///
+    /// **只影响渲染**：不进 `affectsPagination` ⇒ 拖这个滑杆不重排正文、不动阅读位置
+    /// （控制栏是叠加层，不占正文布局）。
+    public var topBarInset: CGFloat?
+
+    /// 下栏面板**下边缘距屏幕底**的距离（pt）。
+    ///
+    /// **绝对值语义**：`0` = 贴屏幕最边缘。
+    ///
+    /// 默认 `8` = App 层尺度令牌 `DesignTokens.Spacing.xs`（NovelCore 不能 import SwiftUI /
+    /// `DesignTokens`，故此处写同值）—— 那个值就是改造前的固定值 ⇒ **默认行为零变化**。
+    ///
+    /// **只影响渲染**：不进 `affectsPagination`（理由同上）。
+    public var bottomBarInset: CGFloat
+
     // MARK: - init
 
     /// 全字段初始化（结构体一次定型）。
@@ -236,7 +259,9 @@ public struct PaginationConfiguration: Equatable, Sendable {
         pageTurnMode: PageTurnMode = .slide,
         pageTurnAnimation: PageTurnAnimation = .none,
         appearanceMode: ReadingAppearanceMode = .system,
-        hudHorizontalInset: CGFloat = 16
+        hudHorizontalInset: CGFloat = 16,
+        topBarInset: CGFloat? = nil,
+        bottomBarInset: CGFloat = 8
     ) {
         self.containerSize = containerSize
         self.fontSize = fontSize
@@ -258,6 +283,8 @@ public struct PaginationConfiguration: Equatable, Sendable {
         self.pageTurnAnimation = pageTurnAnimation
         self.appearanceMode = appearanceMode
         self.hudHorizontalInset = hudHorizontalInset
+        self.topBarInset = topBarInset
+        self.bottomBarInset = bottomBarInset
     }
 
     /// 判断这次配置变化是否需要重新分页。

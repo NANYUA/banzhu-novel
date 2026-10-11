@@ -38,6 +38,15 @@ struct ReaderView: View {
     /// 「下载」按钮弹出的**章节选择面板**开关（口径：下载不再直接入队当前章，统一走面板）。
     @State private var isShowingDownloadPicker = false
     @State private var isChromeVisible = false
+    /// 上栏「自动」上边距在本机的**当前值**（= `autoTopBarPadding` 按本机安全区算出的结果）。
+    ///
+    /// 为什么要在 `ReaderView` 里存一份：设置页是 `.sheet`，挂在 `body` 最外层、**在
+    /// `GeometryReader` 之外**（见 `body` 里 `.sheet(isPresented: $isShowingSettings)`），
+    /// 那里拿不到 `geometry.safeAreaInsets`；而「上标签上边距」滑杆在**自动**状态
+    /// （`config.topBarInset == nil`）下必须显示本机实际值，否则滑杆停在 `0`
+    /// 而面板其实在 25pt 处 —— 用户一碰就跳。⇒ 由 `GeometryReader` 内的
+    /// `.onChange(of:initial:)` 回写。初值取下限 `Spacing.xs`（无刘海机型的自动值），首次渲染即被纠正。
+    @State private var autoTopBarInset: CGFloat = DesignTokens.Spacing.xs
     // 下面四个是滑动 / 平移的跟手状态。**刻意不加 `private`**：Swift 的 `private` 是本文件级的，
     // 而手势已搬到 `ReaderView+PageGesture.swift`，加 `private` 那边就取不到
     // （与 `ReaderView+PageTurn.swift` 放开 `reduceMotion` 同一处理）。
@@ -133,19 +142,31 @@ struct ReaderView: View {
                         viewStore,
                         pageColor: pageColor,
                         safeAreaInsets: geometry.safeAreaInsets,
-                        topPadding: topBarPadding(safeAreaInsets: geometry.safeAreaInsets)
+                        topPadding: topBarPadding(
+                            safeAreaInsets: geometry.safeAreaInsets,
+                            inset: viewStore.config.topBarInset
+                        ),
+                        // 与下栏面板底边同源：下栏被抬高时 HUD 必须跟着走，
+                        // 否则控制栏呼出时盖不住它（这是「HUD 与控制栏同一套外留边」的一半）。
+                        bottomPadding: viewStore.config.bottomBarInset
                     )
 
                     // 控制栏层：与正文层**并列**的叠加层，自己不占正文的布局空间 ⇒
                     // 呼出 / 隐藏不改变正文的分页与阅读位置（设计稿的关键点）。
                     // **只吃横向安全区**（U9-7）：竖向不再被安全区钉住 —— 上栏的上边缘由
-                    // `topBarPadding(safeAreaInsets:)` 决定、跳章条与下栏各吃 `Spacing.xs`
+                    // `topBarPadding(safeAreaInsets:inset:)` 决定（自动 = 安全区推导，用户可覆盖为
+                    // 绝对距离）、下栏的下边缘吃 `bottomBarInset`、跳章条与下栏之间固定 8pt
                     // ⇒ 三条圆角面板能比正文更贴屏幕上下边（见 `ReaderChromeOverlay`）。
                     if isChromeVisible {
                         ReaderChromeOverlay(
                             style: ReaderChromeStyle.make(page: pageColor),
                             chapterTitle: viewStore.chapterName,
-                            topPadding: topBarPadding(safeAreaInsets: geometry.safeAreaInsets),
+                            topPadding: topBarPadding(
+                                safeAreaInsets: geometry.safeAreaInsets,
+                                inset: viewStore.config.topBarInset
+                            ),
+                            // 下栏面板**下边缘**距屏幕底的距离（0 = 贴屏幕最下边）。
+                            bottomBarInset: viewStore.config.bottomBarInset,
                             previousChapter: viewStore.previousChapter,
                             nextChapter: viewStore.nextChapter,
                             onBack: { dismiss() },
@@ -203,6 +224,16 @@ struct ReaderView: View {
                 .onChange(of: contentSize) { _, newSize in
                     viewStore.send(.containerSizeChanged(newSize))
                 }
+                // 回写「自动上边距」的当前值给设置页（`initial: true` ⇒ 首次渲染也算一次，
+                // 不必再挂 `.onAppear`）。只写 `@State`，**不**改设置、不触发分页。
+                // ⚠️ 监听的是**已解析出的 `CGFloat`**而不是 `geometry.safeAreaInsets`：
+                // 前者确定是 `Equatable`，且「安全区变了但自动值没变」时不会多跑一次。
+                .onChange(
+                    of: autoTopBarPadding(safeAreaInsets: geometry.safeAreaInsets),
+                    initial: true
+                ) { _, newValue in
+                    autoTopBarInset = newValue
+                }
             }
             .navigationTitle("")
             .navigationBarBackButtonHidden(true)
@@ -226,6 +257,8 @@ struct ReaderView: View {
                 ReaderSettingsView(
                     configuration: viewStore.config,
                     precacheCount: viewStore.precacheCount,
+                    // 「上标签上边距」滑杆在自动状态下的显示值（本机实际值，见 `autoTopBarInset`）。
+                    autoTopBarInset: autoTopBarInset,
                     onPrecacheCountChange: { newCount in
                         viewStore.send(.precacheCountChanged(newCount))
                     },
@@ -309,25 +342,6 @@ private extension ReaderView {
             width: max(0, size.width - safeAreaInsets.leading - safeAreaInsets.trailing),
             height: max(0, size.height - paddings.top - paddings.bottom)
         )
-    }
-
-    /// 上栏最多可上移的量：理论极限 ≈ 38pt（栏顶 21pt）只剩 0.7pt 余量，太紧 —— 字体度量是
-    /// 查表估的，估错 1pt 标题就会被灵动岛咬 ⇒ 收紧到 34pt。推导见 `topBarPadding(safeAreaInsets:)`。
-    private static let topBarMaxUpwardShift: CGFloat = 34
-
-    /// 上栏的上移量（U9-7）：`T = max(Spacing.xs, safeAreaInsets.top − 34)`。
-    ///
-    /// 上栏的**标题是居中**的，与灵动岛同一列 ⇒ 标题字形必须落在灵动岛下沿（约 48pt）以下。
-    /// 栏内结构是「`Spacing.sm`(12) 内边距 + 44pt 内容行 + 12 内边距」，标题在 44pt 行内垂直
-    /// 居中，其字形顶距栏顶约 27pt ⇒ 栏顶 ≥ 48 − 27 ≈ 21pt 即可（理论上限 59 − 21 ≈ 38pt，
-    /// 但那样只剩 0.7pt 余量）。取 34pt ⇒ 栏顶 59 − 34 = **25pt**，标题字形顶 ≈ 25 + 27 = 52pt，
-    /// 距下沿约 **5.7pt**。栏顶仍进到灵动岛覆盖区（25pt < 48pt）—— 那是预期的：被覆盖的
-    /// 那部分是面板的**空内边距**。下限 `Spacing.xs`(8) 保证无灵动岛 / 无刘海机型上面板也不贴死屏幕边。
-    ///
-    /// ⚠️ 它只作用在**上栏面板**上（控制栏这一层不吃竖向安全区，见 `ReaderView.body`）；
-    /// 跳章条与下栏的下边缘由 `ReaderChromeOverlay` 的 `.padding(.bottom, Spacing.xs)` 决定。
-    private func topBarPadding(safeAreaInsets: EdgeInsets) -> CGFloat {
-        max(DesignTokens.Spacing.xs, safeAreaInsets.top - Self.topBarMaxUpwardShift)
     }
 
     @ViewBuilder

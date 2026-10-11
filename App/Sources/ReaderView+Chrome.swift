@@ -20,11 +20,13 @@ import UIKit
 // 上栏 / 下栏 / 跳章条都是**浮在正文之上的圆角面板**：左右各留 `Spacing.md`(16) 边距、
 // 不贴屏幕上下边，形状是 `RoundedRectangle(cornerRadius: Radius.lg)`。
 // 竖向位置由 `ReaderChromeOverlay` 的三段 `padding` 决定（上栏吃
-// `ReaderView.topBarPadding(safeAreaInsets:)`，下栏与跳章条各吃 `Spacing.xs`），
-// 控制栏这一层**只吃横向安全区** —— 与「上一版」逐值一致（U9-7：两栏要能贴到屏幕上下边）。
+// `ReaderView.topBarPadding(safeAreaInsets:inset:)` —— 自动值由安全区推导、用户可在设置页
+// 覆盖为「距屏幕顶的绝对距离」；下栏吃 `bottomBarInset`；跳章条与下栏之间固定 `Spacing.xs`），
+// 控制栏这一层**只吃横向安全区** —— U9-7：三条面板要能贴到屏幕上下边。
 //
 // ## 玻璃语言（借参考实现的配色，不借它的布局）
-// 玻璃 = 系统 `Material` + 系统语义底色（用 `mask` 做渐变羽化，贴近正文一侧略减淡）
+// 玻璃 = 系统 `Material` + 系统语义底色（**无渐变羽化** ⇒ 三条面板逐像素同色，
+// 为什么去掉见 `ReaderChromeGlass`）
 // + 0.5pt 细边缘线（朝正文那一侧，随面板圆角裁切）+ 只向正文方向偏移的柔影。
 //
 // ## 条目**以项目既有能力为准**（owner：参考代码只是视觉参考）
@@ -45,7 +47,7 @@ enum ReaderChromeEdge {
     case top
     case bottom
 
-    /// 贴近正文的一侧（上栏朝下、下栏与跳章条朝上）—— 边缘线、羽化渐变、投影都朝这一侧。
+    /// 贴近正文的一侧（上栏朝下、下栏与跳章条朝上）—— 边缘线与投影都朝这一侧。
     var contentAnchor: Alignment {
         self == .top ? .bottom : .top
     }
@@ -124,10 +126,6 @@ enum ReaderChromeMetrics {
     /// 0.22 —— 控制栏呼出 / 隐藏的动画时长（设计稿给的缓动时长）。
     /// 转场是「淡入 + 8pt 位移」，用缓出比弹簧更贴合（位移是单向的，没有可回弹的惯性）。
     static let toggleDuration: Double = 0.22
-
-    /// 羽化遮罩的两个停点：从面板内满染，到贴近正文一侧淡到 0.78 —— 软化「玻璃 / 正文」的硬切。
-    static let featherFullLocation: CGFloat = 0.72
-    static let featherEndOpacity = 0.78
 
     /// 栏内图标字体：`.body`（默认内容尺寸下 17pt）随 Dynamic Type 缩放。
     ///
@@ -213,11 +211,23 @@ func chromeIconLabel(
 
 // MARK: - 玻璃背景
 
-/// 圆角面板的玻璃背景：系统材质 + 主题染色（带羽化）+ 0.5pt 细边缘线 + 只朝正文方向的柔影。
+/// 圆角面板的玻璃背景：系统材质 + 主题染色 + 0.5pt 细边缘线 + 只朝正文方向的柔影。
 ///
 /// 形状与「上一版」的圆角面板同源（`RoundedRectangle(cornerRadius: Radius.lg)`）；
 /// 玻璃语言（材质 / 染色 / 边缘 / 投影）来自 `ReaderChromeStyle` 的派生 ——
 /// 三条面板共用这一个视图 ⇒ 材质 / 染色 / 边缘 / 投影 / 圆角在结构上无法分叉。
+///
+/// ## 为什么**没有**渐变羽化（2026-10-11 移除）
+/// 原实现给染色层叠了一个「面板内满染 → 贴近正文一侧淡到 0.78」的 `LinearGradient` 遮罩
+/// （`featherMask`）：它让**同一块面板内部**染色不匀，而三条面板各自的高度、相邻关系与
+/// 背后的正文内容都不同 ⇒ 视觉上无法保证三条「同色」。
+/// owner 真机口径就是「跳章条面板的颜色和上下栏不一致」。
+/// ⇒ 去掉遮罩：三条面板都是**同一层 `Material` + 同一个 0.92 染色**，在任何正文底色上
+/// 都逐像素同色。面板的边界感仍由 0.5pt 边缘线 + 柔影承担（这两样没动）。
+///
+/// ⚠️ 与它配套的还有 `ReaderChromeOverlay` 里跳章条的 `.zIndex(1)`：下栏的柔影
+/// （radius 12 + 朝上偏 5pt ≈ 向上扩 17pt）原本会压暗跳章条的下半截 ——
+/// 那是「颜色不一致」的另一半原因（跳章条与下栏只隔 8pt）。
 ///
 /// ⚠️ 不是 `private`：跳章条已拆到 `ReaderView+ChromeJumpBar.swift`，而 `private` 是
 /// **文件级**的 —— 那边的面板背景仍必须走这一处（玻璃语言不能出现第二份实现）。
@@ -234,7 +244,6 @@ struct ReaderChromeGlass: View {
         ZStack {
             shape.fill(style.material)
             shape.fill(style.tint)
-                .mask(featherMask)
         }
         .overlay(alignment: edge.contentAnchor) {
             Rectangle()
@@ -249,20 +258,6 @@ struct ReaderChromeGlass: View {
         .compositingGroup()
         .shadow(color: style.shadowColor, radius: style.shadowRadius, x: 0, y: edge.shadowOffsetY)
     }
-
-    /// 内侧羽化遮罩：从面板内满染淡到贴近正文处 0.78。
-    /// （遮罩只看 alpha，`.white` 在这里只是「全不透明」的写法，不参与配色。）
-    private var featherMask: LinearGradient {
-        LinearGradient(
-            stops: [
-                .init(color: .white, location: 0),
-                .init(color: .white, location: ReaderChromeMetrics.featherFullLocation),
-                .init(color: .white.opacity(ReaderChromeMetrics.featherEndOpacity), location: 1),
-            ],
-            startPoint: edge == .top ? .top : .bottom,
-            endPoint: edge == .top ? .bottom : .top
-        )
-    }
 }
 
 // MARK: - 上栏
@@ -274,14 +269,17 @@ struct ReaderChromeGlass: View {
 /// 两侧按钮的命中区同为 44pt、两个 `Spacer` 等宽 ⇒ 标题**天然居中**，不需要手工预留宽度。
 ///
 /// 「更多」是项目既有的入口（U9-6 把原来的 `eye.slash` 换成了 `ellipsis.circle`）。
-/// 菜单里现在是**真入口**「书籍详情」（owner 需求：详情页入口收进阅读页右上角「更多」）。
-/// `onShowDetail` 为 `nil` 时（测试 / 预览那条没有 `bookPath` 的构造路径）保留原来的置灰占位项
-/// —— 空 `Menu` 点开是一片空白，用户会以为控件坏了（§11 反馈：别给一个点了没反应的入口）。
+/// ⚠️ 2026-10-11：它**不再自己弹菜单** —— 系统 `Menu` 的弹层位置与材质都不可控，
+/// 真机反馈「弹出的选项和上栏重叠且背景颜色不同」。现在它只是一个**开关按钮**：
+/// 点一下把「展开 / 收起」上报给控制栏叠加层，内容由那边的自绘面板承担
+/// （`ReaderView+MoreMenu.swift`，与上下栏同一套玻璃 ⇒ 颜色逐像素一致、位置在上栏下方）。
+/// ⇒ 本结构体**不持有任何菜单状态**，只负责「长什么样」与「点了通知谁」。
 private struct ReaderTopBar: View {
     let title: String
     let style: ReaderChromeStyle
-    /// 「书籍详情」的落点；`nil` = 不提供这一项（见类型文档）。
-    var onShowDetail: (() -> Void)?
+    /// 「更多」面板是否已展开（只影响无障碍语义，见 `moreButton`）。
+    let isMoreMenuOpen: Bool
+    var onToggleMore: () -> Void
     var onBack: () -> Void
 
     var body: some View {
@@ -302,7 +300,7 @@ private struct ReaderTopBar: View {
 
             Spacer(minLength: 0)
 
-            moreMenu
+            moreButton
         }
         .buttonStyle(ReaderChromeMetrics.buttonStyle)
         .foregroundStyle(style.foreground)
@@ -315,7 +313,7 @@ private struct ReaderTopBar: View {
     }
 
     /// 图标按钮：视觉图标可小于 44pt，命中区按 HIG 补足。
-    /// label 与 `moreMenu`（以及下栏上方的跳章按钮）**共用** `chromeIconLabel` —— 字体、
+    /// label 与 `moreButton`（以及下栏上方的跳章按钮）**共用** `chromeIconLabel` —— 字体、
     /// 光学补偿、44pt 命中区、`contentShape`、无障碍标签的施加方式只有那一处，两侧不会漂移。
     private func iconButton(
         _ label: String,
@@ -328,34 +326,20 @@ private struct ReaderTopBar: View {
         }
     }
 
-    /// 右上角「更多」菜单。命中区与按下反馈与左侧返回按钮**逐值一致**：
+    /// 右上角「更多」**开关按钮**。命中区与按下反馈与左侧返回按钮**逐值一致**：
     /// 同一个 `chromeIconLabel`（⇒ 同一个 44pt 命中区 / `contentShape` / 字体 / 无障碍施加方式）、
-    /// 同一个 `PressableCardButtonStyle`。
+    /// 同一个 `PressableCardButtonStyle`（由外层 `HStack` 注入环境）。
     ///
-    /// 菜单项：「书籍详情」—— 真入口，点开是**覆盖在阅读页之上**的 sheet（不是 push，
-    /// 理由见 `ReaderView.detailSheet`）；`onShowDetail` 为 `nil` 时保留原来的置灰占位项。
-    private var moreMenu: some View {
-        Menu {
-            if let onShowDetail {
-                Button(action: onShowDetail) {
-                    Label("书籍详情", systemImage: "info.circle")
-                }
-            } else {
-                Button("更多选项待添加") {}
-                    .disabled(true)
-            }
-        } label: {
+    /// ⚠️ 改造前这里挂的是系统 `Menu`，注释里留过一条「`Menu` 是否吃环境里的 `ButtonStyle`
+    /// 未验证」—— 换成普通 `Button` 后这条不确定性消失（`Button` **一定**走环境的 `ButtonStyle`）。
+    ///
+    /// 无障碍：展开时补 `.isSelected` trait（VoiceOver 读作「已选中」）—— 与 `GroupChip`、
+    /// 书架编辑态行**同一套**表述，不新增第二种「已展开」的说法。
+    private var moreButton: some View {
+        Button(action: onToggleMore) {
             chromeIconLabel("ellipsis.circle", a11yLabel: "更多")
         }
-        // 显式再挂一次按下反馈。外层 `HStack` 已经把**同一个** `buttonStyle` 注入环境，
-        // 所以「`Menu` 读环境里的 `ButtonStyle`」时这一句是等价重复（无副作用）；
-        // 而万一 `Menu` 的 label 走自己的 `MenuStyle` 样式链、不读环境里的 `ButtonStyle`，
-        // 这里就是唯一可能生效的挂点 —— 故显式写上，不依赖外层那一次。
-        //
-        // ⚠️ **未验证**：本机没有 Xcode / 模拟器，无法确认 `Menu` 是否吃 `ButtonStyle`。
-        // 若真机上「更多」按下仍无强调层，下一步是给 `Menu` 的 label 自绘按下态，
-        // **不换控件**（`Menu` 承载既有「更多」入口）。
-        .buttonStyle(ReaderChromeMetrics.buttonStyle)
+        .accessibilityAddTraits(isMoreMenuOpen ? .isSelected : [])
     }
 }
 
@@ -427,16 +411,22 @@ private struct ReaderBottomBar: View {
 ///
 /// ## 竖向位置：不吃安全区（U9-7）
 /// 这一层**只吃横向安全区**（由 `ReaderView.body` 施加），竖向完全由三段 `padding` 决定：
-/// - 上栏 `.padding(.top, topPadding)` —— `topPadding` 是
-///   `ReaderView.topBarPadding(safeAreaInsets:)` 算好的「上栏上边缘距屏幕顶」，
-///   比安全区**更贴屏幕顶**（标题字形仍落在灵动岛下沿以下）；
-/// - 跳章条与下栏各 `.padding(.bottom, Spacing.xs)` —— 下栏下边缘距屏幕底 8pt，
-///   栏自身 12pt 内边距正好把 Home Indicator 那根细条让在空处。
+/// - 上栏 `.padding(.top, topPadding)` —— `topPadding` 由
+///   `ReaderView.topBarPadding(safeAreaInsets:inset:)` 算好传入：**自动**时是安全区推导值
+///   （比安全区**更贴屏幕顶**，标题字形仍落在灵动岛下沿以下），用户可在设置页覆盖为
+///   「上栏上边缘距屏幕顶的**绝对距离**」（`0` = 贴屏幕最上边，不避让灵动岛）；
+/// - 下栏 `.padding(.bottom, bottomBarInset)` —— 下栏下边缘距屏幕底的距离，同一条 owner 口径
+///   （`0` = 贴屏幕最下边，不避让 Home Indicator；默认 8 = `Spacing.xs`，与改前逐值相同）；
+/// - 跳章条 `.padding(.bottom, Spacing.xs)` —— 这是**跳章条与下栏之间的固定 8pt 间隙**，
+///   **不**跟 `bottomBarInset` 走：下栏整体下移时跳章条跟着一起走，两条面板的间距不变。
 struct ReaderChromeOverlay: View {
     let style: ReaderChromeStyle
     let chapterTitle: String
-    /// 上栏的上边缘距屏幕顶的距离（由 `ReaderView.topBarPadding(safeAreaInsets:)` 算好传入）。
+    /// 上栏的上边缘距屏幕顶的距离（由 `ReaderView.topBarPadding(safeAreaInsets:inset:)` 算好传入）。
     let topPadding: CGFloat
+    /// 下栏面板的下边缘距屏幕底的距离（= `PaginationConfiguration.bottomBarInset`，
+    /// 设置页「下标签下边距」滑杆，`0…90`）。
+    let bottomBarInset: CGFloat
     /// 相邻章节（`ReaderFeature.State` 的派生属性）：`nil` = 到边界，跳章条据此置灰。
     let previousChapter: ChapterItem?
     let nextChapter: ChapterItem?
@@ -446,7 +436,9 @@ struct ReaderChromeOverlay: View {
     var onDownload: () -> Void
     var onSearch: () -> Void
     var onSettings: () -> Void
-    /// 「更多 → 书籍详情」；`nil` = 菜单里不出现这一项（原样透传给 `ReaderTopBar`）。
+    /// 「更多 → 书籍详情」；`nil` = 面板里不出现这一项。
+    /// ⚠️ 现在**不再透传给 `ReaderTopBar`**（上栏只剩一个开关按钮）：菜单项数组在本层构造，
+    /// 见 `ReaderMoreMenuItem.readerMoreMenu(onShowDetail:)`。
     var onShowDetail: (() -> Void)?
     /// 跳章：上一章 / 下一章**共用**一个闭包（两侧都走既有的 `loadChapterWithName` 正常加载路径）。
     var onJumpToChapter: (ChapterItem) -> Void
@@ -458,21 +450,53 @@ struct ReaderChromeOverlay: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// 「更多」下拉面板的显隐。⚠️ **刻意不是 `private`**：面板本体、捕获层与两个写入口都在
+    /// `ReaderView+MoreMenu.swift` 的 `extension ReaderChromeOverlay` 里，而跨文件的 extension
+    /// **读不到 file-private 状态**（先例：`BookshelfView` 那三个分组弹窗 `@State`，
+    /// 见 `BookshelfView+GroupBar.swift` 文件头）。状态住这一层而不是 `ReaderView`：
+    /// 控制栏隐藏时整层被移除 ⇒ 状态自动归零、不会残留。
+    @State var isShowingMoreMenu = false
+
     var body: some View {
         VStack(spacing: 0) {
+            // ## 面板打开时三条栏**让出命中**（owner 口径：完全模态）
+            // 下面三条栏各挂一行 `.allowsHitTesting(!isShowingMoreMenu)`：捕获层是本 `VStack` 的
+            // `.background`（在栏**之下**）⇒ 栏若还吃点击，点「目录」就直接弹 sheet；而面板声明在
+            // 上栏**之后**（画在栏**之上**、且不加这一行）⇒ 面板自己始终可点。
+            // 副作用正是所要的：面板打开时再点「更多」也落到捕获层 ⇒ 收面板，与「再点一次切换关闭」
+            // 结果一致。⛔ 不用 `.disabled`（会变灰 = 观感变化，这里只要「不吃点击」）；
+            // ⛔ 不加 `.accessibilityHidden`（VoiceOver 用户会回不到上下栏、可能被困在面板里）。
+            // 完整因果见 `ReaderView+MoreMenu.swift` 的 `ReaderMoreMenuDismissLayer` 文档。
             ReaderTopBar(
                 title: chapterTitle,
                 style: style,
-                onShowDetail: onShowDetail,
+                isMoreMenuOpen: isShowingMoreMenu,
+                onToggleMore: { setMoreMenu(!isShowingMoreMenu) },
                 onBack: onBack
             )
             .padding(.top, topPadding)
             .transition(.chromeBar(edge: .top, reduceMotion: reduceMotion))
+            .allowsHitTesting(!isShowingMoreMenu)
+
+            // 「更多」下拉面板：夹在上栏与 `Spacer` 之间（由布局保证「永远贴在上栏下方 8pt、
+            // 绝不与上栏重叠」）。面板本体 + 内边距 + 右对齐 + 转场都在
+            // `ReaderView+MoreMenu.swift` 的 `moreMenuLayer` 里 —— 面板的线跟面板走。
+            moreMenuLayer(
+                isShowing: isShowingMoreMenu,
+                reduceMotion: reduceMotion,
+                onSelect: selectMoreMenuItem
+            )
 
             Spacer(minLength: 0)
 
-            // 章节跳转条：贴在下栏上方 8pt（`DesignTokens.Spacing.xs`）。
+            // 章节跳转条：贴在下栏上方 8pt（`DesignTokens.Spacing.xs`）—— 这个 8pt 是
+            // **两条面板之间的间隙**，不是「距屏幕底的距离」，所以不跟 `bottomBarInset` 走。
             // 转场与下栏同向（自下 8pt 滑入）：它与下栏是一起从屏幕底部进来的。
+            //
+            // ⚠️ `.zIndex(1)`：跳章条与下栏只隔 8pt，而下栏的柔影朝上扩约 17pt
+            // （radius 12 + 偏移 5）⇒ 不抬高绘制顺序，下栏的影会压暗跳章条的下半截，
+            // 看上去就是「跳章条的颜色和上下栏不一致」（owner 真机口径）。
+            // `VStack` 同样认 `zIndex`（不是只有 `ZStack` 认），抬高后影落在跳章条之下。
             ReaderChapterJumpBar(
                 style: style,
                 previousChapter: previousChapter,
@@ -481,7 +505,9 @@ struct ReaderChromeOverlay: View {
                 pageJump: pageJump
             )
             .padding(.bottom, DesignTokens.Spacing.xs)
+            .zIndex(1)
             .transition(.chromeBar(edge: .bottom, reduceMotion: reduceMotion))
+            .allowsHitTesting(!isShowingMoreMenu)
 
             ReaderBottomBar(
                 style: style,
@@ -490,21 +516,31 @@ struct ReaderChromeOverlay: View {
                 onSearch: onSearch,
                 onSettings: onSettings
             )
-            .padding(.bottom, DesignTokens.Spacing.xs)
+            .padding(.bottom, bottomBarInset)
             .transition(.chromeBar(edge: .bottom, reduceMotion: reduceMotion))
+            .allowsHitTesting(!isShowingMoreMenu)
         }
         // 三条面板各自带方向相反的转场；容器自己不再叠一层淡入，否则淡入会叠成两层。
         .transition(.identity)
+        // 点面板外关闭的**全屏透明捕获层**：挂在 `.background` = 位于 `VStack`（控制栏本体）
+        // **之下**，而整层又在**正文层之上** ⇒ 点空白处只收面板，不会顺手触发正文那条
+        // 「中央点击呼出 / 隐藏控制栏」。⚠️ 面板打开时三条栏会**让出命中**（见本 `VStack` 顶部
+        // 那段），点击因此落到这一层 ⇒ 视觉与触控都是完全模态的。
+        // 层级因果与实现见 `ReaderView+MoreMenu.swift` 的 `moreMenuDismissLayer`。
+        .background { moreMenuDismissLayer }
     }
 }
 
 // MARK: - 转场
 
-private extension AnyTransition {
+extension AnyTransition {
     /// 控制栏呼出 / 隐藏的转场：淡入 + 轻微位移（上栏自上 8pt、下栏与跳章条自下 8pt）。
     ///
     /// Reduce Motion 时**只做淡入**：位移是前庭刺激，降级 ≠ 无反馈 —— 淡入仍在，
     /// 按下强调层（`PressableCardButtonStyle`）也不受 Reduce Motion 影响。
+    ///
+    /// ⚠️ 不是 `private`：右上角「更多」的下拉面板（`ReaderView+MoreMenu.swift` 那侧调用）
+    /// 也吃这一条 —— 它自上 8pt 滑入，与上栏**同向**，转场语言因此只有一处来源。
     static func chromeBar(edge: ReaderChromeEdge, reduceMotion: Bool) -> AnyTransition {
         reduceMotion
             ? .opacity

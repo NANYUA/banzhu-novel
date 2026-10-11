@@ -54,6 +54,8 @@ final class ReadingSettingsStoreTests: XCTestCase {
             isFirstLineIndentOn: false,
             inset: inset,
             hudHorizontalInset: 40,
+            topBarInset: 40,
+            bottomBarInset: 0,
             backgroundStyle: .custom,
             customBackgroundColor: ReadingColor(red: 0.1, green: 0.2, blue: 0.3),
             customBackgroundColorDark: ReadingColor(red: 0.4, green: 0.5, blue: 0.6),
@@ -161,51 +163,66 @@ final class ReadingSettingsStoreTests: XCTestCase {
     func test缺少新增字段的旧数据仍可解码() throws {
         let data = try JSONEncoder().encode(makeStoredSettings())
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        // 老版本的 JSON 里没有这两个 key（下标赋 nil = 删掉这个 key）。
+        // 老版本的 JSON 里没有这几个 key（下标赋 nil = 删掉这个 key）。
         object["isFirstLineIndentOn"] = nil
         object["hudHorizontalInset"] = nil
+        object["topBarInset"] = nil
+        object["bottomBarInset"] = nil
         let legacy = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(ReadingSettings.self, from: legacy)
 
         XCTAssertNil(decoded.isFirstLineIndentOn)
         XCTAssertNil(decoded.hudHorizontalInset)
+        XCTAssertNil(decoded.topBarInset)
+        XCTAssertNil(decoded.bottomBarInset)
         // 老数据的其它字段逐值保留（解码本身不得动它们）。
         XCTAssertEqual(decoded.fontSize, 21)
         XCTAssertEqual(decoded.inset, PageInset(top: 12, leading: 8, bottom: 0, trailing: 40))
         XCTAssertEqual(decoded.backgroundStyle, .custom)
     }
 
-    /// ⑥ 老数据（两个新字段都是 `nil`）经 `mergedConfiguration` 兜底：
-    /// 首行缩进**打开**（owner 口径「默认打开」）、标签边距 `16`（= `Spacing.md`）。
+    /// ⑥ 老数据（四个新字段都是 `nil`）经 `mergedConfiguration` 兜底：
+    /// 首行缩进**打开**（owner 口径「默认打开」）、标签边距 `16`（= `Spacing.md`）、
+    /// 上栏边距**保持 `nil`**（= 自动，由 App 层按安全区解析）、下栏边距 `8`（= `Spacing.xs`）。
     func test老数据的新字段按新默认兜底() {
         var legacy = ReadingSettings()
         legacy.isFirstLineIndentOn = nil
         legacy.hudHorizontalInset = nil
+        legacy.topBarInset = nil
+        legacy.bottomBarInset = nil
 
         let merged = legacy.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
 
         XCTAssertTrue(merged.isFirstLineIndentOn)
         XCTAssertEqual(merged.firstLineHeadIndent, legacy.fontSize * 2)
         XCTAssertEqual(merged.hudHorizontalInset, 16)
+        // ⚠️ `nil` 不等于「0」：它是「自动」，所以这里**必须**仍是 nil。
+        XCTAssertNil(merged.topBarInset)
+        XCTAssertEqual(merged.bottomBarInset, 8)
     }
 
-    /// ⑦ 用户主动关掉缩进 / 改过标签边距之后，合并结果必须是**存下来的值**
+    /// ⑦ 用户主动关掉缩进 / 改过标签边距 / 拖过上下栏边距之后，合并结果必须是**存下来的值**
     /// （不能被默认兜底盖掉 —— 那会让「设置改不动」）。
     func test已存的新字段优先于默认兜底() {
         var stored = ReadingSettings()
         stored.isFirstLineIndentOn = false
         stored.hudHorizontalInset = 48
+        stored.topBarInset = 40
+        stored.bottomBarInset = 0
 
         let merged = stored.mergedConfiguration(containerSize: CGSize(width: 320, height: 480))
 
         XCTAssertFalse(merged.isFirstLineIndentOn)
         XCTAssertEqual(merged.firstLineHeadIndent, 0)
         XCTAssertEqual(merged.hudHorizontalInset, 48)
+        XCTAssertEqual(merged.topBarInset, 40)
+        // `0` 是**有效值**（贴屏幕最边缘），不能被 `?? 8` 兜底吃掉。
+        XCTAssertEqual(merged.bottomBarInset, 0)
     }
 
     /// ⑧ 两处默认值同源（写法沿用 `PaginatorTests` ⑰）：`ReadingSettings()` 与
-    /// `PaginationConfiguration` 的标签边距 / 缩进开关必须一致 ——
+    /// `PaginationConfiguration` 的标签边距 / 缩进开关 / 上下栏边距必须一致 ——
     /// 漂了就会出现「从没动过设置，但阅读页与设置页读数不同」。
     func test新字段的两处默认值同源() {
         let settings = ReadingSettings()
@@ -213,8 +230,13 @@ final class ReadingSettingsStoreTests: XCTestCase {
 
         XCTAssertEqual(settings.hudHorizontalInset, configuration.hudHorizontalInset)
         XCTAssertEqual(settings.isFirstLineIndentOn, configuration.isFirstLineIndentOn)
+        XCTAssertEqual(settings.topBarInset, configuration.topBarInset)
+        XCTAssertEqual(settings.bottomBarInset, configuration.bottomBarInset)
         XCTAssertEqual(configuration.hudHorizontalInset, 16)
         XCTAssertTrue(configuration.isFirstLineIndentOn)
+        // ⚠️ 上栏默认是 `nil`（自动）—— 不是某个具体数字；下栏默认 8。
+        XCTAssertNil(configuration.topBarInset)
+        XCTAssertEqual(configuration.bottomBarInset, 8)
         // 缩进宽度由开关与字号派生（不单独落盘）。
         XCTAssertEqual(configuration.firstLineHeadIndent, configuration.fontSize * 2)
     }

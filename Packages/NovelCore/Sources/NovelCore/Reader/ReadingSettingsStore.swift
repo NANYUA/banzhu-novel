@@ -28,6 +28,12 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     public var inset: PageInset
     /// 角落标签距屏幕左右边缘的距离。`nil` = 老数据里没有这个 key ⇒ 按 `16`（= `Spacing.md`）。
     public var hudHorizontalInset: CGFloat?
+    /// 上栏面板上边缘距屏幕顶的距离（绝对值语义，`0` = 贴屏幕最边缘）。
+    /// `nil` = **自动**（跟随安全区，由 App 层解析）—— 老数据里没有这个 key 也落在这里，
+    /// 而「自动」正是改造前的行为 ⇒ **不需要迁移 key**。
+    public var topBarInset: CGFloat?
+    /// 下栏面板下边缘距屏幕底的距离（绝对值语义）。`nil` = 老数据里没有这个 key ⇒ 按 `8`（= `Spacing.xs`）。
+    public var bottomBarInset: CGFloat?
     public var backgroundStyle: ReadingBackgroundStyle
     public var customBackgroundColor: ReadingColor
     public var customBackgroundColorDark: ReadingColor
@@ -50,6 +56,8 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         isFirstLineIndentOn: Bool? = true,
         inset: PageInset = PageInset(),
         hudHorizontalInset: CGFloat? = 16,
+        topBarInset: CGFloat? = nil,
+        bottomBarInset: CGFloat? = 8,
         backgroundStyle: ReadingBackgroundStyle = .white,
         customBackgroundColor: ReadingColor = .defaultCustomBackground,
         customBackgroundColorDark: ReadingColor = .defaultCustomBackground,
@@ -71,6 +79,8 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         self.isFirstLineIndentOn = isFirstLineIndentOn
         self.inset = inset
         self.hudHorizontalInset = hudHorizontalInset
+        self.topBarInset = topBarInset
+        self.bottomBarInset = bottomBarInset
         self.backgroundStyle = backgroundStyle
         self.customBackgroundColor = customBackgroundColor
         self.customBackgroundColorDark = customBackgroundColorDark
@@ -95,6 +105,8 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             isFirstLineIndentOn: configuration.isFirstLineIndentOn,
             inset: configuration.inset,
             hudHorizontalInset: configuration.hudHorizontalInset,
+            topBarInset: configuration.topBarInset,
+            bottomBarInset: configuration.bottomBarInset,
             backgroundStyle: configuration.backgroundStyle,
             customBackgroundColor: configuration.customBackgroundColor,
             customBackgroundColorDark: configuration.customBackgroundColorDark,
@@ -135,7 +147,11 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             pageTurnAnimation: pageTurnAnimation,
             appearanceMode: appearanceMode,
             // `nil` = 老数据里没有这个 key ⇒ 16（= `DesignTokens.Spacing.md`，与改造前的硬编码同值）。
-            hudHorizontalInset: hudHorizontalInset ?? 16
+            hudHorizontalInset: hudHorizontalInset ?? 16,
+            // `nil` = 老数据里没有这个 key，**也** = 用户选了「自动」⇒ 原样传 nil，由 App 层按安全区解析。
+            topBarInset: topBarInset,
+            // `nil` = 老数据里没有这个 key ⇒ 8（= `DesignTokens.Spacing.xs`，与改造前的固定值同值）。
+            bottomBarInset: bottomBarInset ?? 8
         )
     }
 }

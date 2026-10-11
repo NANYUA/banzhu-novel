@@ -9,9 +9,12 @@ import SwiftUI
 /// 与书架列表零耦合 —— 整体搬走，不复制任何代码（拆分口径见 U5-4 报告）；
 /// 拆出后 `BookshelfView.swift` 与本文件都远离 SwiftLint `file_length` 门槛。
 ///
-/// ⚠️ U13 起本文件**多了一个输入**：`groupBar` 还收 `StoreOf<DownloadFeature>`
-/// （选择模式的「完成」出口搬到了分组栏最右边，而选择模式的状态住在 `DownloadFeature`）——
-/// 它只读那一个 Bool，与书架列表仍然零耦合（见 `groupBar` 的说明）。
+/// ⚠️ 本文件是**两个「完成」出口**的共同落点（都钉在分组栏最右边、共用同一个胶囊 `selectionDoneChip`）：
+/// 1. **书架编辑态**（「全部」及任何非本地分组）—— 状态是 `BookshelfFeature.State.isEditing`，
+///    本文件本来就读得到它；owner 第十轮第 3 条把出口从**导航栏左上角**搬到了这里；
+/// 2. **下载选择模式**（本地分组）—— 状态住在 `DownloadFeature`，故 `groupBar` 还收一个
+///    `StoreOf<DownloadFeature>`（U13 起）；它只读那一个 Bool，与书架列表仍然零耦合。
+/// ⇒ 两个判据**互斥、永不共存**（见 `groupBar` 里的说明）。
 ///
 /// ## 跨文件的可见性（拆分的唯一代价）
 /// - `groupBar` 必须 `internal`：`BookshelfView.body` 在另一个文件里调用它；
@@ -19,7 +22,13 @@ import SwiftUI
 /// - `BookshelfView` 上那三个「分组弹窗」`@State` 不能再是 `private`
 ///   —— 跨文件的 extension 读不到 file-private 状态（那条注释留在 `BookshelfView` 里）。
 extension BookshelfView {
-    /// 分组栏整体：胶囊行（+ 选择模式的「完成」出口）+ 分组操作提示条 + 与列表之间的发丝分隔线。
+    /// 分组栏整体：胶囊行（+ 两个「完成」出口）+ 分组操作提示条 + 与列表之间的发丝分隔线。
+    ///
+    /// ## 两个「完成」出口（互斥、永不共存）
+    /// | 出口 | 判据 | 状态住在哪 |
+    /// |---|---|---|
+    /// | 书架编辑态 | `viewStore.isEditing && !viewStore.showsLocalGroup` | `BookshelfFeature`（本文件本来就读得到） |
+    /// | 下载选择模式 | `downloadViewStore.state`（= `DownloadFeature.isSelecting`） | `DownloadFeature` ⇒ 需透传 store |
     ///
     /// ## 为什么这里要收一个 `DownloadFeature` 的 store（U13）
     /// 「完成」（退出下载选择模式）**原先是下载页常驻上栏里的一行文字按钮**，owner 要求把它
@@ -43,6 +52,20 @@ extension BookshelfView {
                 HStack(spacing: 0) {
                     groupChips(viewStore)
 
+                    // ① **书架编辑态**的「完成」出口（owner 第十轮第 3 条）：原先是导航栏**左上角**
+                    // 的一个文字按钮，现搬到分组栏最右边、用同一套胶囊样式。语义逐字不变。
+                    //
+                    // ⚠️ `!showsLocalGroup` **不能省**（U9-8 的回归护栏）：`.groupSelected` /
+                    // `.localGroupSelected` 都**不重置** `isEditing`（`BookshelfFeature.swift:147-162`），
+                    // 而本地分组装的是下载任务、不是书目 ⇒ 本地态归下面那条分支管。
+                    // ⇒ 省掉它，本地分组会**同时**长出两个「完成」。
+                    if viewStore.isEditing, !viewStore.showsLocalGroup {
+                        selectionDoneChip {
+                            viewStore.send(.editModeChanged(false))
+                        }
+                    }
+
+                    // ② **下载选择模式**（本地分组）的「完成」出口（round-9）。与 ① 互斥、永不共存。
                     if downloadViewStore.state {
                         selectionDoneChip {
                             downloadStore.send(.selectionModeChanged(false))
@@ -62,9 +85,14 @@ extension BookshelfView {
         }
     }
 
-    /// 选择模式的**退出出口**：钉在分组栏最右边的「完成」胶囊；**非选择模式不渲染（零高度）**。
+    /// **两个「完成」出口共用的胶囊**：钉在分组栏最右边的「完成」；**不满足渲染条件时不渲染（零高度）**。
     ///
-    /// 语义与长按退出**逐字相同**：`DownloadFeature` 的 `.selectionModeChanged(false)`。
+    /// - 书架编辑态：语义 = `BookshelfFeature` 的 `.editModeChanged(false)`
+    ///   （与原先导航栏左上角那个 `Button("完成")` **逐字相同**）；
+    /// - 下载选择模式：语义 = `DownloadFeature` 的 `.selectionModeChanged(false)`
+    ///   （与长按退出**逐字相同**）。
+    ///
+    /// 两者**只是语义不同的两个调用点**，样式与位置共用这一处 ⇒ 不会出现「两个完成长得不一样」。
     ///
     /// ## 样式：复用 `GroupChip` 的**未选中**态（白卡面 + 主色文字）
     /// owner 口径是「移动到分组栏最右边，样式为分组栏的样式」⇒ 直接用分组标签那一个组件，
