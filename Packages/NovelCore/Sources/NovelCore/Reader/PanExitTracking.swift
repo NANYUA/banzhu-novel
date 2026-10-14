@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// 手势采样点：一次 `onChanged` 的「手指横坐标 + 时间戳」。
 ///
