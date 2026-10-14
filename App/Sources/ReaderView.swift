@@ -41,13 +41,17 @@ struct ReaderView: View {
     // 下面四个是滑动 / 平移的跟手状态。**刻意不加 `private`**：Swift 的 `private` 是本文件级的，
     // 而手势已搬到 `ReaderView+PageGesture.swift`，加 `private` 那边就取不到
     // （与 `ReaderView+PageTurn.swift` 放开 `reduceMotion` 同一处理）。
+    // `dismiss` 同理：全书第 1 页右滑退出本书的调用点在 `ReaderView+PageGesture.swift`。
     @State var slideOffset: CGFloat = 0
     @State var slideIsHorizontal: Bool?
     /// 本次手势的抓取基线（第一次 `onChanged` 采一次，抬手即复位）。
     @State var slideBaseline: CGFloat?
     /// 页面**此刻真实显示**的偏移（由探针每帧回报的呈现值，方案 A 的基线来源）。
     @State var slidePresentation = SlidePresentation()
-    @Environment(\.dismiss) private var dismiss
+    /// 本次手势的**速度采样**（全书第 1 页右滑退出用，见 `ReaderView+PageGesture.swift`）。
+    /// 判页（`PagePanTracking`）不读它，采样因此不会改变任何既有手感。
+    @State var slideSamples: [PanExitSample] = []
+    @Environment(\.dismiss) var dismiss
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     /// 便捷构造：给定章节路径，创建带真实排版度量的阅读页 store。
@@ -166,6 +170,9 @@ struct ReaderView: View {
                             bottomBarInset: viewStore.config.bottomBarInset,
                             previousChapter: viewStore.previousChapter,
                             nextChapter: viewStore.nextChapter,
+                            // 当前书：右上「更多 → 加入书架」的查重与落库都要它（`ShelfMembership`）。
+                            bookPath: bookPath,
+                            bookTitle: bookTitle,
                             onBack: { dismiss() },
                             onContents: { isShowingDirectory = true },
                             // 下载：弹出**章节选择面板**（面板里默认勾上「当前章 + 后续预缓存章数」）。
@@ -381,7 +388,13 @@ private extension ReaderView {
         }
     }
 
-    private func pageContent(
+    /// 正文层：手势挂在这一层上（`readerGesture`）。
+    ///
+    /// ⚠️ 非 `private`：本文件的成员都在 `private extension ReaderView` 里，而
+    /// `singlePage`（正文层下面那一支，也是点击翻页的位移落点）连同它的两个依赖
+    /// （`pageIdentity` / `currentPageSlice`）都搬到了 `ReaderView+TapTurn.swift`
+    /// —— 那边是普通 extension，这里不能再把它们留在 `private` 里。搬动不改行为。
+    func pageContent(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         availableWidth: CGFloat
     ) -> some View {
@@ -393,7 +406,7 @@ private extension ReaderView {
             if usesPan {
                 panPages(viewStore, availableWidth: availableWidth)
             } else {
-                singlePage(viewStore, configuration: configuration)
+                singlePage(viewStore, configuration: configuration, usesPan: usesPan)
             }
         }
         .contentShape(Rectangle())
@@ -411,25 +424,6 @@ private extension ReaderView {
                 setChromeVisible(!isChromeVisible)
             }
         )
-    }
-
-    /// 单页渲染：唯一翻页方式（左右滑动）用，平移不可用（Reduce Motion、未分页）时也用它兜底。
-    private func singlePage(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
-        configuration: PaginationConfiguration
-    ) -> some View {
-        let slice = currentPageSlice(viewStore)
-        return PageTextView(
-            text: slice.text,
-            configuration: configuration,
-            startsAtParagraphStart: slice.startsAtParagraphStart
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 正文永远不接受命中测试：手势统一挂在外层（`slideGesture`），
-        // 否则 `UITextView` 会把拖拽吞掉（原先只有滚动方式才打开命中测试，滚动已删）。
-        .allowsHitTesting(false)
-        .id(pageIdentity(viewStore))
-        .transition(pageTransition())
     }
 
     private func directorySheet(
@@ -558,39 +552,5 @@ private extension ReaderView {
         withAnimation(Self.chromeToggleAnimation(reduceMotion: reduceMotion)) {
             isChromeVisible = visible
         }
-    }
-
-    // MARK: - 页面身份
-
-    /// 页面身份 = **章节路径 + 页码**：换章时身份必须变化，否则章尾无缝进下一章若停在
-    /// `0 → 0`（旧章只有 1 页），Reduce Motion 的单页 `.opacity` 转场就不会播（内容会换但像硬切）。
-    private func pageIdentity(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) -> String {
-        "\(viewStore.chapterPath)-\(viewStore.currentPageIndex)"
-    }
-
-    // MARK: - 分页定位
-
-    /// 取当前页对应的文本片段 + 「本页是否从段落开头开始」（首行缩进的判据）。
-    ///
-    /// 判据只此一处：调 NovelCore 的 `ParagraphBoundary`，度量侧 `TextKitMeasuring` 用的是同一条。
-    private func currentPageSlice(
-        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) -> (text: String, startsAtParagraphStart: Bool) {
-        let pages = viewStore.pages
-        let offset = viewStore.currentOffset
-        let text = viewStore.displayText
-
-        // 兜底（还没分页 / 定位不到）时整章当一页渲染、从 0 起排 ⇒ 一定是段落开头。
-        guard !pages.isEmpty, !text.isEmpty else { return (text, true) }
-        guard let page = pages.first(where: { offset >= $0.location && offset < $0.location + $0.length }) else {
-            return (text, true)
-        }
-        let chars = Array(text)
-        let start = min(page.location, chars.count)
-        let end = min(page.location + page.length, chars.count)
-        guard start < end else { return ("", true) }
-        return (String(chars[start ..< end]), ParagraphBoundary.isParagraphStart(chars, at: start))
     }
 }

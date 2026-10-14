@@ -99,7 +99,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（37 文件）
+│   └── Sources/                     # SwiftUI 视图层（41 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -108,12 +108,15 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       ├── Reader*.swift            # 阅读器：View / PageGesture / PageTurn /
 │       │                            #   SlideTracking / PageTextView / Appearance /
 │       │                            #   Chrome / ChromeStyle / Insets（上下栏边距解析）/
-│       │                            #   MoreMenu（右上「更多」自绘下拉面板）/ SettingsView / SearchView /
+│       │                            #   MoreMenu（右上「更多」自绘下拉面板：目录 / 书籍详情 / 加入书架）/
+│       │                            #   Shelf（阅读页「加入书架」依赖接线）/
+│       │                            #   TapTurn（点击翻页：左 1/3 上一页 · 中 1/3 控制栏 · 右 1/3 下一页）/
+│       │                            #   SettingsView / SearchView /
 │       │                            #   CornerHUD（角落标签：书名·章节名 / 电量 / 页码）/
 │       │                            #   ChromeJumpBar（跳章条 + 可拖页码进度条）/
 │       │                            #   TextAreaBorder（正文盒红线标尺，设置里开关）/
 │       │                            #   DownloadPicker（阅读页「下载」弹的章节选择面板）
-│       ├── SearchView.swift         # 搜索
+│       ├── SearchView.swift         # 搜索（+PaginationRows：底部页码标签 / 加载行 / 重试行）
 │       ├── ExploreView.swift        # 发现/分类
 │       ├── DownloadQueueView.swift  # 下载队列 + 下载设置（卡片常驻上栏）
 │       ├── DownloadBookCard.swift   # 下载书卡 + 卡片装饰（downloadQueueCard/Row）+ 共享尺度
@@ -127,19 +130,22 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   ├── NovelEngine/                 # 纯逻辑层（9 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（51 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（53 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
 │   │   │   ├── Shelf/               # BookshelfFeature / ShelfRow / ShelfLoader / ShelfAdder /
+│   │   │   │                        #   ShelfMembership（按 bookPath 查 / 加书架，阅读页「加入书架」用）/
 │   │   │   │                        #   ShelfGroupStore / ShelfBatchDownloader /
 │   │   │   │                        #   ReadingTargetLoader（单点书卡 → 阅读落点）/ BookCoverLoader
 │   │   │   ├── Search/ Detail/ Explore/
+│   │   │   │                        #   SearchFeature.State.pageStarts = 每页起始下标（页码标签用）
 │   │   │   ├── Download/            # DownloadFeature（+State / +Selection）/ DownloadQueueStore /
 │   │   │   │                        #   DownloadSettingsStore（下载设置持久化）/ DownloadNetworkMonitor
 │   │   │   ├── Reader/              # ReaderFeature（+ChapterTransition 相邻章切换）/ ReaderLoader /
 │   │   │   │                        #   ChapterCacheStore / ReadingSettingsStore /
-│   │   │   │                        #   ReadingProgressStore / PagePanTracking / SlideTracking /
+│   │   │   │                        #   ReadingProgressStore / PagePanTracking /
+│   │   │   │                        #   PanExitTracking（全书第 1 页右滑退出本书的判据）/ SlideTracking /
 │   │   │   │                        #   ParagraphIndentStripper（行首空白归一化）…
 │   │   │   ├── Pagination/          # Paginator / TextCursor / TextMeasuring / PageRange /
 │   │   │   │                        #   ParagraphBoundary（段落边界判据，度量与渲染共用）

@@ -131,8 +131,8 @@ struct ReaderPageScrubber: View {
                 onEditingChanged: editingChanged
             )
             .tint(foreground)
-            // `Slider` 固有高度约 31pt，低于 HIG 的 44pt 触控下限（`apple-design-2` §9）⇒ 补足。
-            // 44 的唯一来源是 `ReaderChromeMetrics.minTouchTarget`，不在这里另写一个数。
+            // `Slider` 固有高度约 31pt，低于 HIG 的触控下限（`apple-design-2` §9）⇒ 补足。
+            // 那个数的唯一来源是 `ReaderChromeMetrics.minTouchTarget`，不在这里另写一个数。
             //
             // 宽度下限是**硬下限**（见 `ReaderPageScrubberMetrics.minSliderWidth`）：
             // 它比 `layoutPriority` 可靠 —— 滑块是「给多少吃多少」的弹性视图，若给它更高的

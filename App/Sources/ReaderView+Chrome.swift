@@ -1,3 +1,4 @@
+import Dependencies
 import NovelCore
 import SwiftUI
 import UIKit
@@ -73,9 +74,9 @@ enum ReaderChromeEdge {
 ///
 /// ⚠️ 不是 `private`：跳章条已拆到 `ReaderView+ChromeJumpBar.swift`，而 `private` 是
 /// **文件级**的 —— 那边要读 `buttonStyle` / `barInnerPadding` / `panelVerticalPadding` /
-/// `panelOuterMargin` / `disabledOpacity`，进度条还要读 `minTouchTarget`（44 的唯一来源）。
+/// `panelOuterMargin` / `disabledOpacity`，进度条还要读 `minTouchTarget`（触控下限的唯一来源）。
 enum ReaderChromeMetrics {
-    /// 44 —— 触控目标下限（HIG §9）。图标本身远小于此，命中区必须补足，
+    /// 触控目标下限（HIG §9）。图标本身远小于此，命中区必须补足，
     /// 否则「看得见点不着」。
     ///
     /// 三条面板的**内容行**都以它作 `minHeight`（`chromeIconLabel` / 下栏的 `item`），
@@ -430,6 +431,9 @@ struct ReaderChromeOverlay: View {
     /// 相邻章节（`ReaderFeature.State` 的派生属性）：`nil` = 到边界，跳章条据此置灰。
     let previousChapter: ChapterItem?
     let nextChapter: ChapterItem?
+    /// 当前书的路径 / 书名：「更多 → 加入书架」用它查重与落库。
+    let bookPath: String
+    let bookTitle: String
 
     var onBack: () -> Void
     var onContents: () -> Void
@@ -438,7 +442,7 @@ struct ReaderChromeOverlay: View {
     var onSettings: () -> Void
     /// 「更多 → 书籍详情」；`nil` = 面板里不出现这一项。
     /// ⚠️ 现在**不再透传给 `ReaderTopBar`**（上栏只剩一个开关按钮）：菜单项数组在本层构造，
-    /// 见 `ReaderMoreMenuItem.readerMoreMenu(onShowDetail:)`。
+    /// 见 `ReaderMoreMenuItem.readerMoreMenu(isOnShelf:onShowContents:onShowDetail:onAddToShelf:)`。
     var onShowDetail: (() -> Void)?
     /// 跳章：上一章 / 下一章**共用**一个闭包（两侧都走既有的 `loadChapterWithName` 正常加载路径）。
     var onJumpToChapter: (ChapterItem) -> Void
@@ -448,6 +452,11 @@ struct ReaderChromeOverlay: View {
     /// `function_parameter_count` 的 warning 5（理由见 `ReaderPageJump` 的类型注释）。
     var pageJump: ReaderPageJump
 
+    /// 「加入书架」要的两件事（查重 / 落库）。⚠️ **刻意不是 `private`**：两个动作住在
+    /// `ReaderView+Shelf.swift` 的 `extension ReaderChromeOverlay` 里，跨文件 extension
+    /// 读不到 file-private 状态（同 `isShowingMoreMenu` 的理由，见下）。
+    @Dependency(\.shelfMembership) var shelfMembership
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 「更多」下拉面板的显隐。⚠️ **刻意不是 `private`**：面板本体、捕获层与两个写入口都在
@@ -456,6 +465,9 @@ struct ReaderChromeOverlay: View {
     /// 见 `BookshelfView+GroupBar.swift` 文件头）。状态住这一层而不是 `ReaderView`：
     /// 控制栏隐藏时整层被移除 ⇒ 状态自动归零、不会残留。
     @State var isShowingMoreMenu = false
+    /// 这本书**此刻**在不在书架：菜单项据此显示「加入书架」或置灰的「已在书架」。
+    /// 由 `body` 的 `.task` 查一次、`addBookToShelf()` 成功后置真。⚠️ 同样刻意不是 `private`。
+    @State var isOnShelf = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -528,6 +540,9 @@ struct ReaderChromeOverlay: View {
         // 那段），点击因此落到这一层 ⇒ 视觉与触控都是完全模态的。
         // 层级因果与实现见 `ReaderView+MoreMenu.swift` 的 `moreMenuDismissLayer`。
         .background { moreMenuDismissLayer }
+        // 查一次「这本书在不在书架」（菜单项据此显示 / 置灰）。放在**本层出现时**而不是
+        // 面板打开时：后者第一帧会先显示「加入书架」再跳成「已在书架」。
+        .task { await refreshShelfMembership() }
     }
 }
 

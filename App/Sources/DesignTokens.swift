@@ -48,6 +48,13 @@ enum DesignTokens {
         static let xxl: CGFloat = 32
     }
 
+    /// 触控目标下限（pt）—— Apple HIG 的 **44×44pt**。
+    enum Hit {
+        /// 44 —— 可点元素的最小高度。仅在「文字 + 内边距撑不到 44」时才需要显式使用，
+        /// 例如搜索页底部那一行「加载失败，点一下重试」（`.footnote` 18pt + 上下 `Spacing.sm` 24pt = 42pt）。
+        static let minSize: CGFloat = 44
+    }
+
     /// 圆角刻度（pt）。
     ///
     /// 卡片语言只有两档：`sm`(12) 用于卡片 / 封面 / 缩略图 / 列表行，

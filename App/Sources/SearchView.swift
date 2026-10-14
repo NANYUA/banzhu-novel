@@ -162,61 +162,12 @@ struct SearchView: View {
         _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
     ) -> some View {
         List {
-            ForEach(viewStore.results) { book in
-                SearchResultRow(
-                    book: book,
-                    isAdding: viewStore.addingPaths.contains(book.path),
-                    isAdded: viewStore.addedPaths.contains(book.path),
-                    onOpen: {
-                        detailBook = book
-                        isShowingDetail = true
-                    },
-                    onAdd: { viewStore.send(.addRequested(book)) }
-                )
-                .listRowInsets(
-                    .init(
-                        top: DesignTokens.Spacing.xs,
-                        leading: DesignTokens.Spacing.md,
-                        bottom: DesignTokens.Spacing.xs,
-                        trailing: DesignTokens.Spacing.md
-                    )
-                )
-                .listRowSeparator(.hidden)
-                // 行背景清掉：卡面颜色由 `SearchResultRow` 自己画（`AppTheme.Surface.card`），
-                // 这里再铺一层 List 默认的 `systemBackground`（浅色纯白）会把卡片之间的
-                // 间隙也涂白，卡片就与页面分不出层次了。
-                .listRowBackground(Color.clear)
-            }
-
-            if viewStore.hasMore {
-                loadMoreRow(viewStore)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
+            resultRows(viewStore)
+            paginationRow(viewStore)
         }
         .listStyle(.plain)
         // 让 List 自己的滚动背景透出页面分组灰。
         .scrollContentBackground(.hidden)
-    }
-
-    private func loadMoreRow(
-        _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
-    ) -> some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
-            if viewStore.isLoadingMore {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Button {
-                viewStore.send(.loadMore)
-            } label: {
-                Text("加载更多")
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .disabled(viewStore.isLoadingMore)
-        }
-        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -252,17 +203,19 @@ struct SearchView: View {
     }
 }
 
+/// 搜索结果行：封面占位 + 书名 + 作者，整卡可点、按下有反馈、push 详情页。
+///
+/// 行内**没有**任何加入书架的入口 —— 加入 / 移出书架统一走「点进详情页」，
+/// 书名因此独占整行宽度（单行 + 尾部省略）。
+/// 结构上与书城的 `ExploreView.swift` 的 `ExploreBookRow` 同形（见其 `:338` 注释）。
 private struct SearchResultRow: View {
     let book: Book
-    let isAdding: Bool
-    let isAdded: Bool
     let onOpen: () -> Void
-    let onAdd: () -> Void
 
     var body: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             // 🔴 整卡跳详情用 `Button` + 外层显式 push，不用 `NavigationLink`：
-            // List 行里的 NavigationLink 会接管整行，行尾的「加入书架」会被一起吞掉。
+            // List 行里的 NavigationLink 会接管整行，行内任何独立控件都会被一起吞掉。
             Button(action: onOpen) {
                 HStack(spacing: DesignTokens.Spacing.sm) {
                     RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
@@ -299,14 +252,8 @@ private struct SearchResultRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            // 强调层贴「打开详情」那块区域的轮廓；行尾「加入书架」是独立控件，不跟着变暗。
+            // 强调层贴「打开详情」那块区域的轮廓。
             .buttonStyle(PressableCardButtonStyle(shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))))
-
-            // 两个独立触控目标之间的发丝分隔线（系统 `Divider()`，不自算 1px）：
-            // 左边整块进详情、右边「加入书架」，这条线让「一块卡里有两个可点区域」一眼可读。
-            Divider()
-
-            shelfAction
         }
         .padding(DesignTokens.Spacing.sm)
         .contentShape(Rectangle())
@@ -316,38 +263,6 @@ private struct SearchResultRow: View {
             AppTheme.Surface.card,
             in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
         )
-    }
-
-    /// 「加入书架」入口。
-    ///
-    /// 未加入 = 带文字的次级按钮（`bordered`），命中区按 HIG 补到 44pt；
-    /// 已加入 = 绿色 checkmark + 文字状态，一眼可辨，且不再重复发加书请求。
-    @ViewBuilder
-    private var shelfAction: some View {
-        if isAdded {
-            Label("已加入", systemImage: "checkmark.circle.fill")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(AppTheme.statusAdded)
-                .frame(minHeight: 44)
-                .accessibilityLabel("已在书架")
-        } else {
-            Button(action: onAdd) {
-                if isAdding {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(minHeight: 44)
-                } else {
-                    Label("加入书架", systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
-                        // 命中区补到 44pt：`.frame` 必须落在 label 上，
-                        // 套在 Button 外面只是撑开布局，不会扩大真正的点击区域。
-                        .frame(minHeight: 44)
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(isAdding)
-            .accessibilityLabel("加入书架：\(book.title)")
-        }
     }
 }
 
@@ -372,4 +287,73 @@ private struct SearchResultRow: View {
             DownloadFeature()
         }
     )
+}
+
+// MARK: - 列表行
+
+/// 这两个行构造器住在 `extension` 里（**同一个文件**，所以照旧读得到 `private` 状态）：
+/// `SearchView` 的类型体已经贴着 SwiftLint `type_body_length` 的 250 行线
+/// （CI 用 `--strict`，warning 即失败），新行不再往类型体里加。
+/// 同仓先例见 `BookshelfView+GroupBar.swift` / `ReaderView+MoreMenu.swift`。
+extension SearchView {
+    private func resultRows(
+        _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
+    ) -> some View {
+        ForEach(SearchDisplayRow.rows(
+            results: viewStore.results,
+            pageStarts: viewStore.pageStarts
+        )) { row in
+            if let page = row.pageLabel {
+                SearchPageLabelRow(page: page)
+                    .searchRowChrome()
+            }
+
+            SearchResultRow(
+                book: row.book,
+                onOpen: {
+                    detailBook = row.book
+                    isShowingDetail = true
+                }
+            )
+            .listRowInsets(
+                .init(
+                    top: DesignTokens.Spacing.xs,
+                    leading: DesignTokens.Spacing.md,
+                    bottom: DesignTokens.Spacing.xs,
+                    trailing: DesignTokens.Spacing.md
+                )
+            )
+            .listRowSeparator(.hidden)
+            // 行背景清掉：卡面颜色由 `SearchResultRow` 自己画（`AppTheme.Surface.card`），
+            // 这里再铺一层 List 默认的 `systemBackground`（浅色纯白）会把卡片之间的
+            // 间隙也涂白，卡片就与页面分不出层次了。
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    /// 列表最后一行 = 分页行。上拉到底时它被 `List` 的原生橡皮筋拉进视野，
+    /// 一出现（`.onAppear`）就自动加载下一页 —— 列表上**不**挂任何手势，
+    /// 不抢 `List` 自己的滚动手势。
+    ///
+    /// 失败态单独一支：那支**不带** `.onAppear`（失败后自动重发会在弱网下变成
+    /// 无限重试循环，而且用户看不到「点一下重试」这个入口），只由用户点击发起。
+    @ViewBuilder
+    private func paginationRow(
+        _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
+    ) -> some View {
+        if viewStore.loadMoreFailed {
+            SearchLoadMoreRetryRow {
+                viewStore.send(.loadMore)
+            }
+            .searchRowChrome()
+        } else if viewStore.hasMore {
+            SearchLoadMoreRow(isLoadingMore: viewStore.isLoadingMore) {
+                viewStore.send(.loadMore)
+            }
+            .searchRowChrome()
+        } else {
+            SearchEndOfResultsRow()
+                .searchRowChrome()
+        }
+    }
 }

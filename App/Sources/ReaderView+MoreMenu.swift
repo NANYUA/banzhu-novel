@@ -15,8 +15,8 @@ import SwiftUI
 // 位置由布局决定（在上栏下方 `Spacing.xs`(8pt)、右对齐）⇒ 结构上**不可能**与上栏重叠。
 //
 // ## 内容做成「数组 → 逐项渲染」
-// 现在只有一项（「书籍详情」），但渲染路径是 `[ReaderMoreMenuItem]` 的遍历 ⇒
-// **以后加项只改数组**（`ReaderMoreMenuItem.readerMoreMenu(onShowDetail:)`），不动视图。
+// 现在是三项（**目录 / 书籍详情 / 加入书架**），但渲染路径仍是 `[ReaderMoreMenuItem]` 的遍历 ⇒
+// **以后加项只改数组**（`ReaderMoreMenuItem.readerMoreMenu(…)`），不动视图。
 //
 // ## 几何（2026-10-11 owner 定稿：**一个选项 = 一张卡片**）
 // 每张卡片按**自己的文字宽**定尺寸：宽 = 文字 + `textHorizontalPadding`(12) × 2 + `cardPadding`(4) × 2、
@@ -48,19 +48,40 @@ struct ReaderMoreMenuItem: Identifiable {
 extension ReaderMoreMenuItem {
     /// 本页当前的菜单项（**唯一的数组构造处** ⇒ 以后加项只改这里）。
     ///
-    /// - `onShowDetail != nil` ⇒ 一项「书籍详情」，点开是**覆盖在阅读页之上**的 sheet
-    ///   （不是 push，理由见 `ReaderView.detailSheet`）。
+    /// 顺序固定为 **目录 / 书籍详情 / 加入书架**。
+    /// - 「目录」= 阅读页下栏那个目录入口的**同一个** action（`onShowContents` ⇒
+    ///   `ReaderView.isShowingDirectory`）⇒ 打开的是**同一个** sheet，不新建第二个。
+    /// - 「加入书架」是**纯文字项**（owner：「加入书架不要符号只要文字」）⇒ 不加图标；
+    ///   `isOnShelf == true` ⇒ 文字变「已在书架」且置灰不可点（`isEnabled: false`，
+    ///   置灰与不可点的既有处置见 `ReaderMoreMenuPanel.card(_:)`）。
     /// - `onShowDetail == nil` ⇒ 一项**置灰**的「更多选项待添加」：那条路径是测试 / 预览
     ///   （没有 `bookPath`），保留占位项与改造前**逐字相同** —— 空面板会让人以为控件坏了
     ///   （§11：别给一个点了没反应的入口，也别给一个空壳）。
-    static func readerMoreMenu(onShowDetail: (() -> Void)?) -> [ReaderMoreMenuItem] {
+    static func readerMoreMenu(
+        isOnShelf: Bool,
+        onShowContents: @escaping () -> Void,
+        onShowDetail: (() -> Void)?,
+        onAddToShelf: @escaping () -> Void
+    ) -> [ReaderMoreMenuItem] {
         if let onShowDetail {
             return [
+                ReaderMoreMenuItem(
+                    id: "contents",
+                    title: "目录",
+                    isEnabled: true,
+                    action: onShowContents
+                ),
                 ReaderMoreMenuItem(
                     id: "detail",
                     title: "书籍详情",
                     isEnabled: true,
                     action: onShowDetail
+                ),
+                ReaderMoreMenuItem(
+                    id: "shelf",
+                    title: isOnShelf ? "已在书架" : "加入书架",
+                    isEnabled: !isOnShelf,
+                    action: onAddToShelf
                 ),
             ]
         }
@@ -269,7 +290,12 @@ extension ReaderChromeOverlay {
         if isShowing {
             ReaderMoreMenuPanel(
                 style: style,
-                items: ReaderMoreMenuItem.readerMoreMenu(onShowDetail: onShowDetail),
+                items: ReaderMoreMenuItem.readerMoreMenu(
+                    isOnShelf: isOnShelf,
+                    onShowContents: onContents,
+                    onShowDetail: onShowDetail,
+                    onAddToShelf: addBookToShelf
+                ),
                 onSelect: onSelect
             )
             .padding(.top, DesignTokens.Spacing.xs)

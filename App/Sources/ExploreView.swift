@@ -333,10 +333,9 @@ private struct ExploreCategoryChip: View {
 
 // MARK: - 书目行
 
-/// 书城的书目行（照抄 `SearchView.swift:256-313` 的 `SearchResultRow` 卡面）：
+/// 书城的书目行（与 `SearchView.swift` 的 `SearchResultRow` 卡面同形）：
 /// 封面占位 + 书名 + 作者，整卡可点、按下有反馈、push 详情页。
-/// 与搜索结果卡的差异只有一处：这里**没有**行尾的「加入书架」按钮
-/// —— 加书入口统一在详情页，由 `onAddedToShelf` 回写书架。
+/// 加书入口统一在详情页，由 `onAddedToShelf` 回写书架。
 private struct ExploreBookRow: View {
     let book: Book
     let onOpen: () -> Void

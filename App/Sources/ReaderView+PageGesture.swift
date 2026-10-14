@@ -2,6 +2,12 @@ import ComposableArchitecture
 import NovelCore
 import SwiftUI
 
+/// 速度采样最多留几个点（本次手势的 `onChanged` 逐帧追加）。
+///
+/// 8 个点在 60Hz 下覆盖约 130ms —— 够 `PanExitTracking.velocityWindow` 的 90ms 窗口，
+/// 又不会让长手势把数组撑大。判退阈值与窗口本身在 `PanExitTracking` 里，此处只管容量。
+private let slideSampleLimit = 8
+
 /// 全景图里的一格：身份 + 该格要渲染的文本 + 相对当前页的格数。
 ///
 /// 放在文件级而不是嵌在 `ReaderView` 里：它只是渲染数据，没有身份。
@@ -49,6 +55,28 @@ extension ReaderView {
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> Bool {
         viewStore.config.pageTurnMode == .slide && !reduceMotion && !viewStore.pages.isEmpty
+    }
+
+    /// 是否「**全书第 1 页**」= 第 1 章第 1 页 —— 右滑退出本书只在这一页生效。
+    ///
+    /// 三个条件缺一不可：
+    /// - `currentPageIndex == 0`：章内第 1 页（`pages` 为空时它是 `-1`，一并挡掉）；
+    /// - `previousChapter == nil`：第 1 章；
+    /// - `previousPages.isEmpty`：上一章确实没预加载出页来（与 `panSlots` / `panGeometry`
+    ///   渲染 `-1` 格用的是**同一个判据**，不另立一份）。
+    ///
+    /// ⚠️ 必须与 `chapters` 非空联合判定：`previousChapter == nil` 还有「章列表还没加载」
+    /// 这个成因，只认它会把**任意一章的第 1 页**误判成全书第 1 页 ⇒ 误退。
+    ///
+    /// ⚠️ 单章书（`chapters.count == 1`）天然满足本判据 —— 它的第 1 章第 1 页就是全书第 1 页，
+    /// 右滑退出正是 owner 要的行为。
+    func isBookFirstPage(
+        _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) -> Bool {
+        guard !viewStore.chapters.isEmpty else { return false }
+        return viewStore.currentPageIndex == 0
+            && viewStore.previousChapter == nil
+            && viewStore.previousPages.isEmpty
     }
 
     // MARK: - 手势入口
@@ -220,9 +248,13 @@ extension ReaderView {
             .simultaneousGesture(
                 SpatialTapGesture()
                     .onEnded { value in
-                        if isCenterTap(value.location.x, width: availableWidth) {
-                            onCenterTap()
-                        }
+                        // 中央 1/3 = 呼出 / 收起控制栏（既有行为），左 / 右 1/3 = 点击翻页。
+                        // 三支的判定都在 `handleReaderTap` 里，本手势只负责把落点递进去。
+                        handleReaderTap(
+                            value.location.x,
+                            width: availableWidth,
+                            onCenterTap: onCenterTap
+                        )
                     }
             )
     }
@@ -235,6 +267,17 @@ extension ReaderView {
     ) {
         slideIsHorizontal = slideIsHorizontal ?? (abs(value.translation.width) > abs(value.translation.height))
         guard slideIsHorizontal == true, !reduceMotion else { return }
+        // 速度采样（只给「全书第 1 页右滑退出」用，判页不读它）：逐帧追加、只留最近几个
+        // —— 抬手时按最近 90ms 算速度。数组在抬手处清空，不跨手势累积。
+        slideSamples.append(
+            PanExitSample(
+                translation: value.translation.width,
+                timestamp: value.time.timeIntervalSinceReferenceDate
+            )
+        )
+        if slideSamples.count > slideSampleLimit {
+            slideSamples.removeFirst(slideSamples.count - slideSampleLimit)
+        }
         // 基线只在本次手势的第一次 onChanged 采一次：之后 translation 是
         // 相对同一个起点累积的，逐帧重采就会把已跟手走的位移当成新基线而滚雪球。
         let baseline = slideBaseline ?? slidePresentation.offset
@@ -246,7 +289,7 @@ extension ReaderView {
         )
     }
 
-    /// 抬手：判页 + 落位。
+    /// 抬手：判页 + 落位；**全书第 1 页**上够远的右滑改成退出本书。
     private func endSlide(
         _ value: DragGesture.Value,
         viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
@@ -258,6 +301,23 @@ extension ReaderView {
         slideIsHorizontal = nil
         slideBaseline = nil
         guard wasHorizontal else { return }
+        // 全书第 1 页 + 够远的右滑 ⇒ 直接退出（系统返回动画 = `dismiss()`，不跟手、不播回位动画）。
+        // 距离与速度的阈值全在 `PanExitTracking` 里，这里只负责「递进采样、拿回结论」。
+        // 方向判据（`> 0`）留在调用点：纯函数只按需求写「够距离 / 够快」，不替调用方定方向。
+        if value.translation.width > 0,
+           PanExitTracking.exitsBook(
+               translation: value.translation.width,
+               availableWidth: availableWidth,
+               samples: slideSamples,
+               isBookFirstPage: isBookFirstPage(viewStore)
+           )
+        {
+            slideSamples = []
+            slideOffset = 0
+            dismiss()
+            return
+        }
+        slideSamples = []
         // 跟手与判页**共用同一份几何**（同一次手势、同一个 `has*ChapterPage`）：
         // 分叉一次就会出现「能跟手拉过去、松手却不换章」这类错位。
         let geometry = panGeometry(viewStore, availableWidth: availableWidth)
@@ -280,7 +340,10 @@ extension ReaderView {
     /// 用的是**同一个条件**（`nextPages` / `previousPages` 非空）：非空 ⇒ 那一格摆的是
     /// 下一章第 1 页 / 上一章最后一页 ⇒ 章尾 / 章首不算边界，跟手与章内一致；
     /// 空 ⇒ 那一格空着 ⇒ 保留橡皮筋，不把空白拉出来。
-    private func panGeometry(
+    ///
+    /// 非 private：点击翻页要**复用同一份几何**（见 `ReaderView+TapTurn.swift` 的 `turnPage`），
+    /// 章界判据不能出现第二份 —— 与 `usesPanTurning` 同一处理（`private` 是本文件级的）。
+    func panGeometry(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         availableWidth: CGFloat
     ) -> PagePanGeometry {
@@ -317,7 +380,10 @@ extension ReaderView {
     /// **章尾换章 / 章首退章走的是同一条路**：此刻 `+1` 格上摆的就是下一章第 1 页
     /// （`-1` 格上摆的是上一章最后一页），换章后它正好变成当前页 —— 补位那一步与章内
     /// 翻页**逐值相同**，观感因此连续（owner 要的「不先跳一下」）。
-    private func settlePan(
+    ///
+    /// 非 private：点击翻页的落位也走这一个函数（见 `ReaderView+TapTurn.swift` 的 `turnPage`）
+    /// —— 位移路径与「章尾 / 章首怎么翻」只此一处定义，与 `usesPanTurning` 同一处理。
+    func settlePan(
         _ turn: PagePanTurn,
         viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         availableWidth: CGFloat
@@ -364,16 +430,16 @@ extension ReaderView {
     /// 注意：跟手（1:1 位移 + 边界橡皮筋）与抬手后的**动量判向**都保留，
     /// 被去掉的只是回位动画的弹簧曲线本身。副作用是失去了释放速度的交接
     /// （普通缓动没有初速度概念），换来的就是「不弹」。
-    private func slideSettleAnimation() -> Animation {
+    ///
+    /// 非 private：点击翻页的位移要跟它**同一条曲线、同一个时长**（见
+    /// `ReaderView+TapTurn.swift` 的 `singlePage`），时长与曲线只留这一处定义。
+    func slideSettleAnimation() -> Animation {
         .timingCurve(0.22, 1, 0.36, 1, duration: 0.22)
     }
 
-    // MARK: - 中央点击判定
-
-    /// 屏幕中间三分之一算「中央点击」（呼出 / 收起控制栏），左右两侧留给翻页。
-    private func isCenterTap(_ locationX: CGFloat, width: CGFloat) -> Bool {
-        locationX >= width / 3 && locationX <= width * 2 / 3
-    }
+    // 中央点击的判定已随点击手势的回调一起搬到 `ReaderView+TapTurn.swift` 的
+    // `tapTurnZone`（它同时判左 / 中 / 右三个分区）。边界条件与这里原`isCenterTap`
+    // 逐字相同（`width / 3`、`width * 2 / 3`），中央 1/3 的行为没有变。
 }
 
 // MARK: - 控制栏显隐的兜底点击

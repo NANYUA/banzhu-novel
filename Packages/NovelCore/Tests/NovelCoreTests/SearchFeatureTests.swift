@@ -41,6 +41,7 @@ final class SearchFeatureTests: XCTestCase {
         await store.receive(.searchSucceeded([Self.book])) {
             $0.results = [Self.book]
             $0.isLoading = false
+            $0.pageStarts = [SearchPageStart(page: 1, index: 0)]
             $0.hasMore = false
         }
         await store.finish()
@@ -135,43 +136,8 @@ final class SearchFeatureTests: XCTestCase {
         await store.finish()
     }
 
-    func test搜索可分页追加下一页() async {
-        let pageOne = (0 ..< 30).map { Book(path: "/1/\($0)/", title: "第 \($0) 本") }
-        let pageTwo = [Book(path: "/2/1/", title: "第二页第一本")]
-        let store = TestStore(initialState: SearchFeature.State()) {
-            SearchFeature()
-        } withDependencies: {
-            $0.searchService.search = { _, page in
-                page == 1 ? pageOne : pageTwo
-            }
-        }
-
-        await store.send(.keywordChanged("示例")) {
-            $0.keyword = "示例"
-        }
-        await store.send(.search) {
-            $0.submittedKeyword = "示例"
-            $0.isLoading = true
-            $0.page = 1
-            $0.hasMore = false
-        }
-        await store.receive(.searchSucceeded(pageOne)) {
-            $0.results = pageOne
-            $0.isLoading = false
-            $0.page = 1
-            $0.hasMore = true
-        }
-        await store.send(.loadMore) {
-            $0.isLoadingMore = true
-        }
-        await store.receive(.moreSucceeded(pageTwo, page: 2)) {
-            $0.results = pageOne + pageTwo
-            $0.page = 2
-            $0.isLoadingMore = false
-            $0.hasMore = false
-        }
-        await store.finish()
-    }
+    // ⚠️ 分页相关用例（`.pageStarts` 的维护）在 `SearchPaginationTests.swift`：
+    // 本类型体已接近 SwiftLint `type_body_length` 的 250 行 warning 线（CI 用 `--strict`）。
 
     func test加入时发现已在书架则切到已加入并显示人话提示() async {
         let store = TestStore(initialState: SearchFeature.State(results: [Self.book])) {

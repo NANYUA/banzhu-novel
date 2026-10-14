@@ -25,7 +25,9 @@ public struct SearchFeature: Reducer {
             addingPaths: Set<String> = [],
             addedPaths: Set<String> = [],
             page: Int = 1,
+            pageStarts: [SearchPageStart] = [],
             isLoadingMore: Bool = false,
+            loadMoreFailed: Bool = false,
             hasMore: Bool = false,
             notice: String? = nil,
             lastAddedRow: ShelfRow? = nil
@@ -38,7 +40,9 @@ public struct SearchFeature: Reducer {
             self.addingPaths = addingPaths
             self.addedPaths = addedPaths
             self.page = page
+            self.pageStarts = pageStarts
             self.isLoadingMore = isLoadingMore
+            self.loadMoreFailed = loadMoreFailed
             self.hasMore = hasMore
             self.notice = notice
             self.lastAddedRow = lastAddedRow
@@ -68,8 +72,24 @@ public struct SearchFeature: Reducer {
         /// 已加载到第几页。
         public var page = 1
 
+        /// 每一页的第一本书：**页码 + 它在 `results` 里的起始下标**（第 1 页恒为 `(1, 0)`）。
+        ///
+        /// 🔴 下标必须单独记：`.moreSucceeded` 是**按书路径去重后追加**的，
+        /// 一旦有重复被滤掉，页边界就无法从 `results` 反推。
+        /// 🔴 页码必须跟下标**记在一起**、不能靠数组下标 +1 推算：整页都是重复时这一页
+        /// 不记（见 `.moreSucceeded`），若用数组下标推算，它后面所有页的页码都会整体少 1 ——
+        /// 而「提醒我下面的书是第几页的内容」正是这些标签的全部意义。
+        public var pageStarts: [SearchPageStart] = []
+
         /// 正在加载下一页。
         public var isLoadingMore = false
+
+        /// 上一次 `.loadMore` 失败了 —— 加载行据此变成**可点的「加载失败，点一下重试」**。
+        ///
+        /// 为什么单独一个字段、而不是复用 `notice`：`notice` 是 1 秒后自动消失的顶部提示条，
+        /// 它消失之后用户就没有任何「还能重试」的入口了；失败态必须**留在列表底部**直到重试成功。
+        /// 复位点见 `.search` / `.searchSucceeded` / `.loadMore` / `.moreSucceeded`。
+        public var loadMoreFailed = false
 
         /// 是否还有下一页。页面返回满 30 本时继续允许加载。
         public var hasMore = false
@@ -130,6 +150,8 @@ public struct SearchFeature: Reducer {
                 state.errorMessage = nil
                 state.notice = nil
                 state.page = 1
+                state.pageStarts = []
+                state.loadMoreFailed = false
                 state.hasMore = false
                 let service = searchService
                 return .run { send in
@@ -145,6 +167,9 @@ public struct SearchFeature: Reducer {
                 state.results = books
                 state.isLoading = false
                 state.page = 1
+                // 第 1 页的书从 `results` 的第 0 位开始；视图侧据此**不**在列表开头插标签。
+                state.pageStarts = [SearchPageStart(page: 1, index: 0)]
+                state.loadMoreFailed = false
                 state.hasMore = books.count >= 30
                 return .none
 
@@ -161,6 +186,7 @@ public struct SearchFeature: Reducer {
                 let keyword = state.submittedKeyword
                 guard !keyword.isEmpty else { return .none }
                 state.isLoadingMore = true
+                state.loadMoreFailed = false
                 state.notice = nil
                 let nextPage = state.page + 1
                 let service = searchService
@@ -175,14 +201,26 @@ public struct SearchFeature: Reducer {
 
             case let .moreSucceeded(books, page):
                 let existing = Set(state.results.map(\.path))
-                state.results.append(contentsOf: books.filter { !existing.contains($0.path) })
+                let newBooks = books.filter { !existing.contains($0.path) }
+                // 先记起始下标再追加：重复被滤掉时，这一页的「第一本书」就是
+                // `newBooks.first`，而它落在 `results` 里的下标正是追加前的 `results.count`。
+                // 页码用服务端给的 `page`，**不是** `pageStarts.count + 1`：
+                // 整页都是重复（`newBooks` 为空）时这一页不记（记了会画出一行没有书跟其后的标签），
+                // 但后面真实落地的那一页仍要显示自己的真实页号。
+                if !newBooks.isEmpty {
+                    state.pageStarts.append(SearchPageStart(page: page, index: state.results.count))
+                }
+                state.results.append(contentsOf: newBooks)
                 state.page = page
                 state.isLoadingMore = false
+                state.loadMoreFailed = false
                 state.hasMore = books.count >= 30
                 return .none
 
             case let .moreFailed(message):
                 state.isLoadingMore = false
+                // 失败态留在列表底部（加载行变成可点的重试按钮），直到下一次重试成功。
+                state.loadMoreFailed = true
                 state.notice = message
                 return .none
 
@@ -243,6 +281,22 @@ public struct SearchFeature: Reducer {
                 return .none
             }
         }
+    }
+}
+
+/// 「某一页的第一本书」：页号 + 这本书在 `SearchFeature.State.results` 里的起始下标。
+///
+/// 页号必须**跟下标一起记**（而不是在视图层用数组下标 +1 推算）：整页都是重复时那一页
+/// 不记录（否则会画出一行后面没有书的页码标签），靠下标推算会让它后面所有页的页码整体少 1。
+public struct SearchPageStart: Equatable {
+    /// 服务端页号（从 1 开始）。
+    public let page: Int
+    /// 该页第一本书在 `results` 里的下标。
+    public let index: Int
+
+    public init(page: Int, index: Int) {
+        self.page = page
+        self.index = index
     }
 }
 
