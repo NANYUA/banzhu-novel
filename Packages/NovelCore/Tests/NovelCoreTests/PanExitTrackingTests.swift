@@ -134,16 +134,23 @@ final class PanExitTrackingTests: XCTestCase {
 
     // MARK: - 退化盒子
 
-    /// 屏宽为 0（退化盒子）⇒ 距离门恒不满足，只剩速度门 —— 且 12% 下限也是 0。
-    func test屏宽为零时只靠速度门() {
+    /// 屏宽为 0（退化盒子）：距离门的阈值也退化成 0 ⇒ **任何正位移**都过距离门，
+    /// 速度门在这个盒子里无法被单独观察到（`distance > 0` 恒强于 `distance > 0.12 × 0`）。
+    /// 记在这里只为锁住退化输入的现状；生产路径另有 `translation.width > 0` 前置
+    /// （`endSlide` 里的 `shouldExitBook`），左滑根本不会走到判退。
+    func test屏宽为零时距离门阈值退化成零() {
         let flick = [sample(0, at: 0), sample(60, at: 0.045), sample(120, at: 0.09)]
         XCTAssertFalse(
+            exits(translation: 0, availableWidth: 0, samples: []),
+            "零位移 ⇒ 距离门（0 > 0）与 12% 下限都不成立 ⇒ 不退"
+        )
+        XCTAssertTrue(
             exits(translation: 1000, availableWidth: 0, samples: []),
-            "屏宽 0 时「> 屏宽 × 0.35」不成立（0 不大于 0）"
+            "屏宽 0 ⇒ 阈值 0 ⇒ 任何正位移都过距离门（退化结果，非设计意图）"
         )
         XCTAssertTrue(
             exits(translation: 120, availableWidth: 0, samples: flick),
-            "屏宽 0 时速度门仍然有效"
+            "屏宽 0 时快甩也判退 —— 走的仍是距离门，速度门在这里观察不到"
         )
     }
 }
