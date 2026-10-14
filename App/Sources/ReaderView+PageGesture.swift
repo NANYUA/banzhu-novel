@@ -304,14 +304,13 @@ extension ReaderView {
         // 全书第 1 页 + 够远的右滑 ⇒ 直接退出（系统返回动画 = `dismiss()`，不跟手、不播回位动画）。
         // 距离与速度的阈值全在 `PanExitTracking` 里，这里只负责「递进采样、拿回结论」。
         // 方向判据（`> 0`）留在调用点：纯函数只按需求写「够距离 / 够快」，不替调用方定方向。
-        if value.translation.width > 0,
-           PanExitTracking.exitsBook(
-               translation: value.translation.width,
-               availableWidth: availableWidth,
-               samples: slideSamples,
-               isBookFirstPage: isBookFirstPage(viewStore)
-           )
-        {
+        let shouldExitBook = value.translation.width > 0 && PanExitTracking.exitsBook(
+            translation: value.translation.width,
+            availableWidth: availableWidth,
+            samples: slideSamples,
+            isBookFirstPage: isBookFirstPage(viewStore)
+        )
+        if shouldExitBook {
             slideSamples = []
             slideOffset = 0
             dismiss()
