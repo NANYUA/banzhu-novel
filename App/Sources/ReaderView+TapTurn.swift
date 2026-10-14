@@ -39,13 +39,14 @@ extension ReaderView {
     func handleReaderTap(
         _ locationX: CGFloat,
         width: CGFloat,
+        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         onCenterTap: @escaping () -> Void
     ) {
         switch tapTurnZone(locationX, width: width) {
         case .center:
             onCenterTap()
         case .previous, .next:
-            turnPage(at: locationX, width: width)
+            turnPage(at: locationX, width: width, viewStore: viewStore)
         }
     }
 
@@ -76,7 +77,11 @@ extension ReaderView {
     /// —— 前者 `pageIndex == 0` 且没有上一章页 ⇒ 不翻；后者 `pageIndex == pageCount - 1`
     /// 且没有下一章页 ⇒ 不翻。两条都是静默无反应（`pages` 为空时 `currentPageIndex`
     /// 是 `-1`，同样两条都不成立）。
-    private func turnPage(at locationX: CGFloat, width: CGFloat) {
+    private func turnPage(
+        at locationX: CGFloat,
+        width: CGFloat,
+        viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
+    ) {
         let geometry = panGeometry(viewStore, availableWidth: width)
         let turn: PagePanTurn
         switch tapTurnZone(locationX, width: width) {

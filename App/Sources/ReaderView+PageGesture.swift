@@ -253,6 +253,7 @@ extension ReaderView {
                         handleReaderTap(
                             value.location.x,
                             width: availableWidth,
+                            viewStore: viewStore,
                             onCenterTap: onCenterTap
                         )
                     }
