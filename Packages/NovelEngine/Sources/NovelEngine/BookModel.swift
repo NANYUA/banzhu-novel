@@ -62,17 +62,44 @@ public struct Chapter: Identifiable, Codable, Hashable {
     }
 }
 
-/// 书城分类入口
+/// 书城筛选分组。
+public enum ExploreCategoryGroup: String, CaseIterable, Hashable, Codable, Sendable {
+    case status
+    case sort
+    case genre
+    case legacy
+
+    public var title: String {
+        switch self {
+        case .status: return "状态"
+        case .sort: return "排序"
+        case .genre: return "分类"
+        case .legacy: return "分类"
+        }
+    }
+}
+
+/// 书城分类入口 / 筛选项。
 public struct ExploreCategory: Identifiable, Hashable {
-    public var id: String { title }
+    public var id: String { "\(group.rawValue):\(value ?? title)" }
     public var title: String
     public var urlTemplate: String          // 含 {{page}}
+    public var group: ExploreCategoryGroup
+    public var value: String?
+
     public func url(page: Int) -> String {
         urlTemplate.replacingOccurrences(of: "{{page}}", with: String(page))
     }
 
-    public init(title: String, urlTemplate: String) {
+    public init(
+        title: String,
+        urlTemplate: String,
+        group: ExploreCategoryGroup = .legacy,
+        value: String? = nil
+    ) {
         self.title = title
         self.urlTemplate = urlTemplate
+        self.group = group
+        self.value = value
     }
 }

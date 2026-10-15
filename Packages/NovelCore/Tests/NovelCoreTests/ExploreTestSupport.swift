@@ -28,6 +28,11 @@ enum ExploreTestData {
             Book(path: "/book/\(prefix)_\($0)/", title: "示例书 \(prefix)-\($0)")
         }
     }
+
+    /// 用「页号, 起始下标」对生成每页起始标记，供初态与断言复用（也压 `function_body_length`）。
+    static func pageStarts(_ pairs: [(page: Int, index: Int)]) -> [ExplorePageStart] {
+        pairs.map { ExplorePageStart(page: $0.page, index: $0.index) }
+    }
 }
 
 /// 记录书城依赖收到的调用，供测试在 `store.finish()` 后断言。

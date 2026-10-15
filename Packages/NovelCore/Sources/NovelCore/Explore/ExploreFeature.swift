@@ -5,11 +5,7 @@ import NovelEngine
 
 /// 书城 —— 分类入口 + 分类书目分页。
 ///
-/// ## 为什么分类要落盘缓存（「固定分类」）
-/// 分类由引擎的 `exploreCategories()` 从首页抽一次得到，**抓一次就稳定存在**。
-/// 每次进页面都联网的话，网络一抖用户看到的就是一个空书城。
-/// 所以 `.task` 先读落盘缓存，**只有缓存缺失才联网**，拿到后立刻写回
-/// （见 `loadCategories`；读写实现见 `ExploreCategoryStore.swift`）。
+/// 分类由 `ExploreCategoryCatalog` 本地提供，不依赖首页分类导航或分类缓存。
 ///
 /// ## 分页终止判据
 /// **返回不足一页（`pageSize` = 30 本）即视为末页**：`hasMore` 置 `false`，
@@ -26,7 +22,7 @@ public struct ExploreFeature: Reducer {
     public init() {}
 
     /// 「还有下一页」的阈值：满一页才允许继续翻（与 `SearchFeature` 同口径）。
-    static let pageSize = 30
+    public static let pageSize = 30
 
     public struct State: Equatable {
         public init(
@@ -38,6 +34,8 @@ public struct ExploreFeature: Reducer {
             selectedCategory: ExploreCategory? = nil,
             books: [Book] = [],
             page: Int = 1,
+            pageStarts: [ExplorePageStart] = [],
+            requestID: Int = 0,
             isLoadingMore: Bool = false,
             hasMore: Bool = false
         ) {
@@ -49,14 +47,16 @@ public struct ExploreFeature: Reducer {
             self.selectedCategory = selectedCategory
             self.books = books
             self.page = page
+            self.pageStarts = pageStarts
+            self.requestID = requestID
             self.isLoadingMore = isLoadingMore
             self.hasMore = hasMore
         }
 
-        /// 书城分类（来自落盘缓存或一次联网）。
+        /// 固定三维筛选目录。
         public var categories: [ExploreCategory]
 
-        /// 首屏加载中：分类列表本身，或选中分类的第 1 页。
+        /// 选中分类的第 1 页加载中。
         public var isLoading = false
 
         /// 最近一次的失败 / 空结果提示。空结果与失败都不能伪装成「正常空列表」。
@@ -88,6 +88,12 @@ public struct ExploreFeature: Reducer {
         /// 当前分类已加载到第几页（从 1 起）。
         public var page = 1
 
+        /// 每个已追加页面的首本书下标与服务端页号。
+        public var pageStarts: [ExplorePageStart]
+
+        /// 最新书目请求的身份；切分类或重试后旧请求不得修改当前状态。
+        public var requestID: Int
+
         /// 正在加载当前分类的下一页。
         public var isLoadingMore = false
 
@@ -96,73 +102,55 @@ public struct ExploreFeature: Reducer {
     }
 
     public enum Action: Equatable {
-        /// 进页面：先读缓存，缺失才联网并落盘。
+        /// 进页面：同步提供固定分类；仅首次自动加载默认组合。
         case task
-        /// 分类就绪（缓存命中或联网成功）。
-        case categoriesLoaded([ExploreCategory])
-        /// 分类没拿到：联网失败，或首页解析不出分类。`String` 是已组装好的中文文案。
-        case categoriesFailed(String)
         /// 选中分类：拉它的第 1 页。
         case categorySelected(ExploreCategory)
         /// 第 1 页就绪。
-        case booksLoaded([Book])
+        case booksLoaded([Book], requestID: Int)
         /// 第 1 页失败。
-        case booksFailed(String)
+        case booksFailed(String, requestID: Int)
         /// 加载当前分类的下一页。
         case loadMore
         /// 下一页就绪。
-        case moreLoaded([Book], page: Int)
+        case moreLoaded([Book], page: Int, requestID: Int)
         /// 下一页失败。**局部失败**：只记在 `State.moreErrorMessage` 上，
         /// 既有书目、页码与整页失败态都不受影响。
-        case moreFailed(String)
+        case moreFailed(String, requestID: Int)
         /// 重试「当前失败的那一步」（依据 `State.failedStep`）：
-        /// 分类失败 → 重拉分类；首屏失败 → 重拉第 1 页；翻页失败 → 重发**同一页**。
+        /// 首屏失败 → 重拉第 1 页；翻页失败 → 重发**同一页**。
         case retry
     }
 
     @Dependency(\.exploreService) var exploreService
-    @Dependency(\.exploreCategoryStore) var exploreCategoryStore
 
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
             case .task:
-                // 页面每次出现都会发 `.task`：已在加载中就不重复发，避免打两次首页。
-                guard !state.isLoading else { return .none }
-                // 手上已经有分类（切回 tab / 从详情页 pop 回来）⇒ **静默刷新**：不进首屏加载态，
-                // 否则已经展示出来的分类胶囊与书目会被 spinner 顶掉再回来。
-                let showsLoading = state.categories.isEmpty
-                return loadCategories(
+                state.categories = ExploreCategoryCatalog.allItems
+                guard state.selectedCategory == nil else { return .none }
+                return loadFirstPage(
                     &state,
-                    store: exploreCategoryStore,
-                    service: exploreService,
-                    showsLoading: showsLoading
+                    category: ExploreCategoryCatalog.defaultCategory,
+                    service: exploreService
                 )
-
-            case let .categoriesLoaded(categories):
-                state.categories = categories
-                state.isLoading = false
-                clearFailure(&state)
-                return .none
-
-            case let .categoriesFailed(message):
-                state.isLoading = false
-                state.errorMessage = message
-                state.failedStep = .categories
-                return .none
 
             case let .categorySelected(category):
                 return loadFirstPage(&state, category: category, service: exploreService)
 
-            case let .booksLoaded(books):
+            case let .booksLoaded(books, requestID):
+                guard requestID == state.requestID, state.isLoading else { return .none }
                 state.books = books
                 state.isLoading = false
                 state.page = 1
+                state.pageStarts = books.isEmpty ? [] : [ExplorePageStart(page: 1, index: 0)]
                 state.hasMore = books.count >= Self.pageSize
                 clearFailure(&state)
                 return .none
 
-            case let .booksFailed(message):
+            case let .booksFailed(message, requestID):
+                guard requestID == state.requestID, state.isLoading else { return .none }
                 state.isLoading = false
                 state.errorMessage = message
                 state.failedStep = .firstPage
@@ -171,22 +159,28 @@ public struct ExploreFeature: Reducer {
             case .loadMore:
                 return loadMore(&state, service: exploreService)
 
-            case let .moreLoaded(books, page):
-                // 切换分类后旧请求可能晚到：页码对不上就丢弃，
-                // 否则会把上一个分类的书追加进当前列表。
-                guard page == state.page + 1 else {
-                    state.isLoadingMore = false
+            case let .moreLoaded(books, page, requestID):
+                // 页码相同也可能是上个分类的旧请求，必须先核对请求身份。
+                guard requestID == state.requestID, state.isLoadingMore, page == state.page + 1 else {
                     return .none
                 }
                 let existing = Set(state.books.map(\.path))
-                state.books.append(contentsOf: books.filter { !existing.contains($0.path) })
+                let newBooks = books.filter { !existing.contains($0.path) }
+                if !newBooks.isEmpty {
+                    if state.pageStarts.isEmpty, !state.books.isEmpty {
+                        state.pageStarts = [ExplorePageStart(page: 1, index: 0)]
+                    }
+                    state.pageStarts.append(ExplorePageStart(page: page, index: state.books.count))
+                    state.books.append(contentsOf: newBooks)
+                }
                 state.page = page
                 state.isLoadingMore = false
                 state.hasMore = books.count >= Self.pageSize
                 clearFailure(&state)
                 return .none
 
-            case let .moreFailed(message):
+            case let .moreFailed(message, requestID):
+                guard requestID == state.requestID, state.isLoadingMore else { return .none }
                 // 🔴 局部失败：只写 `moreErrorMessage`，**不写 `errorMessage`**。
                 // 写它会让 `ExploreView` 把整份已经加载好的书目换成整页失败态，
                 // 用户翻了半天看到的书会被一次网络抖动全部顶掉。
@@ -200,15 +194,6 @@ public struct ExploreFeature: Reducer {
                 // 按**显式**记录的失败步骤重发对应请求 —— 不靠「哪个 message 非空」反推。
                 guard let failedStep = state.failedStep else { return .none }
                 switch failedStep {
-                case .categories:
-                    // 显式重试一律给 loading 反馈（静默刷新只属于 `.task`）。
-                    return loadCategories(
-                        &state,
-                        store: exploreCategoryStore,
-                        service: exploreService,
-                        showsLoading: true
-                    )
-
                 case .firstPage:
                     guard let category = state.selectedCategory else { return .none }
                     return loadFirstPage(&state, category: category, service: exploreService)
@@ -226,52 +211,13 @@ public struct ExploreFeature: Reducer {
 public extension ExploreFeature {
     /// 加载失败发生在哪一步（`State.failedStep`）。
     ///
-    /// 三个阶段各有独立的失败态：分类没拿到与首屏书目失败都是**整页失败**
-    /// （写 `errorMessage`），下一页失败是**局部失败**（写 `moreErrorMessage`）。
-    /// `.retry` 必须知道是哪一步，才能重发对应的那一条请求 —— 尤其不能在
-    /// 「翻页失败」时重拉第 1 页，那等于把用户已经翻开的分页位置丢掉。
+    /// 首屏书目失败是整页失败（写 `errorMessage`），下一页失败是局部失败
+    /// （写 `moreErrorMessage`）。`.retry` 必须重发失败的那一页。
     enum FailureStep: Equatable {
-        /// 分类列表（`.task` 缓存缺失后的那一次联网）。
-        case categories
         /// 选中分类的第 1 页。
         case firstPage
         /// 当前分类的下一页。
         case more
-    }
-}
-
-/// 读缓存 → 命中即用；未命中才联网并落盘。
-///
-/// `.task` 与 `.retry` 走同一条路径，差别只在 `showsLoading`：`.task` 传
-/// `state.categories.isEmpty`（手上已经有分类就**静默刷新**，别用 spinner 把已经展示出来的
-/// 内容顶掉），`.retry` 传 `true`（显式重试必须看得到 loading 反馈）。
-/// 首屏 loading / 失败态复位也收在这里。
-private func loadCategories(
-    _ state: inout ExploreFeature.State,
-    store: ExploreCategoryStore,
-    service: ExploreService,
-    showsLoading: Bool
-) -> Effect<ExploreFeature.Action> {
-    state.isLoading = showsLoading
-    clearFailure(&state)
-    return .run { send in
-        if let cached = await store.load(), !cached.isEmpty {
-            await send(.categoriesLoaded(cached))
-            return
-        }
-        do {
-            let categories = try await service.categories()
-            // 引擎对「首页解析不出分类」不抛错而是返回空数组（见 `exploreCategories` 文档）：
-            // 必须与「成功」分开呈现，并且**不落盘** —— 别用一次空结果覆盖掉已有缓存。
-            guard !categories.isEmpty else {
-                await send(.categoriesFailed("未解析到书城分类，请稍后重试。"))
-                return
-            }
-            await store.save(categories)
-            await send(.categoriesLoaded(categories))
-        } catch {
-            await send(.categoriesFailed("分类加载失败：\(error.localizedDescription)"))
-        }
     }
 }
 
@@ -284,16 +230,19 @@ private func loadFirstPage(
     state.selectedCategory = category
     state.books = []
     state.page = 1
+    state.pageStarts = []
     state.hasMore = false
     state.isLoadingMore = false
     state.isLoading = true
+    state.requestID += 1
+    let requestID = state.requestID
     clearFailure(&state)
     return .run { send in
         do {
             let books = try await service.books(category, 1)
-            await send(.booksLoaded(books))
+            await send(.booksLoaded(books, requestID: requestID))
         } catch {
-            await send(.booksFailed("书目加载失败：\(error.localizedDescription)"))
+            await send(.booksFailed("书目加载失败：\(error.localizedDescription)", requestID: requestID))
         }
     }
 }
@@ -312,13 +261,15 @@ private func loadMore(
     guard let category = state.selectedCategory else { return .none }
     clearFailure(&state)
     state.isLoadingMore = true
+    state.requestID += 1
+    let requestID = state.requestID
     let nextPage = state.page + 1
     return .run { send in
         do {
             let books = try await service.books(category, nextPage)
-            await send(.moreLoaded(books, page: nextPage))
+            await send(.moreLoaded(books, page: nextPage, requestID: requestID))
         } catch {
-            await send(.moreFailed("加载更多失败：\(error.localizedDescription)"))
+            await send(.moreFailed("加载更多失败：\(error.localizedDescription)", requestID: requestID))
         }
     }
 }

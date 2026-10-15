@@ -6,7 +6,7 @@ import SwiftUI
 /// 书城 —— 分类胶囊栏 + 分类书目分页（U5-3）。
 ///
 /// ## 与 Reducer 的分工
-/// 本文件**只管展示和用户交互**：分类的缓存 / 联网、分页游标、末页判定全在 `ExploreFeature`
+/// 本文件**只管展示和用户交互**：固定分类目录、书目联网、分页游标、末页判定全在 `ExploreFeature`
 /// （见 `Packages/NovelCore/Sources/NovelCore/Explore/ExploreFeature.swift`）。
 ///
 /// ## 为什么用 `WithViewStore` 而不是 `store.state`
@@ -90,45 +90,6 @@ public struct ExploreView: View {
     }
 }
 
-// MARK: - 分类栏
-
-private extension ExploreView {
-    /// 分类栏：胶囊行 + 一条发丝分隔线。
-    /// 与书架的 `groupBar`（见 `BookshelfView+GroupBar.swift` 的 `groupBar(_:downloadStore:)`）同一套结构。
-    func categoryBar(
-        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
-    ) -> some View {
-        VStack(spacing: 0) {
-            categoryChips(viewStore)
-
-            // 分类栏与书目区之间的一条发丝分隔线（系统 `Divider()`，不自算 1px）。
-            // 滚动书目时它固定不动，把「筛选」和「内容」两个区块分开。
-            Divider()
-        }
-        .background(AppTheme.Surface.page)
-    }
-
-    /// 横向滚动的分类胶囊（照抄 `BookshelfView+GroupBar.swift` 的 `groupChips(_:)` 写法）。
-    private func categoryChips(
-        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
-    ) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DesignTokens.Spacing.xs) {
-                ForEach(viewStore.categories) { category in
-                    ExploreCategoryChip(
-                        title: category.title,
-                        isSelected: viewStore.selectedCategory == category
-                    ) {
-                        viewStore.send(.categorySelected(category))
-                    }
-                }
-            }
-            .padding(.horizontal, DesignTokens.Spacing.md)
-            .padding(.vertical, DesignTokens.Spacing.xs)
-        }
-    }
-}
-
 // MARK: - 内容区
 
 private extension ExploreView {
@@ -137,8 +98,8 @@ private extension ExploreView {
     /// 加载态排在最前（同 `SearchView` 的 `content(_:)` 的顺序）：切分类时旧书目要立刻让位，
     /// 否则上一个分类的列表原样留着，看起来像没点中。
     /// 它同时兜住「还没有分类、也还没有失败」的那一帧：`.task` 是 `onAppear` 之后才发的，
-    /// 这一帧若判成失败，进页面会先闪一下「加载失败」。reducer 对「首页解析不出分类」
-    /// 一律置 `errorMessage`，所以「分类为空且无错误」只可能是还没请求完。
+    /// 这一帧若判成失败，进页面会先闪一下「加载失败」；固定分类由 `.task` 同步填入，
+    /// 所以「分类为空且无错误」只可能是首次发起请求前的短暂状态。
     ///
     /// 🔴 这里的整页失败态**只**由 `errorMessage`（分类 / 首屏失败）触发：
     /// 「加载更多」失败是局部失败，走 `moreErrorMessage`，只在底部分页行上就地提示 ——
@@ -211,9 +172,17 @@ private extension ExploreView {
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         List {
-            ForEach(viewStore.books) { book in
-                ExploreBookRow(book: book) {
-                    detailBook = book
+            ForEach(ExploreDisplayRow.rows(
+                books: viewStore.books,
+                pageStarts: viewStore.pageStarts
+            )) { row in
+                if let page = row.pageLabel {
+                    ExplorePageLabelRow(page: page)
+                        .exploreRowChrome()
+                }
+
+                ExploreBookRow(book: row.book) {
+                    detailBook = row.book
                     isShowingDetail = true
                 }
                 .listRowInsets(
@@ -225,109 +194,27 @@ private extension ExploreView {
                     )
                 )
                 .listRowSeparator(.hidden)
-                // 行背景清掉：卡面颜色由 `ExploreBookRow` 自己画（`AppTheme.Surface.card`），
-                // 这里再铺一层 List 默认的 `systemBackground`（浅色纯白）会把卡片之间的
-                // 间隙也涂白，卡片就与页面分不出层次了（同 `SearchView` 的 `resultsView(_:)`）。
                 .listRowBackground(Color.clear)
             }
 
-            if let message = viewStore.moreErrorMessage {
-                // 「加载更多」失败：提示与「重试」就地长在分页行上，上面已加载的书目不动。
-                moreErrorRow(message, viewStore: viewStore)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+            if viewStore.moreErrorMessage != nil {
+                ExploreLoadMoreRetryRow {
+                    viewStore.send(.retry)
+                }
+                .exploreRowChrome()
             } else if viewStore.hasMore {
-                loadMoreRow(viewStore)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                ExploreLoadMoreRow(isLoadingMore: viewStore.isLoadingMore) {
+                    viewStore.send(.loadMore)
+                }
+                .exploreRowChrome()
+            } else {
+                ExploreEndOfResultsRow()
+                    .exploreRowChrome()
             }
         }
         .listStyle(.plain)
         // 让 List 自己的滚动背景透出页面分组灰。
         .scrollContentBackground(.hidden)
-    }
-
-    /// 「加载更多」失败的行内提示 + 「重试」。
-    ///
-    /// 不套详情的 `InlineErrorBanner`（`ChapterListView.swift:385`）：那条错误条自带标题，
-    /// 文案里已经写了「加载更多失败」，两行会重复同一句话。
-    private func moreErrorRow(
-        _ message: String,
-        viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
-    ) -> some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            // HIG §9：`.controlSize(.large)` 把「重试」抬到 44pt 命中区（同 `failureView`）。
-            Button("重试") {
-                viewStore.send(.retry)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-        }
-    }
-
-    /// 分页入口：`hasMore == true` 才出现；加载中显示进度并禁用，重复点不会拉出重复页。
-    private func loadMoreRow(
-        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
-    ) -> some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
-            if viewStore.isLoadingMore {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Button {
-                viewStore.send(.loadMore)
-            } label: {
-                Text("加载更多")
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .disabled(viewStore.isLoadingMore)
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - 分类胶囊
-
-/// 与书架的 `GroupChip`（见 `BookshelfView+GroupBar.swift` 的 `GroupChip`）逐项对齐：同为 44pt 胶囊、
-/// 同样的选中填充与按下反馈 —— 同类控件必须用同一种视觉语言。
-private struct ExploreCategoryChip: View {
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .lineLimit(1)
-                .padding(.horizontal, DesignTokens.Spacing.md)
-                .padding(.vertical, DesignTokens.Spacing.xs)
-                // §9 触控目标：胶囊本身做到 44pt —— 强调层贴的就是它，所以不会出现「按下变胖」。
-                .frame(minHeight: 44)
-                // 未选中 = 白卡面 + 主色文字（U1-1 的「卡面 = 白」同样适用于分类栏里的贴片）；
-                // 选中 = 品牌强调色填充。
-                .background(
-                    Capsule().fill(
-                        isSelected ? AppTheme.accent : AppTheme.Surface.card
-                    )
-                )
-                // ⚠️ 这里的 `Color.white` 与书架胶囊一致，是 owner **已裁定「保持现状」**的一项：
-                // 深色下强调色填充配白字是 3.65:1，而任何单一深色值都无法同时满足
-                // 「小字压在卡片上 ≥ 4.5」与「填充配白字 ≥ 4.5」（论证见 `AppTheme.accent` 文档），
-                // 取舍是保小字可读。**不要**改这一处颜色，也不要引入新的硬编码色。
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
-        }
-        // 强调层贴胶囊轮廓，避免按下瞬间两端露出方角（U0-4）。
-        .buttonStyle(PressableCardButtonStyle(pressedScale: 0.96, shape: AnyShape(Capsule())))
-        // 选中语义交给 Button 的 `.isSelected` trait（照抄 `BookshelfView+GroupBar.swift` 的 `GroupChip`）：
-        // VoiceOver 才读得出「当前选中」。
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

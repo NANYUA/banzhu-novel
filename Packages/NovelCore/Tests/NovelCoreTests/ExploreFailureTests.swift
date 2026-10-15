@@ -5,44 +5,12 @@ import XCTest
 
 /// 失败与重试的回归测试。
 ///
-/// 三类失败必须分开处理：分类没拿到、首屏书目失败都是**整页失败**（写 `errorMessage`），
-/// 「加载更多」失败是**局部失败**（写 `moreErrorMessage`）—— 后者不得把已经加载好的书目
-/// 换成失败页，而且 `.retry` 必须重发**失败的那一步**：翻页失败就重发同一页，
-/// 不许退回第 1 页。夹具与调用记录器见 `ExploreTestSupport.swift`。
+/// 首屏书目失败是**整页失败**（写 `errorMessage`），「加载更多」失败是**局部失败**
+/// （写 `moreErrorMessage`）—— 后者不得把已经加载好的书目换成失败页，
+/// 而且 `.retry` 必须重发同一页，不许退回第 1 页。夹具见 `ExploreTestSupport.swift`。
 @MainActor
 final class ExploreFailureTests: XCTestCase {
     // MARK: - 失败态下的重试：必须给 loading，且重发的是「失败的那一步」
-
-    /// 失败态下的 `.retry` **必须**给 loading 反馈 —— 哪怕手上已经有分类。
-    /// 这条同时钉住「静默刷新只属于 `.task`」：重试是用户显式动作，不能被悄悄降级成静默刷新。
-    func test失败态下重试仍然进入加载态() async {
-        let stale = [ExploreTestData.category]
-        let store = TestStore(
-            initialState: ExploreFeature.State(
-                categories: stale,
-                errorMessage: "分类加载失败：连接超时。",
-                failedStep: .categories
-            )
-        ) {
-            ExploreFeature()
-        } withDependencies: {
-            // 缓存命中：不该走网络。
-            $0.exploreCategoryStore.load = { stale }
-            $0.exploreService.categories = { stale }
-        }
-
-        await store.send(.retry) {
-            $0.isLoading = true
-            $0.errorMessage = nil
-            $0.failedStep = nil
-        }
-        await store.receive(.categoriesLoaded(stale)) {
-            $0.isLoading = false
-        }
-        await store.finish()
-
-        XCTAssertFalse(store.state.isLoading, "重试完成后必须复位 loading")
-    }
 
     func test首屏书目失败后重试仍重拉第1页() async {
         let pageOne = ExploreTestData.fullPage(1)
@@ -63,8 +31,9 @@ final class ExploreFailureTests: XCTestCase {
         await store.send(.categorySelected(ExploreTestData.category)) {
             $0.selectedCategory = ExploreTestData.category
             $0.isLoading = true
+            $0.requestID = 1
         }
-        await store.receive(.booksFailed("书目加载失败：网络不可用。")) {
+        await store.receive(.booksFailed("书目加载失败：网络不可用。", requestID: 1)) {
             $0.isLoading = false
             $0.errorMessage = "书目加载失败：网络不可用。"
             $0.failedStep = .firstPage
@@ -73,10 +42,12 @@ final class ExploreFailureTests: XCTestCase {
             $0.isLoading = true
             $0.errorMessage = nil
             $0.failedStep = nil
+            $0.requestID = 2
         }
-        await store.receive(.booksLoaded(pageOne)) {
+        await store.receive(.booksLoaded(pageOne, requestID: 2)) {
             $0.books = pageOne
             $0.isLoading = false
+            $0.pageStarts = [ExplorePageStart(page: 1, index: 0)]
             $0.hasMore = true
         }
         await store.finish()
@@ -97,6 +68,7 @@ final class ExploreFailureTests: XCTestCase {
                 categories: [ExploreTestData.category],
                 selectedCategory: ExploreTestData.category,
                 books: pageOne,
+                pageStarts: [ExplorePageStart(page: 1, index: 0)],
                 hasMore: true
             )
         ) {
@@ -112,8 +84,9 @@ final class ExploreFailureTests: XCTestCase {
 
         await store.send(.loadMore) {
             $0.isLoadingMore = true
+            $0.requestID = 1
         }
-        await store.receive(.moreFailed("加载更多失败：网络不可用。")) {
+        await store.receive(.moreFailed("加载更多失败：网络不可用。", requestID: 1)) {
             $0.moreErrorMessage = "加载更多失败：网络不可用。"
             $0.failedStep = .more
             $0.isLoadingMore = false
@@ -125,6 +98,7 @@ final class ExploreFailureTests: XCTestCase {
         XCTAssertEqual(store.state.moreErrorMessage, "加载更多失败：网络不可用。")
         XCTAssertFalse(store.state.isLoadingMore, "失败后必须复位 isLoadingMore")
         XCTAssertEqual(store.state.page, 1, "失败不推进页码，重试仍从这一页往后")
+        XCTAssertEqual(store.state.pageStarts, [ExplorePageStart(page: 1, index: 0)], "翻页失败保留已有页码标签")
     }
 
     func test加载更多失败后重试重发同一页而不是回第1页() async {
@@ -137,6 +111,7 @@ final class ExploreFailureTests: XCTestCase {
                 selectedCategory: ExploreTestData.category,
                 books: loaded,
                 page: 3,
+                pageStarts: ExploreTestData.pageStarts([(1, 0), (2, 30), (3, 60)]),
                 hasMore: true
             )
         ) {
@@ -152,8 +127,9 @@ final class ExploreFailureTests: XCTestCase {
 
         await store.send(.loadMore) {
             $0.isLoadingMore = true
+            $0.requestID = 1
         }
-        await store.receive(.moreFailed("加载更多失败：网络不可用。")) {
+        await store.receive(.moreFailed("加载更多失败：网络不可用。", requestID: 1)) {
             $0.moreErrorMessage = "加载更多失败：网络不可用。"
             $0.failedStep = .more
             $0.isLoadingMore = false
@@ -163,10 +139,12 @@ final class ExploreFailureTests: XCTestCase {
             $0.moreErrorMessage = nil
             $0.failedStep = nil
             $0.isLoadingMore = true
+            $0.requestID = 2
         }
-        await store.receive(.moreLoaded(pageFour, page: 4)) {
+        await store.receive(.moreLoaded(pageFour, page: 4, requestID: 2)) {
             $0.books = loaded + pageFour
             $0.page = 4
+            $0.pageStarts = ExploreTestData.pageStarts([(1, 0), (2, 30), (3, 60), (4, 90)])
             $0.isLoadingMore = false
             $0.hasMore = false
         }
@@ -193,6 +171,8 @@ final class ExploreFailureTests: XCTestCase {
                 failedStep: .more,
                 selectedCategory: ExploreTestData.category,
                 books: pageOne,
+                pageStarts: [ExplorePageStart(page: 1, index: 0)],
+                requestID: 1,
                 isLoadingMore: true,
                 hasMore: true
             )
@@ -200,9 +180,10 @@ final class ExploreFailureTests: XCTestCase {
             ExploreFeature()
         }
 
-        await store.send(.moreLoaded(pageTwo, page: 2)) {
+        await store.send(.moreLoaded(pageTwo, page: 2, requestID: 1)) {
             $0.books = pageOne + pageTwo
             $0.page = 2
+            $0.pageStarts = [ExplorePageStart(page: 1, index: 0), ExplorePageStart(page: 2, index: 30)]
             $0.isLoadingMore = false
             $0.hasMore = false
             $0.moreErrorMessage = nil

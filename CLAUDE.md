@@ -99,7 +99,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（41 文件）
+│   └── Sources/                     # SwiftUI 视图层（43 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -117,7 +117,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       │                            #   TextAreaBorder（正文盒红线标尺，设置里开关）/
 │       │                            #   DownloadPicker（阅读页「下载」弹的章节选择面板）
 │       ├── SearchView.swift         # 搜索（+PaginationRows：底部页码标签 / 加载行 / 重试行）
-│       ├── ExploreView.swift        # 发现/分类
+│       ├── ExploreView*.swift       # 书城：三维分类条（组内原位展开）/ 页码提示 / 上拉加载
 │       ├── DownloadQueueView.swift  # 下载队列 + 下载设置（卡片常驻上栏）
 │       ├── DownloadBookCard.swift   # 下载书卡 + 卡片装饰（downloadQueueCard/Row）+ 共享尺度
 │       ├── DownloadSummaryCard.swift # 总进度卡片（与选择卡片**同位交替**）
@@ -127,10 +127,10 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       └── AppTheme / DesignTokens / PressableCardButtonStyle / NumberInputRow.swift
 │                                    # NumberInputRow = 设置页「− 数字框 +」输入行（替代 Slider）
 ├── Packages/
-│   ├── NovelEngine/                 # 纯逻辑层（9 文件）
-│   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 重试 / 日志
+│   ├── NovelEngine/                 # 纯逻辑层（10 文件）
+│   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 固定三维书库目录 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（53 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（54 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
@@ -139,7 +139,8 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   │   │   │                        #   ShelfGroupStore / ShelfBatchDownloader /
 │   │   │   │                        #   ReadingTargetLoader（单点书卡 → 阅读落点）/ BookCoverLoader
 │   │   │   ├── Search/ Detail/ Explore/
-│   │   │   │                        #   SearchFeature.State.pageStarts = 每页起始下标（页码标签用）
+│   │   │   │                        #   SearchFeature.State.pageStarts / ExploreFeature（固定三维书库目录 +
+│   │   │   │                        #   ExplorePageStart 每页起始下标）
 │   │   │   ├── Download/            # DownloadFeature（+State / +Selection）/ DownloadQueueStore /
 │   │   │   │                        #   DownloadSettingsStore（下载设置持久化）/ DownloadNetworkMonitor
 │   │   │   ├── Reader/              # ReaderFeature（+ChapterTransition 相邻章切换）/ ReaderLoader /
