@@ -127,6 +127,12 @@ public struct SearchFeature: Reducer {
         case removedFromShelf(bookPath: String)
         /// 关闭提示。
         case noticeDismissed
+        /// 跳到指定页码：用第 N 页的结果替换当前结果。
+        case jumpToPage(Int)
+        /// 跳页就绪。
+        case jumpedToPage([Book], page: Int)
+        /// 跳页失败。
+        case jumpFailed(String)
     }
 
     @Dependency(\.searchService) var searchService
@@ -278,6 +284,44 @@ public struct SearchFeature: Reducer {
 
             case .noticeDismissed:
                 state.notice = nil
+                return .none
+
+            case let .jumpToPage(page):
+                guard page >= 1 else { return .none }
+                let keyword = state.submittedKeyword
+                guard !keyword.isEmpty else { return .none }
+                state.results = []
+                state.isLoading = true
+                state.errorMessage = nil
+                state.notice = nil
+                state.page = page
+                state.pageStarts = []
+                state.loadMoreFailed = false
+                state.hasMore = false
+                let service = searchService
+                return .run { send in
+                    do {
+                        let books = try await service.search(keyword, page)
+                        await send(.jumpedToPage(books, page: page))
+                    } catch {
+                        await send(.jumpFailed(error.localizedDescription))
+                    }
+                }
+
+            case let .jumpedToPage(books, page):
+                state.results = books
+                state.isLoading = false
+                state.page = page
+                // 第 N 页的书从 `results` 的第 0 位开始，后续 `.moreSucceeded` 继续往后追加。
+                state.pageStarts = [SearchPageStart(page: page, index: 0)]
+                state.loadMoreFailed = false
+                state.hasMore = books.count >= 30
+                return .none
+
+            case let .jumpFailed(message):
+                state.results = []
+                state.isLoading = false
+                state.errorMessage = message
                 return .none
             }
         }

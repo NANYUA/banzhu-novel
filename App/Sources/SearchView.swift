@@ -161,13 +161,25 @@ struct SearchView: View {
     private func resultsView(
         _ viewStore: ViewStore<SearchFeature.State, SearchFeature.Action>
     ) -> some View {
-        List {
-            resultRows(viewStore)
-            paginationRow(viewStore)
+        VStack(spacing: 0) {
+            // 跳页按钮：搜索结果区顶部（搜索框右下、结果上方），右对齐。
+            HStack {
+                Spacer()
+                PageJumpButton(page: viewStore.page) { page in
+                    viewStore.send(.jumpToPage(page))
+                }
+            }
+            .padding(.horizontal, DesignTokens.Spacing.md)
+            .padding(.top, DesignTokens.Spacing.xs)
+
+            List {
+                resultRows(viewStore)
+                paginationRow(viewStore)
+            }
+            .listStyle(.plain)
+            // 让 List 自己的滚动背景透出页面分组灰。
+            .scrollContentBackground(.hidden)
         }
-        .listStyle(.plain)
-        // 让 List 自己的滚动背景透出页面分组灰。
-        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder

@@ -195,4 +195,62 @@ final class ExploreFailureTests: XCTestCase {
         XCTAssertNil(store.state.failedStep, "失败步骤也要一起清掉，否则 `.retry` 还会重发这一页")
         XCTAssertEqual(store.state.books, pageOne + pageTwo)
     }
+
+    // MARK: - 跳页失败：整页失败，`.retry` 重跳同一页
+
+    func test跳页失败后重试仍跳同一页() async {
+        let selected = ExploreTestData.category
+        let pageOne = ExploreTestData.fullPage(1)
+        let pageTwo = [Book(path: "/book/2_0/", title: "第二页的书")]
+        let recorder = ExploreCallRecorder()
+        let store = TestStore(
+            initialState: ExploreFeature.State(
+                categories: [selected],
+                selectedCategory: selected,
+                books: pageOne,
+                pageStarts: [ExplorePageStart(page: 1, index: 0)],
+                hasMore: true
+            )
+        ) {
+            ExploreFeature()
+        } withDependencies: {
+            $0.exploreService.books = { category, page in
+                try await recorder.recordBooks(title: category.title, page: page)
+                return page == 2 ? pageTwo : pageOne
+            }
+        }
+
+        await recorder.failBookCalls(1)
+
+        await store.send(.jumpToPage(2)) {
+            $0.books = []
+            $0.page = 2
+            $0.pageStarts = []
+            $0.hasMore = false
+            $0.isLoading = true
+            $0.requestID = 1
+        }
+        await store.receive(.jumpFailed("书目加载失败：网络不可用。", page: 2, requestID: 1)) {
+            $0.isLoading = false
+            $0.errorMessage = "书目加载失败：网络不可用。"
+            $0.failedStep = .jump(page: 2)
+        }
+        await store.send(.retry) {
+            $0.isLoading = true
+            $0.errorMessage = nil
+            $0.failedStep = nil
+            $0.requestID = 2
+        }
+        await store.receive(.jumpedToPage(pageTwo, page: 2, requestID: 2)) {
+            $0.books = pageTwo
+            $0.isLoading = false
+            $0.page = 2
+            $0.pageStarts = [ExplorePageStart(page: 2, index: 0)]
+            $0.hasMore = true
+        }
+        await store.finish()
+
+        let pages = await recorder.pageNumbers()
+        XCTAssertEqual(pages, [2, 2], "跳页失败后的重试仍应请求同一页码")
+    }
 }

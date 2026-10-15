@@ -184,6 +184,7 @@ final class ExploreFeatureTests: XCTestCase {
             $0.books = [book]
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0)]
             $0.isLoading = false
+            $0.hasMore = true
         }
         await store.finish()
     }
@@ -400,5 +401,50 @@ final class ExplorePagingTests: XCTestCase {
 
         let pages = await recorder.pageNumbers()
         XCTAssertEqual(pages, [2], "末页之后不得再发请求")
+    }
+
+    // MARK: - 跳页
+
+    func test跳页用指定页替换当前书目() async {
+        let selected = ExploreTestData.category
+        let pageOne = ExploreTestData.fullPage(1)
+        let pageTwo = [Book(path: "/book/2_0/", title: "第二页的书")]
+        let recorder = ExploreCallRecorder()
+        let store = TestStore(
+            initialState: ExploreFeature.State(
+                categories: [selected],
+                selectedCategory: selected,
+                books: pageOne,
+                pageStarts: [ExplorePageStart(page: 1, index: 0)],
+                hasMore: true
+            )
+        ) {
+            ExploreFeature()
+        } withDependencies: {
+            $0.exploreService.books = { category, page in
+                try await recorder.recordBooks(title: category.title, page: page)
+                return page == 2 ? pageTwo : pageOne
+            }
+        }
+
+        await store.send(.jumpToPage(2)) {
+            $0.books = []
+            $0.page = 2
+            $0.pageStarts = []
+            $0.hasMore = false
+            $0.isLoading = true
+            $0.requestID = 1
+        }
+        await store.receive(.jumpedToPage(pageTwo, page: 2, requestID: 1)) {
+            $0.books = pageTwo
+            $0.isLoading = false
+            $0.page = 2
+            $0.pageStarts = [ExplorePageStart(page: 2, index: 0)]
+            $0.hasMore = true
+        }
+        await store.finish()
+
+        let pages = await recorder.pageNumbers()
+        XCTAssertEqual(pages, [2], "跳页应只请求目标页码")
     }
 }

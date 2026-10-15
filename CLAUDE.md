@@ -99,7 +99,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（43 文件）
+│   └── Sources/                     # SwiftUI 视图层（44 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -124,7 +124,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       ├── DownloadSelectionCard.swift # 选择模式四项操作卡片（横排一行）
 │       ├── SiteSettingsView.swift   # 站点设置
 │       ├── GuardView.swift          # 盾页/人机校验覆盖层
-│       └── AppTheme / DesignTokens / PressableCardButtonStyle / NumberInputRow.swift
+│       └── AppTheme / DesignTokens / PressableCardButtonStyle / PageJumpButton / NumberInputRow.swift
 │                                    # NumberInputRow = 设置页「− 数字框 +」输入行（替代 Slider）
 ├── Packages/
 │   ├── NovelEngine/                 # 纯逻辑层（10 文件）

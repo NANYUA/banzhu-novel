@@ -9,6 +9,16 @@ extension ExploreView {
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         VStack(spacing: 0) {
+            // 跳页按钮：筛选栏右上角、单独压在最上（右对齐），点击弹输入框跳指定页码。
+            HStack {
+                Spacer()
+                PageJumpButton(page: viewStore.page) { page in
+                    viewStore.send(.jumpToPage(page))
+                }
+            }
+            .padding(.horizontal, DesignTokens.Spacing.md)
+            .padding(.top, DesignTokens.Spacing.xs)
+
             ExploreCategoryFilters(
                 categories: viewStore.categories,
                 selectedCategory: viewStore.selectedCategory,

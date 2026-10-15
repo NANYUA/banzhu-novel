@@ -115,8 +115,14 @@ public struct ExploreFeature: Reducer {
         /// 既有书目、页码与整页失败态都不受影响。
         case moreFailed(String, requestID: Int)
         /// 重试「当前失败的那一步」（依据 `State.failedStep`）：
-        /// 首屏失败 → 重拉第 1 页；翻页失败 → 重发**同一页**。
+        /// 首屏失败 → 重拉第 1 页；翻页失败 → 重发**同一页**；跳页失败 → 重跳**同一页**。
         case retry
+        /// 跳到指定页码：用第 N 页的书替换当前书目。
+        case jumpToPage(Int)
+        /// 跳页就绪。
+        case jumpedToPage([Book], page: Int, requestID: Int)
+        /// 跳页失败（整页级失败）。
+        case jumpFailed(String, page: Int, requestID: Int)
     }
 
     @Dependency(\.exploreService) var exploreService
@@ -199,7 +205,30 @@ public struct ExploreFeature: Reducer {
                     // 重发**同一页**：`loadMore` 只按 `page + 1` 再请求一次，
                     // 不碰 `books` / `page` / `hasMore`，所以分页位置原地保住。
                     return loadMore(&state, service: exploreService)
+
+                case let .jump(page):
+                    return jumpToPage(&state, page: page, service: exploreService)
                 }
+
+            case let .jumpToPage(page):
+                return jumpToPage(&state, page: page, service: exploreService)
+
+            case let .jumpedToPage(books, page, requestID):
+                guard requestID == state.requestID, state.isLoading else { return .none }
+                state.books = books
+                state.isLoading = false
+                state.page = page
+                state.pageStarts = books.isEmpty ? [] : [ExplorePageStart(page: page, index: 0)]
+                state.hasMore = !books.isEmpty
+                clearFailure(&state)
+                return .none
+
+            case let .jumpFailed(message, page, requestID):
+                guard requestID == state.requestID, state.isLoading else { return .none }
+                state.isLoading = false
+                state.errorMessage = message
+                state.failedStep = .jump(page: page)
+                return .none
             }
         }
     }
@@ -215,6 +244,8 @@ public extension ExploreFeature {
         case firstPage
         /// 当前分类的下一页。
         case more
+        /// 跳到第 N 页失败（整页级失败，`.retry` 重跳**同一页**）。
+        case jump(page: Int)
     }
 }
 
@@ -267,6 +298,37 @@ private func loadMore(
             await send(.moreLoaded(books, page: nextPage, requestID: requestID))
         } catch {
             await send(.moreFailed("加载更多失败：\(error.localizedDescription)", requestID: requestID))
+        }
+    }
+}
+
+/// 跳到指定页码：清空当前书目、拉第 N 页替换（整页级，同 `loadFirstPage`）。
+///
+/// 与 `loadFirstPage` 同一套语义（清书目 → 置 loading → 拉第 N 页 → 覆盖），
+/// 只是目标页号由调用方给定。跳页失败是整页失败：写 `errorMessage` 并记
+/// `failedStep = .jump(page:)`，`.retry` 据此重跳**同一页**而不是退回第 1 页。
+private func jumpToPage(
+    _ state: inout ExploreFeature.State,
+    page: Int,
+    service: ExploreService
+) -> Effect<ExploreFeature.Action> {
+    guard page >= 1 else { return .none }
+    guard let category = state.selectedCategory else { return .none }
+    state.books = []
+    state.page = page
+    state.pageStarts = []
+    state.hasMore = false
+    state.isLoadingMore = false
+    state.isLoading = true
+    state.requestID += 1
+    let requestID = state.requestID
+    clearFailure(&state)
+    return .run { send in
+        do {
+            let books = try await service.books(category, page)
+            await send(.jumpedToPage(books, page: page, requestID: requestID))
+        } catch {
+            await send(.jumpFailed("书目加载失败：\(error.localizedDescription)", page: page, requestID: requestID))
         }
     }
 }
