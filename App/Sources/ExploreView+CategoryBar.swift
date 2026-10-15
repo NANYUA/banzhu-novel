@@ -5,23 +5,18 @@ import SwiftUI
 
 extension ExploreView {
     /// 三个筛选维度各占一行；空间不足时可单独展开该组的全部选项。
+    /// 跳页按钮并入「状态」行末（右对齐），点击弹输入框跳指定页码。
     func categoryBar(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         VStack(spacing: 0) {
-            // 跳页按钮：筛选栏右上角、单独压在最上（右对齐），点击弹输入框跳指定页码。
-            HStack {
-                Spacer()
-                PageJumpButton(page: viewStore.page) { page in
-                    viewStore.send(.jumpToPage(page))
-                }
-            }
-            .padding(.horizontal, DesignTokens.Spacing.md)
-            .padding(.top, DesignTokens.Spacing.xs)
-
             ExploreCategoryFilters(
                 categories: viewStore.categories,
                 selectedCategory: viewStore.selectedCategory,
+                page: viewStore.page,
+                onJump: { page in
+                    viewStore.send(.jumpToPage(page))
+                },
                 onSelect: { category in
                     viewStore.send(.categorySelected(category))
                 }
@@ -35,6 +30,8 @@ extension ExploreView {
 private struct ExploreCategoryFilters: View {
     let categories: [ExploreCategory]
     let selectedCategory: ExploreCategory?
+    let page: Int
+    let onJump: (Int) -> Void
     let onSelect: (ExploreCategory) -> Void
 
     private var selectedStatus: ExploreCategory {
@@ -94,6 +91,8 @@ private struct ExploreCategoryFilters: View {
                     title: group.title,
                     items: categories.filter { $0.group == group },
                     selectedItem: selectedItem(for: group),
+                    page: group == .status ? page : nil,
+                    onJump: group == .status ? onJump : nil,
                     onSelect: select
                 )
             }
@@ -107,48 +106,86 @@ private struct ExploreCategoryFilterRow: View {
     let title: String
     let items: [ExploreCategory]
     let selectedItem: ExploreCategory
+    let page: Int?
+    let onJump: ((Int) -> Void)?
     let onSelect: (ExploreCategory) -> Void
     @State private var isExpanded = false
+
+    /// 展开态第一行保留的胶囊数（不含「收起」按钮）。
+    ///
+    /// demo 稿固定 3 个（14px 字号 / 392px 宽度）；本 App 统一 `.subheadline`（15pt）
+    /// 加 `Spacing.md` 内边距后，标准 iPhone 宽度只放得下 2 个胶囊 + 「收起」（3 个会溢出），
+    /// 故取 2，与收起态在标准宽度下实际能放下的胶囊数一致。
+    private static let expandedFirstRowCount = 2
 
     var body: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.xs) {
             Text(title)
-                .font(.footnote.weight(.medium))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
                 .frame(width: DesignTokens.Hit.minSize, alignment: .leading)
                 .frame(minHeight: DesignTokens.Hit.minSize, alignment: .center)
 
             if isExpanded {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: DesignTokens.Hit.minSize * 2), spacing: DesignTokens.Spacing.xs)],
-                    alignment: .leading,
-                    spacing: DesignTokens.Spacing.xs
-                ) {
-                    ForEach(items) { category in
-                        chip(for: category, allowsWrapping: true)
-                    }
-                    toggleButton
-                }
+                expandedContent
             } else {
-                ViewThatFits(in: .horizontal) {
-                    ForEach((1 ... items.count).reversed(), id: \.self) { visibleCount in
-                        HStack(spacing: DesignTokens.Spacing.xs) {
-                            ForEach(collapsedItems(visibleCount: visibleCount)) { category in
-                                chip(for: category)
-                            }
-                            if visibleCount < items.count {
-                                toggleButton
-                            }
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                    }
-                    VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                        chip(for: selectedItem, allowsWrapping: true)
-                        toggleButton
-                    }
+                collapsedContent
+            }
+
+            if let page, let onJump {
+                Spacer(minLength: DesignTokens.Spacing.xxs)
+                PageJumpButton(page: page, onJump: onJump)
+            }
+        }
+    }
+
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            HStack(spacing: DesignTokens.Spacing.xs) {
+                ForEach(firstRowItems) { category in
+                    chip(for: category)
+                }
+                toggleButton
+            }
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: DesignTokens.Hit.minSize * 2), spacing: DesignTokens.Spacing.xs)],
+                alignment: .leading,
+                spacing: DesignTokens.Spacing.xs
+            ) {
+                ForEach(overflowItems) { category in
+                    chip(for: category, allowsWrapping: true)
                 }
             }
         }
+    }
+
+    private var collapsedContent: some View {
+        ViewThatFits(in: .horizontal) {
+            ForEach((1 ... items.count).reversed(), id: \.self) { visibleCount in
+                HStack(spacing: DesignTokens.Spacing.xs) {
+                    ForEach(collapsedItems(visibleCount: visibleCount)) { category in
+                        chip(for: category)
+                    }
+                    if visibleCount < items.count {
+                        toggleButton
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
+                chip(for: selectedItem, allowsWrapping: true)
+                toggleButton
+            }
+        }
+    }
+
+    private var firstRowItems: [ExploreCategory] {
+        collapsedItems(visibleCount: Self.expandedFirstRowCount)
+    }
+
+    private var overflowItems: [ExploreCategory] {
+        let firstRow = firstRowItems
+        return items.filter { item in !firstRow.contains(item) }
     }
 
     private func collapsedItems(visibleCount: Int) -> [ExploreCategory] {
@@ -174,17 +211,16 @@ private struct ExploreCategoryFilterRow: View {
         Button {
             isExpanded.toggle()
         } label: {
-            HStack(spacing: DesignTokens.Spacing.xxs) {
-                Text(isExpanded ? "收起" : "展开")
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-            }
-            .font(.footnote.weight(.medium))
-            .padding(.horizontal, DesignTokens.Spacing.xs)
-            .frame(minWidth: DesignTokens.Hit.minSize, minHeight: DesignTokens.Hit.minSize)
-            .background(Capsule().fill(AppTheme.Surface.card))
+            Text(isExpanded ? "收起" : "展开")
+                .font(.subheadline.weight(.regular))
+                .lineLimit(1)
+                .padding(.horizontal, DesignTokens.Spacing.md)
+                .padding(.vertical, DesignTokens.Spacing.xs)
+                .frame(minWidth: DesignTokens.Hit.minSize, minHeight: DesignTokens.Hit.minSize)
+                .background(Capsule().fill(AppTheme.Surface.card))
+                .foregroundStyle(Color.primary)
         }
         .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Capsule())))
-        .foregroundStyle(AppTheme.accent)
         .accessibilityLabel(isExpanded ? "收起\(title)筛选" : "展开\(title)筛选")
     }
 }
