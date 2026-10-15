@@ -143,11 +143,10 @@ private struct ExploreCategoryFilterRow: View {
 
     private func collapsedItems(visibleCount: Int) -> [ExploreCategory] {
         var visible = Array(items.prefix(visibleCount))
-        if visibleCount < items.count, let selected = items.first(where: { $0.value == selectedItem.value }),
-           !visible.contains(selected)
-        {
-            visible[visible.count - 1] = selected
-        }
+        guard visibleCount < items.count else { return visible }
+        guard let selected = items.first(where: { $0.value == selectedItem.value }) else { return visible }
+        guard !visible.contains(selected) else { return visible }
+        visible[visible.count - 1] = selected
         return visible
     }
 
