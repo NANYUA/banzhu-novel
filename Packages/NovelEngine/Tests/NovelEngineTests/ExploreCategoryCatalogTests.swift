@@ -23,7 +23,7 @@ final class ExploreCategoryCatalogTests: XCTestCase {
             sort: ExploreCategoryCatalog.sorts[1],
             genre: ExploreCategoryCatalog.genres[5]
         )
-        XCTAssertEqual(selection.url(page: 3), "/shuku/2-allvisit-5-3.html")
+        XCTAssertEqual(selection.url(page: 3), "/shuku/5-allvisit-2-3.html")
         XCTAssertEqual(selection.value, "2|allvisit|5")
     }
 

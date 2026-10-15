@@ -41,6 +41,7 @@ final class ExploreFeatureTests: XCTestCase {
             $0.books = firstPage
             $0.isLoading = false
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0)]
+            $0.hasMore = true
         }
         await store.finish()
         let pages = await recorder.pageNumbers()
@@ -110,6 +111,7 @@ final class ExploreFeatureTests: XCTestCase {
             $0.books = [book]
             $0.isLoading = false
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0)]
+            $0.hasMore = true
         }
         await store.finish()
 
@@ -141,7 +143,7 @@ final class ExploreFeatureTests: XCTestCase {
             ExploreFeature()
         } withDependencies: {
             $0.exploreService.books = { category, page in
-                XCTAssertEqual(category.url(page: page), "/shuku/1-monthvisit-3-1.html")
+                XCTAssertEqual(category.url(page: page), "/shuku/3-monthvisit-1-1.html")
                 return [newBook]
             }
         }
@@ -161,6 +163,7 @@ final class ExploreFeatureTests: XCTestCase {
             $0.books = [newBook]
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0)]
             $0.isLoading = false
+            $0.hasMore = true
         }
         await store.finish()
     }
@@ -248,7 +251,7 @@ final class ExplorePagingTests: XCTestCase {
             $0.page = 2
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0), ExplorePageStart(page: 2, index: 30)]
             $0.isLoadingMore = false
-            $0.hasMore = false
+            $0.hasMore = true
         }
         await store.finish()
 
@@ -280,7 +283,7 @@ final class ExplorePagingTests: XCTestCase {
             $0.page = 2
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0), ExplorePageStart(page: 2, index: 30)]
             $0.isLoadingMore = false
-            $0.hasMore = false
+            $0.hasMore = true
         }
         await store.finish()
     }
@@ -307,7 +310,7 @@ final class ExplorePagingTests: XCTestCase {
             $0.page = 2
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0), ExplorePageStart(page: 2, index: 30)]
             $0.isLoadingMore = false
-            $0.hasMore = false
+            $0.hasMore = true
         }
         await store.finish()
     }
@@ -327,6 +330,7 @@ final class ExplorePagingTests: XCTestCase {
         await store.send(.moreLoaded(first, page: 2, requestID: 1)) {
             $0.page = 2
             $0.isLoadingMore = false
+            $0.hasMore = false
         }
         await store.finish()
         XCTAssertEqual(store.state.pageStarts, [ExplorePageStart(page: 1, index: 0)])
@@ -361,9 +365,8 @@ final class ExplorePagingTests: XCTestCase {
         XCTAssertTrue(calls.isEmpty, "已在加载下一页时不得重复发请求")
     }
 
-    func test返回不足一页视为末页且不再翻页() async {
+    func test返回空页视为末页且不再翻页() async {
         let pageOne = ExploreTestData.fullPage(1)
-        let lastBook = Book(path: "/book/9_1/", title: "最后一本")
         let recorder = ExploreCallRecorder()
         let store = TestStore(
             initialState: ExploreFeature.State(
@@ -378,7 +381,7 @@ final class ExplorePagingTests: XCTestCase {
         } withDependencies: {
             $0.exploreService.books = { category, page in
                 try await recorder.recordBooks(title: category.title, page: page)
-                return [lastBook]
+                return []
             }
         }
 
@@ -386,14 +389,12 @@ final class ExplorePagingTests: XCTestCase {
             $0.isLoadingMore = true
             $0.requestID = 1
         }
-        await store.receive(.moreLoaded([lastBook], page: 2, requestID: 1)) {
-            $0.books = pageOne + [lastBook]
+        await store.receive(.moreLoaded([], page: 2, requestID: 1)) {
             $0.page = 2
-            $0.pageStarts = [ExplorePageStart(page: 1, index: 0), ExplorePageStart(page: 2, index: 30)]
             $0.isLoadingMore = false
             $0.hasMore = false
         }
-        // 不足一页 ⇒ hasMore = false ⇒ 再触发是 no-op（不改变状态，故不传尾随闭包）。
+        // 空页 ⇒ hasMore = false ⇒ 再触发是 no-op（不改变状态，故不传尾随闭包）。
         await store.send(.loadMore)
         await store.finish()
 

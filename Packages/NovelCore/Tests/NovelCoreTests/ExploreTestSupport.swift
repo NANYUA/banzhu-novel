@@ -22,9 +22,9 @@ enum ExploreTestData {
         urlTemplate: "/catalog/1_{{page}}.html"
     )
 
-    /// 满一页（`pageSize` 本）——用来构造「还有下一页」的初态。
+    /// 30 本——用来构造「有内容的一页」的初态（真实站点每页本数不定，这里只取一个方便的下标基准）。
     static func fullPage(_ prefix: Int) -> [Book] {
-        (0 ..< ExploreFeature.pageSize).map {
+        (0 ..< 30).map {
             Book(path: "/book/\(prefix)_\($0)/", title: "示例书 \(prefix)-\($0)")
         }
     }

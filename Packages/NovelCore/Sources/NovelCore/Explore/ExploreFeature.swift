@@ -8,10 +8,10 @@ import NovelEngine
 /// 分类由 `ExploreCategoryCatalog` 本地提供，不依赖首页分类导航或分类缓存。
 ///
 /// ## 分页终止判据
-/// **返回不足一页（`pageSize` = 30 本）即视为末页**：`hasMore` 置 `false`，
-/// 之后 `.loadMore` 一律 no-op（守卫见 `.loadMore` 分支）。
-/// 阈值与 `SearchFeature` 的分页口径一致（书目列表页满一页才继续翻）。
-/// ⚠️ 若列表页实际每页不足 30 本，翻页会提前停住 —— 只需改 `pageSize` 一处。
+/// **本页返回了未重复的新书 ⇒ 还有下一页；整页重复或空页 ⇒ 视为末页**：`hasMore` 置
+/// `false` 后 `.loadMore` 一律 no-op（守卫见 `.loadMore` 分支）。
+/// ⚠️ 站点列表页每页本数不定，不能按「满 30 本才继续翻」推断 —— 那正是上一版
+/// 「只能看到第 1 页」的真因（每页不足 30 本 ⇒ 第 1 页后 `hasMore` 恒为 false）。
 ///
 /// ## 「加载更多」失败是局部失败
 /// 翻页失败只记在 `State.moreErrorMessage` 上，**不写 `State.errorMessage`**：
@@ -20,9 +20,6 @@ import NovelEngine
 /// `.retry` 按 `State.failedStep` 重发**同一页**，而不是退回第 1 页。
 public struct ExploreFeature: Reducer {
     public init() {}
-
-    /// 「还有下一页」的阈值：满一页才允许继续翻（与 `SearchFeature` 同口径）。
-    public static let pageSize = 30
 
     public struct State: Equatable {
         public init(
@@ -145,7 +142,7 @@ public struct ExploreFeature: Reducer {
                 state.isLoading = false
                 state.page = 1
                 state.pageStarts = books.isEmpty ? [] : [ExplorePageStart(page: 1, index: 0)]
-                state.hasMore = books.count >= Self.pageSize
+                state.hasMore = !books.isEmpty
                 clearFailure(&state)
                 return .none
 
@@ -175,7 +172,7 @@ public struct ExploreFeature: Reducer {
                 }
                 state.page = page
                 state.isLoadingMore = false
-                state.hasMore = books.count >= Self.pageSize
+                state.hasMore = !newBooks.isEmpty
                 clearFailure(&state)
                 return .none
 

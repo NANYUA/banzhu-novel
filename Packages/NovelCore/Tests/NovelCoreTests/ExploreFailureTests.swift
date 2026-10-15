@@ -146,7 +146,7 @@ final class ExploreFailureTests: XCTestCase {
             $0.page = 4
             $0.pageStarts = ExploreTestData.pageStarts([(1, 0), (2, 30), (3, 60), (4, 90)])
             $0.isLoadingMore = false
-            $0.hasMore = false
+            $0.hasMore = true
         }
         await store.finish()
 
@@ -185,7 +185,7 @@ final class ExploreFailureTests: XCTestCase {
             $0.page = 2
             $0.pageStarts = [ExplorePageStart(page: 1, index: 0), ExplorePageStart(page: 2, index: 30)]
             $0.isLoadingMore = false
-            $0.hasMore = false
+            $0.hasMore = true
             $0.moreErrorMessage = nil
             $0.failedStep = nil
         }

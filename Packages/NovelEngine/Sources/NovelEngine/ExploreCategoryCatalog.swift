@@ -1,6 +1,6 @@
 /// 站点发现页的筛选目录。
 ///
-/// URL 由「状态-排序-题材-页码」四段组成；状态、排序和题材分别是独立筛选维度。
+/// URL 由「题材-排序-状态-页码」四段组成；状态、排序和题材分别是独立筛选维度。
 public enum ExploreCategoryCatalog {
     public static let statuses: [ExploreCategory] = [
         item("全部", status: "0"),
@@ -39,9 +39,11 @@ public enum ExploreCategoryCatalog {
         let statusValue = status.value ?? "0"
         let sortValue = sort.value ?? "lastupdate"
         let genreValue = genre.value ?? "0"
+        // URL 段序跟站点一致：题材-排序-状态-页码；`value` 仍按「状态|排序|题材」
+        // 排列，供筛选条按位还原选中项（`ExploreView+CategoryBar` 里 value[0]/[1]/[2] = 状态/排序/题材）。
         return ExploreCategory(
             title: "\(status.title) · \(sort.title) · \(genre.title)",
-            urlTemplate: "/shuku/\(statusValue)-\(sortValue)-\(genreValue)-{{page}}.html",
+            urlTemplate: "/shuku/\(genreValue)-\(sortValue)-\(statusValue)-{{page}}.html",
             value: "\(statusValue)|\(sortValue)|\(genreValue)"
         )
     }
