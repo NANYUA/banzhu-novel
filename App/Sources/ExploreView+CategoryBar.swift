@@ -3,11 +3,29 @@ import NovelCore
 import NovelEngine
 import SwiftUI
 
+private struct ExploreFullBarHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct ExploreCompactBarHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 extension ExploreView {
     /// 三个筛选维度各占一行；空间不足时可单独展开该组的全部选项。
     /// 跳页按钮并入「状态」行末（右对齐），点击弹输入框跳指定页码。
+    /// 滚动时按 `collapseProgress`（0 完整 / 1 收缩）把完整栏交叉淡入淡出成
+    /// 一行「3 个选中值 + 跳页按钮」，对齐 `ui-mockups/explore-page.html` 的收缩态。
     func categoryBar(
-        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
+        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>,
+        collapseProgress: Double,
+        onExpand: @escaping () -> Void
     ) -> some View {
         VStack(spacing: 0) {
             ExploreCategoryFilters(
@@ -19,7 +37,9 @@ extension ExploreView {
                 },
                 onSelect: { category in
                     viewStore.send(.categorySelected(category))
-                }
+                },
+                collapseProgress: collapseProgress,
+                onExpand: onExpand
             )
             Divider()
         }
@@ -33,6 +53,13 @@ private struct ExploreCategoryFilters: View {
     let page: Int
     let onJump: (Int) -> Void
     let onSelect: (ExploreCategory) -> Void
+    let collapseProgress: Double
+    let onExpand: () -> Void
+
+    @State private var fullBarHeight: CGFloat = 0
+    @State private var compactBarHeight: CGFloat = 0
+    @State private var hasMeasuredFullBar = false
+    @State private var hasMeasuredCompactBar = false
 
     private var selectedStatus: ExploreCategory {
         option(in: ExploreCategoryCatalog.statuses, defaultIndex: 0)
@@ -85,6 +112,64 @@ private struct ExploreCategoryFilters: View {
     }
 
     var body: some View {
+        ZStack(alignment: .top) {
+            fullBar
+                .opacity(fullBarOpacity)
+                .allowsHitTesting(collapseProgress < 0.5)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ExploreFullBarHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+            compactBar
+                .opacity(compactBarOpacity)
+                .allowsHitTesting(collapseProgress >= 0.5)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ExploreCompactBarHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+        }
+        .frame(height: interpolatedHeight, alignment: .top)
+        .clipped()
+        .onPreferenceChange(ExploreFullBarHeightKey.self) { height in
+            guard !hasMeasuredFullBar, height > 0 else { return }
+            fullBarHeight = height
+            hasMeasuredFullBar = true
+        }
+        .onPreferenceChange(ExploreCompactBarHeightKey.self) { height in
+            guard !hasMeasuredCompactBar, height > 0 else { return }
+            compactBarHeight = height
+            hasMeasuredCompactBar = true
+        }
+        .background(AppTheme.Surface.page)
+    }
+
+    /// 完整栏淡出：`collapseProgress` 0→0.5 内从 1 降到 0。
+    private var fullBarOpacity: Double {
+        1 - min(collapseProgress / 0.5, 1)
+    }
+
+    /// 收缩栏淡入：`collapseProgress` 0.25→0.625 内从 0 升到 1。
+    private var compactBarOpacity: Double {
+        min(max((collapseProgress - 0.25) / 0.375, 0), 1)
+    }
+
+    /// 完整栏与收缩栏高度之间线性插值；首次测量完成前不约束高度（自然高度）。
+    private var interpolatedHeight: CGFloat? {
+        guard hasMeasuredFullBar, hasMeasuredCompactBar, fullBarHeight > 0, compactBarHeight > 0 else {
+            return nil
+        }
+        return fullBarHeight - CGFloat(collapseProgress) * (fullBarHeight - compactBarHeight)
+    }
+
+    private var fullBar: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
             ForEach(visibleGroups, id: \.self) { group in
                 ExploreCategoryFilterRow(
@@ -99,6 +184,34 @@ private struct ExploreCategoryFilters: View {
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.vertical, DesignTokens.Spacing.xs)
+    }
+
+    private var compactBar: some View {
+        HStack(spacing: DesignTokens.Spacing.xs) {
+            compactChip(for: selectedStatus)
+            compactChip(for: selectedSort)
+            compactChip(for: selectedGenre)
+            Spacer(minLength: DesignTokens.Spacing.xxs)
+            PageJumpButton(page: page, onJump: onJump)
+        }
+        .padding(.horizontal, DesignTokens.Spacing.md)
+        .padding(.vertical, DesignTokens.Spacing.xs)
+    }
+
+    /// 收缩态的单个选中胶囊：点击整颗展开回完整栏（不切换选择，对应 demo 的「手动展开」）。
+    private func compactChip(for category: ExploreCategory) -> some View {
+        Button(action: onExpand) {
+            Text(category.title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, DesignTokens.Spacing.md)
+                .padding(.vertical, DesignTokens.Spacing.xs)
+                .frame(minHeight: DesignTokens.Hit.minSize)
+                .background(Capsule().fill(AppTheme.Surface.card))
+                .foregroundStyle(Color.primary)
+        }
+        .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Capsule())))
+        .accessibilityLabel("展开\(category.title)筛选")
     }
 }
 

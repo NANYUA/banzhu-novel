@@ -3,6 +3,17 @@ import NovelCore
 import NovelEngine
 import SwiftUI
 
+/// 书城筛选栏滚动收缩：滚动多远后完整栏收缩成一行（对齐 demo 稿的 `RANGE = 60`）。
+private let exploreFilterCollapseRange: CGFloat = 60
+
+/// 书目列表的滚动偏移：首行零高标记在 `exploreScroll` 坐标空间里的 `minY`（顶部 0、下滑为负）。
+private struct ExploreScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// 书城 —— 分类胶囊栏 + 分类书目分页（U5-3）。
 ///
 /// ## 与 Reducer 的分工
@@ -31,6 +42,13 @@ public struct ExploreView: View {
     @State private var detailBook: Book?
     @State private var isShowingDetail = false
 
+    /// 筛选栏滚动收缩进度（0 = 完整三行，1 = 收缩成一行），由书目列表滚动偏移驱动。
+    @State private var filterCollapseProgress: Double = 0
+    /// 点收缩态胶囊后进入「手动展开」：进度改由滚动增量驱动，直到再次收缩到底。
+    @State private var isFilterManualExpanded = false
+    /// 上一次滚动偏移，用于计算滚动增量。
+    @State private var lastFilterScrollOffset: CGFloat = 0
+
     init(
         store: StoreOf<ExploreFeature>,
         downloadStore: StoreOf<DownloadFeature>,
@@ -47,12 +65,25 @@ public struct ExploreView: View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             NavigationStack {
                 VStack(spacing: 0) {
-                    categoryBar(viewStore)
+                    categoryBar(viewStore, collapseProgress: filterCollapseProgress) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            isFilterManualExpanded = true
+                            filterCollapseProgress = 0
+                        }
+                    }
 
                     // 自撑满：内容区只剩一个 `ContentUnavailableView` 时不能跟着它缩水，
                     // 否则分类栏会被整体居中（同 `BookshelfView` 的 `body` 对内容区 `ZStack` 的自撑满写法与理由）。
                     content(viewStore)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                // 切分类 / 首屏加载会让内容区离开 `bookList`（List 消失、滚动偏移归零），
+                // 此时把收缩进度归零，避免残留的收缩态盖在加载态上。
+                .onChange(of: viewStore.isLoading) { _, isLoading in
+                    if isLoading {
+                        filterCollapseProgress = 0
+                        isFilterManualExpanded = false
+                    }
                 }
                 // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`）。
                 .background(AppTheme.Surface.page)
@@ -172,6 +203,7 @@ private extension ExploreView {
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         List {
+            scrollOffsetMarker
             ForEach(ExploreDisplayRow.rows(
                 books: viewStore.books,
                 pageStarts: viewStore.pageStarts
@@ -215,6 +247,47 @@ private extension ExploreView {
         .listStyle(.plain)
         // 让 List 自己的滚动背景透出页面分组灰。
         .scrollContentBackground(.hidden)
+        .coordinateSpace(name: "exploreScroll")
+        .onPreferenceChange(ExploreScrollOffsetKey.self) { minY in
+            handleFilterScroll(minY: minY)
+        }
+    }
+
+    /// 零高的滚动偏移标记：放进 List 首行，随滚动上报 `minY`。
+    private var scrollOffsetMarker: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ExploreScrollOffsetKey.self,
+                value: proxy.frame(in: .named("exploreScroll")).minY
+            )
+        }
+        .frame(height: 0)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+
+    /// 由滚动偏移驱动收缩进度。普通态按绝对偏移成比例收缩；
+    /// 「手动展开」态按滚动增量累加（对齐 demo 的 `collapseProgress += dy/RANGE`），
+    /// 收缩到底后回到普通态。
+    private func handleFilterScroll(minY: CGFloat) {
+        let offset = max(-minY, 0)
+        let delta = offset - lastFilterScrollOffset
+        lastFilterScrollOffset = offset
+        if isFilterManualExpanded {
+            filterCollapseProgress = min(
+                max(filterCollapseProgress + Double(delta) / Double(exploreFilterCollapseRange), 0),
+                1
+            )
+            if filterCollapseProgress >= 1 {
+                isFilterManualExpanded = false
+            }
+        } else {
+            filterCollapseProgress = min(
+                max(Double(offset) / Double(exploreFilterCollapseRange), 0),
+                1
+            )
+        }
     }
 }
 
