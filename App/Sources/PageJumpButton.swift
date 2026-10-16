@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// 书城（筛选栏右上）与搜索页（结果区顶部右对齐）共用。
 /// 风格与分组胶囊按钮一致（参照 `ExploreView+CategoryBar.swift` 的 `ExploreCategoryChip`）：
-/// 纯文字无符号、`DesignTokens.FontSize.filterChip`（14pt）、胶囊底、按下有反馈（`PressableCardButtonStyle`）。
+/// 纯文字无符号、`.subheadline`（15pt）、胶囊底、按下有反馈（`PressableCardButtonStyle`）。
 struct PageJumpButton: View {
     /// 当前页码（从 1 起）。
     let page: Int
@@ -21,10 +21,11 @@ struct PageJumpButton: View {
             isShowingInput = true
         } label: {
             Text("第 \(page) 页")
-                .font(.system(size: DesignTokens.FontSize.filterChip))
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
                 .padding(.horizontal, DesignTokens.FilterChip.hPadding)
-                .frame(height: DesignTokens.FilterChip.height)
+                .padding(.vertical, DesignTokens.Spacing.xs)
+                .frame(minWidth: DesignTokens.Hit.minSize, minHeight: DesignTokens.Hit.minSize)
                 .background(Capsule().fill(AppTheme.Surface.card))
                 .foregroundStyle(Color.primary)
         }

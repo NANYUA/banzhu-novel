@@ -173,10 +173,11 @@ private struct ExploreCategoryFilters: View {
     private func compactChip(for category: ExploreCategory) -> some View {
         Button(action: onExpand) {
             Text(category.title)
-                .font(.system(size: DesignTokens.FontSize.filterChip, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
                 .padding(.horizontal, DesignTokens.FilterChip.hPadding)
-                .frame(height: DesignTokens.FilterChip.height)
+                .padding(.vertical, DesignTokens.Spacing.xs)
+                .frame(minHeight: DesignTokens.Hit.minSize)
                 .background(Capsule().fill(AppTheme.accent))
                 .foregroundStyle(Color(uiColor: .systemBackground))
         }
@@ -202,10 +203,10 @@ private struct ExploreCategoryFilterRow: View {
         // 标签与胶囊之间不留额外间距（对齐 demo `.group` 无 gap、`.label` 宽 34 自带视觉留白）。
         HStack(alignment: .top, spacing: 0) {
             Text(title)
-                .font(.system(size: DesignTokens.FontSize.filterChip))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
                 .frame(width: DesignTokens.FilterChip.labelWidth, alignment: .leading)
-                .frame(height: DesignTokens.FilterChip.height, alignment: .center)
+                .frame(minHeight: DesignTokens.Hit.minSize, alignment: .center)
 
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 HStack(spacing: DesignTokens.Spacing.xs) {
@@ -265,10 +266,11 @@ private struct ExploreCategoryFilterRow: View {
             isExpanded.toggle()
         } label: {
             Text(isExpanded ? "收起" : "展开")
-                .font(.system(size: DesignTokens.FontSize.filterChip))
+                .font(.subheadline.weight(.regular))
                 .lineLimit(1)
                 .padding(.horizontal, DesignTokens.FilterChip.hPadding)
-                .frame(height: DesignTokens.FilterChip.height)
+                .padding(.vertical, DesignTokens.Spacing.xs)
+                .frame(minWidth: DesignTokens.Hit.minSize, minHeight: DesignTokens.Hit.minSize)
                 .background(Capsule().fill(AppTheme.Surface.card))
                 .foregroundStyle(Color.primary)
         }
@@ -285,10 +287,11 @@ private struct ExploreCategoryChip: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: DesignTokens.FontSize.filterChip, weight: isSelected ? .semibold : .regular))
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
                 .lineLimit(1)
                 .padding(.horizontal, DesignTokens.FilterChip.hPadding)
-                .frame(height: DesignTokens.FilterChip.height)
+                .padding(.vertical, DesignTokens.Spacing.xs)
+                .frame(minWidth: DesignTokens.Hit.minSize, minHeight: DesignTokens.Hit.minSize)
                 .background(
                     Capsule().fill(isSelected ? AppTheme.accent : AppTheme.Surface.card)
                 )

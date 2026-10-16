@@ -78,22 +78,17 @@ enum DesignTokens {
         static let lg: CGFloat = 18
     }
 
-    /// 字号刻度（pt）。
-    enum FontSize {
-        /// 14 —— 书城筛选栏统一字号（标签 / 胶囊 / 展开 / 跳页），
-        /// 对齐 `ui-mockups/explore-page.html` 的 `--fs: 14px`。
-        static let filterChip: CGFloat = 14
-    }
-
     /// 书城筛选胶囊几何（筛选栏胶囊 + 跳页按钮共用），对齐 `ui-mockups/explore-page.html`。
+    /// 触控高度与字号走 App 标准（`Hit.minSize` 44pt / `.subheadline` 15pt），
+    /// 只保留 demo 的紧凑水平内边距与标签宽（owner 裁决「紧凑保留 demo 布局」）。
     enum FilterChip {
-        /// 34 —— 胶囊高度（demo `--chip-h: 34px`）。
-        static let height: CGFloat = 34
         /// 14 —— 胶囊左右内边距（demo `padding: 0 14px`）。
         static let hPadding: CGFloat = 14
         /// 34 —— 标签列宽（demo `.label { width: 34px }`）。
         static let labelWidth: CGFloat = 34
-        /// 22 —— 完整栏跳页按钮右外边距，使右边缘与「展开」右边缘对齐（demo `margin-right: 22px`）。
-        static let jumpTrailing: CGFloat = 22
+        /// 8 —— 完整栏跳页按钮右外边距，使右边缘与「展开」右边缘对齐。
+        /// demo `margin-right: 22px` 是按 14px 字号算的；改用 `.subheadline`(15pt) 后
+        /// 「3 胶囊 + 展开」更宽，故缩到 8pt（按 390pt 屏「3 胶囊 + 展开 ≈ 316pt」估算）。
+        static let jumpTrailing: CGFloat = 8
     }
 }
