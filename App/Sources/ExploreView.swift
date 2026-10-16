@@ -271,6 +271,7 @@ private extension ExploreView {
     /// 「手动展开」态按滚动增量累加（对齐 demo 的 `collapseProgress += dy/RANGE`），
     /// 收缩到底后回到普通态。
     private func handleFilterScroll(minY: CGFloat) {
+        guard minY.isFinite else { return }
         let offset = max(-minY, 0)
         let delta = offset - lastFilterScrollOffset
         lastFilterScrollOffset = offset

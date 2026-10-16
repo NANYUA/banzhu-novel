@@ -3,20 +3,6 @@ import NovelCore
 import NovelEngine
 import SwiftUI
 
-private struct ExploreFullBarHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-private struct ExploreCompactBarHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 extension ExploreView {
     /// 三个筛选维度各占一行；空间不足时可单独展开该组的全部选项。
     /// 跳页按钮并入「状态」行末（右对齐），点击弹输入框跳指定页码。
@@ -58,8 +44,6 @@ private struct ExploreCategoryFilters: View {
 
     @State private var fullBarHeight: CGFloat = 0
     @State private var compactBarHeight: CGFloat = 0
-    @State private var hasMeasuredFullBar = false
-    @State private var hasMeasuredCompactBar = false
 
     private var selectedStatus: ExploreCategory {
         option(in: ExploreCategoryCatalog.statuses, defaultIndex: 0)
@@ -116,38 +100,24 @@ private struct ExploreCategoryFilters: View {
             fullBar
                 .opacity(fullBarOpacity)
                 .allowsHitTesting(collapseProgress < 0.5)
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ExploreFullBarHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    guard height > 0 else { return }
+                    fullBarHeight = height
+                }
             compactBar
                 .opacity(compactBarOpacity)
                 .allowsHitTesting(collapseProgress >= 0.5)
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ExploreCompactBarHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    guard height > 0 else { return }
+                    compactBarHeight = height
+                }
         }
         .frame(height: interpolatedHeight, alignment: .top)
         .clipped()
-        .onPreferenceChange(ExploreFullBarHeightKey.self) { height in
-            guard !hasMeasuredFullBar, height > 0 else { return }
-            fullBarHeight = height
-            hasMeasuredFullBar = true
-        }
-        .onPreferenceChange(ExploreCompactBarHeightKey.self) { height in
-            guard !hasMeasuredCompactBar, height > 0 else { return }
-            compactBarHeight = height
-            hasMeasuredCompactBar = true
-        }
         .background(AppTheme.Surface.page)
     }
 
@@ -163,7 +133,7 @@ private struct ExploreCategoryFilters: View {
 
     /// 完整栏与收缩栏高度之间线性插值；首次测量完成前不约束高度（自然高度）。
     private var interpolatedHeight: CGFloat? {
-        guard hasMeasuredFullBar, hasMeasuredCompactBar, fullBarHeight > 0, compactBarHeight > 0 else {
+        guard fullBarHeight > 0, compactBarHeight > 0 else {
             return nil
         }
         return fullBarHeight - CGFloat(collapseProgress) * (fullBarHeight - compactBarHeight)
