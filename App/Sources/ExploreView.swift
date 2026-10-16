@@ -202,12 +202,11 @@ private extension ExploreView {
     private func bookList(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
-        // 用 `ScrollView` + `LazyVStack` 而不是 `List`：
-        // `List` 上 `.coordinateSpace(name:)` 对行内 GeometryReader 不可靠（真机上报不出滚动偏移），
-        // 换 `ScrollView` 后命名坐标空间稳定，滚动收缩才生效；也顺带去掉 `List` 的默认顶部内边距。
+        // 用 `ScrollView` + `LazyVStack` 而不是 `List`：去掉 `List` 的默认顶部内边距（修「卡片太靠下」）。
+        // 滚动偏移由 LazyVStack 的 `.background(GeometryReader)` 上报（见下），
+        // 零高标记行在 LazyVStack 里会被懒加载吞掉、坐标空间解析不出（minY 恒 0/NaN）。
         ScrollView {
             LazyVStack(spacing: 0) {
-                scrollOffsetMarker
                 ForEach(ExploreDisplayRow.rows(
                     books: viewStore.books,
                     pageStarts: viewStore.pageStarts
@@ -236,22 +235,21 @@ private extension ExploreView {
                     ExploreEndOfResultsRow()
                 }
             }
+            // 滚动偏移用「整个内容作背景」的 GeometryReader 量 `minY`，比放进 LazyVStack 的零高标记更稳：
+            // 零高标记行在 LazyVStack 里常被懒加载布局吞掉、坐标空间解析不出（minY 恒 0/NaN）。
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: ExploreScrollOffsetKey.self,
+                        value: proxy.frame(in: .named("exploreScroll")).minY
+                    )
+                }
+            )
         }
         .coordinateSpace(name: "exploreScroll")
         .onPreferenceChange(ExploreScrollOffsetKey.self) { minY in
             handleFilterScroll(minY: minY)
         }
-    }
-
-    /// 零高的滚动偏移标记：放进滚动容器首行，随滚动上报 `minY`。
-    private var scrollOffsetMarker: some View {
-        GeometryReader { proxy in
-            Color.clear.preference(
-                key: ExploreScrollOffsetKey.self,
-                value: proxy.frame(in: .named("exploreScroll")).minY
-            )
-        }
-        .frame(height: 0)
     }
 
     /// 由滚动偏移驱动收缩进度。普通态按绝对偏移成比例收缩；
