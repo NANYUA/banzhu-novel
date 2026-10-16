@@ -2,15 +2,57 @@ import ComposableArchitecture
 import NovelCore
 import NovelEngine
 import SwiftUI
+import UIKit
 
 /// 书城筛选栏滚动收缩：滚动多远后完整栏收缩成一行（对齐 demo 稿的 `RANGE = 60`）。
 private let exploreFilterCollapseRange: CGFloat = 60
 
-/// 书目列表的滚动偏移：首行零高标记在 `exploreScroll` 坐标空间里的 `minY`（顶部 0、下滑为负）。
-private struct ExploreScrollOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+/// 书目列表的滚动偏移：内省承载 `ScrollView` 的 `UIScrollView`，用 KVO 监听 `contentOffset.y`。
+///
+/// 为什么不用 SwiftUI 的 `.coordinateSpace` + GeometryReader：
+/// 对 `LazyVStack` 内容，命名坐标空间解析不可靠（`minY` 恒 0/NaN），
+/// 两次尝试（零高标记行 / `.background(GeometryReader)`）都没让收缩在真机生效。
+/// `contentOffset` 是 UIKit 滚动的真相源，KVO 一定拿得到。
+private struct ExploreScrollOffsetReporter: UIViewRepresentable {
+    let onOffsetChange: (CGFloat) -> Void
+
+    func makeUIView(context _: Context) -> ExploreScrollOffsetReporterView {
+        let view = ExploreScrollOffsetReporterView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        view.onOffsetChange = onOffsetChange
+        return view
+    }
+
+    func updateUIView(_ uiView: ExploreScrollOffsetReporterView, context _: Context) {
+        uiView.onOffsetChange = onOffsetChange
+    }
+}
+
+/// 承载滚动偏移上报的 `UIView`：进入窗口后沿 `superview` 链找到 `UIScrollView`，
+/// KVO 监听 `contentOffset`。只挂一次（`didMoveToWindow` 里 `observation == nil` 守卫），
+/// 离开窗口时释放观察、让旧 `UIScrollView` 可被回收。
+private final class ExploreScrollOffsetReporterView: UIView {
+    var onOffsetChange: ((CGFloat) -> Void)?
+    private var observation: NSKeyValueObservation?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else {
+            observation = nil
+            return
+        }
+        guard observation == nil else { return }
+        var cursor: UIView? = self
+        while let current = cursor {
+            if let scrollView = current as? UIScrollView {
+                observation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
+                    self?.onOffsetChange?(scrollView.contentOffset.y)
+                }
+                return
+            }
+            cursor = current.superview
+        }
     }
 }
 
@@ -203,8 +245,8 @@ private extension ExploreView {
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         // 用 `ScrollView` + `LazyVStack` 而不是 `List`：去掉 `List` 的默认顶部内边距（修「卡片太靠下」）。
-        // 滚动偏移由 LazyVStack 的 `.background(GeometryReader)` 上报（见下），
-        // 零高标记行在 LazyVStack 里会被懒加载吞掉、坐标空间解析不出（minY 恒 0/NaN）。
+        // 滚动偏移由 `ExploreScrollOffsetReporter` 内省 UIScrollView.contentOffset 上报（见下），
+        // 不再用 SwiftUI 的命名坐标空间（对 LazyVStack 解析不可靠）。
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(ExploreDisplayRow.rows(
@@ -235,29 +277,21 @@ private extension ExploreView {
                     ExploreEndOfResultsRow()
                 }
             }
-            // 滚动偏移用「整个内容作背景」的 GeometryReader 量 `minY`，比放进 LazyVStack 的零高标记更稳：
-            // 零高标记行在 LazyVStack 里常被懒加载布局吞掉、坐标空间解析不出（minY 恒 0/NaN）。
+            // 滚动偏移由内省的 UIScrollView.contentOffset 上报（真相源），见 `ExploreScrollOffsetReporter`。
             .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: ExploreScrollOffsetKey.self,
-                        value: proxy.frame(in: .named("exploreScroll")).minY
-                    )
+                ExploreScrollOffsetReporter { offsetY in
+                    handleFilterScroll(offsetY: offsetY)
                 }
             )
-        }
-        .coordinateSpace(name: "exploreScroll")
-        .onPreferenceChange(ExploreScrollOffsetKey.self) { minY in
-            handleFilterScroll(minY: minY)
         }
     }
 
     /// 由滚动偏移驱动收缩进度。普通态按绝对偏移成比例收缩；
     /// 「手动展开」态按滚动增量累加（对齐 demo 的 `collapseProgress += dy/RANGE`），
     /// 收缩到底后回到普通态。
-    private func handleFilterScroll(minY: CGFloat) {
-        guard minY.isFinite else { return }
-        let offset = max(-minY, 0)
+    private func handleFilterScroll(offsetY: CGFloat) {
+        guard offsetY.isFinite else { return }
+        let offset = max(offsetY, 0)
         let delta = offset - lastFilterScrollOffset
         lastFilterScrollOffset = offset
         if isFilterManualExpanded {
