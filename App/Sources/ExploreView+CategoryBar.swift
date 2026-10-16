@@ -7,8 +7,9 @@ extension ExploreView {
     /// 三个筛选维度各占一行；每组首行固定 3 个胶囊，行尾右对齐「展开 / 收起」
     /// （「状态」行行尾改为跳页按钮），两者右边缘对齐；展开后其余选项折到下一行。
     /// 跳页按钮点击弹输入框跳指定页码。
-    /// 滚动时按 `collapseProgress`（0 完整 / 1 收缩）把完整栏交叉淡入淡出成
-    /// 一行「3 个选中值 + 跳页按钮」，对齐 `ui-mockups/explore-page.html` 的收缩态。
+    /// 滚动时按 `collapseProgress`（0 完整 / 1 收缩）把完整栏收缩成
+    /// 一行「3 个选中值 + 跳页按钮」：收缩态胶囊从「状态」行上方下滑、
+    /// 用不透明底色覆盖第一排，对齐 `ui-mockups/explore-page.html` 的收缩态。
     func categoryBar(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>,
         collapseProgress: Double,
@@ -108,6 +109,8 @@ private struct ExploreCategoryFilters: View {
                     fullBarHeight = height
                 }
             compactBar
+                .background(AppTheme.Surface.page)
+                .offset(y: -(1 - compactBarOpacity) * compactBarHeight)
                 .opacity(compactBarOpacity)
                 .allowsHitTesting(collapseProgress >= 0.5)
                 .onGeometryChange(for: CGFloat.self) { proxy in
@@ -127,7 +130,8 @@ private struct ExploreCategoryFilters: View {
         1 - min(collapseProgress / 0.5, 1)
     }
 
-    /// 收缩栏淡入：`collapseProgress` 0.25→0.625 内从 0 升到 1。
+    /// 收缩栏淡入：`collapseProgress` 0.25→0.625 内从 0 升到 1；
+    /// 同时从「状态」行上方（offset = −自身高度）下滑到原位。
     private var compactBarOpacity: Double {
         min(max((collapseProgress - 0.25) / 0.375, 0), 1)
     }
