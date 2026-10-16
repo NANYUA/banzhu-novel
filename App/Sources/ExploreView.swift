@@ -108,7 +108,8 @@ public struct ExploreView: View {
     /// 吸顶收缩栏自身高度，用于「从导航栏下缘下滑到位」的位移量。
     @State private var compactBarHeight: CGFloat = 0
     /// 点吸顶收缩栏的选中胶囊后递增，驱动 `ExploreScrollOffsetReporter` 把列表滚回顶部（重新展开完整栏）。
-    @State private var scrollToTopToken = 0
+    /// ⚠️ 不能 `private`：`ExploreView+CategoryBar.swift` 的 `compactBarOverlay` 需要从另一个文件递增它。
+    @State var scrollToTopToken = 0
 
     init(
         store: StoreOf<ExploreFeature>,
