@@ -4,8 +4,8 @@ import NovelEngine
 import SwiftUI
 
 extension ExploreView {
-    /// 三个筛选维度各占一行；空间不足时可单独展开该组的全部选项。
-    /// 跳页按钮并入「状态」行末（右对齐），点击弹输入框跳指定页码。
+    /// 三个筛选维度各占一行；每组首行固定 3 个胶囊 + 「展开」，展开后其余选项折到下一行。
+    /// 跳页按钮并入「状态」行末（右边缘与「展开」右边缘对齐），点击弹输入框跳指定页码。
     /// 滚动时按 `collapseProgress`（0 完整 / 1 收缩）把完整栏交叉淡入淡出成
     /// 一行「3 个选中值 + 跳页按钮」，对齐 `ui-mockups/explore-page.html` 的收缩态。
     func categoryBar(
@@ -169,16 +169,16 @@ private struct ExploreCategoryFilters: View {
     }
 
     /// 收缩态的单个选中胶囊：点击整颗展开回完整栏（不切换选择，对应 demo 的「手动展开」）。
+    /// 用选中态配色（accent 底 + 反色文字），对齐 demo 收缩栏的 `.chip.selected`。
     private func compactChip(for category: ExploreCategory) -> some View {
         Button(action: onExpand) {
             Text(category.title)
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: DesignTokens.FontSize.filterChip, weight: .semibold))
                 .lineLimit(1)
-                .padding(.horizontal, DesignTokens.Spacing.md)
-                .padding(.vertical, DesignTokens.Spacing.xs)
-                .frame(minHeight: DesignTokens.Hit.minSize)
-                .background(Capsule().fill(AppTheme.Surface.card))
-                .foregroundStyle(Color.primary)
+                .padding(.horizontal, DesignTokens.FilterChip.hPadding)
+                .frame(height: DesignTokens.FilterChip.height)
+                .background(Capsule().fill(AppTheme.accent))
+                .foregroundStyle(Color(uiColor: .systemBackground))
         }
         .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Capsule())))
         .accessibilityLabel("展开\(category.title)筛选")
@@ -194,76 +194,56 @@ private struct ExploreCategoryFilterRow: View {
     let onSelect: (ExploreCategory) -> Void
     @State private var isExpanded = false
 
-    /// 展开态第一行保留的胶囊数（不含「收起」按钮）。
-    ///
-    /// demo 稿固定 3 个（14px 字号 / 392px 宽度）；本 App 统一 `.subheadline`（15pt）
-    /// 加 `Spacing.md` 内边距后，标准 iPhone 宽度只放得下 2 个胶囊 + 「收起」（3 个会溢出），
-    /// 故取 2，与收起态在标准宽度下实际能放下的胶囊数一致。
-    private static let expandedFirstRowCount = 2
+    /// 首行固定 3 个胶囊（对齐 demo `explore-page.html` 的「3 胶囊 + 展开」）；
+    /// 第 4 位是「展开 / 收起」。展开只把剩余选项折到下一行，首行不变 ⇒ 按钮不移动。
+    private static let firstRowCount = 3
 
     var body: some View {
-        HStack(alignment: .top, spacing: DesignTokens.Spacing.xs) {
+        // 标签与胶囊之间不留额外间距（对齐 demo `.group` 无 gap、`.label` 宽 34 自带视觉留白）。
+        HStack(alignment: .top, spacing: 0) {
             Text(title)
-                .font(.subheadline.weight(.medium))
+                .font(.system(size: DesignTokens.FontSize.filterChip))
                 .foregroundStyle(.secondary)
-                .frame(width: DesignTokens.Hit.minSize, alignment: .leading)
-                .frame(minHeight: DesignTokens.Hit.minSize, alignment: .center)
+                .frame(width: DesignTokens.FilterChip.labelWidth, alignment: .leading)
+                .frame(height: DesignTokens.FilterChip.height, alignment: .center)
 
-            if isExpanded {
-                expandedContent
-            } else {
-                collapsedContent
-            }
-
-            if let page, let onJump {
-                Spacer(minLength: DesignTokens.Spacing.xxs)
-                PageJumpButton(page: page, onJump: onJump)
-            }
-        }
-    }
-
-    private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            HStack(spacing: DesignTokens.Spacing.xs) {
-                ForEach(firstRowItems) { category in
-                    chip(for: category)
-                }
-                toggleButton
-            }
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: DesignTokens.Hit.minSize * 2), spacing: DesignTokens.Spacing.xs)],
-                alignment: .leading,
-                spacing: DesignTokens.Spacing.xs
-            ) {
-                ForEach(overflowItems) { category in
-                    chip(for: category, allowsWrapping: true)
-                }
-            }
-        }
-    }
-
-    private var collapsedContent: some View {
-        ViewThatFits(in: .horizontal) {
-            ForEach((1 ... items.count).reversed(), id: \.self) { visibleCount in
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 HStack(spacing: DesignTokens.Spacing.xs) {
-                    ForEach(collapsedItems(visibleCount: visibleCount)) { category in
+                    ForEach(firstRowItems) { category in
                         chip(for: category)
                     }
-                    if visibleCount < items.count {
+                    if items.count > Self.firstRowCount {
                         toggleButton
                     }
                 }
-                .fixedSize(horizontal: true, vertical: false)
+                if isExpanded {
+                    FlowLayout(spacing: DesignTokens.Spacing.xs) {
+                        ForEach(overflowItems) { category in
+                            chip(for: category)
+                        }
+                    }
+                }
             }
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                chip(for: selectedItem, allowsWrapping: true)
-                toggleButton
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let page, let onJump {
+                PageJumpButton(page: page, onJump: onJump)
+                    .padding(.trailing, DesignTokens.FilterChip.jumpTrailing)
             }
         }
     }
 
+    /// 首行固定的 3 个胶囊；选中项不在前 3 时，把最后一个换成选中项（保证选中可见）。
     private var firstRowItems: [ExploreCategory] {
-        collapsedItems(visibleCount: Self.expandedFirstRowCount)
+        var visible = Array(items.prefix(Self.firstRowCount))
+        guard items.count > Self.firstRowCount,
+              let selected = items.first(where: { $0.value == selectedItem.value }),
+              !visible.contains(selected)
+        else {
+            return visible
+        }
+        visible[visible.count - 1] = selected
+        return visible
     }
 
     private var overflowItems: [ExploreCategory] {
@@ -271,21 +251,11 @@ private struct ExploreCategoryFilterRow: View {
         return items.filter { item in !firstRow.contains(item) }
     }
 
-    private func collapsedItems(visibleCount: Int) -> [ExploreCategory] {
-        var visible = Array(items.prefix(visibleCount))
-        guard visibleCount < items.count else { return visible }
-        guard let selected = items.first(where: { $0.value == selectedItem.value }) else { return visible }
-        guard !visible.contains(selected) else { return visible }
-        visible[visible.count - 1] = selected
-        return visible
-    }
-
-    private func chip(for category: ExploreCategory, allowsWrapping: Bool = false) -> some View {
+    private func chip(for category: ExploreCategory) -> some View {
         ExploreCategoryChip(
             title: category.title,
             isSelected: selectedItem.group == category.group
                 && selectedItem.value == category.value,
-            allowsWrapping: allowsWrapping,
             action: { onSelect(category) }
         )
     }
@@ -295,11 +265,10 @@ private struct ExploreCategoryFilterRow: View {
             isExpanded.toggle()
         } label: {
             Text(isExpanded ? "收起" : "展开")
-                .font(.subheadline.weight(.regular))
+                .font(.system(size: DesignTokens.FontSize.filterChip))
                 .lineLimit(1)
-                .padding(.horizontal, DesignTokens.Spacing.md)
-                .padding(.vertical, DesignTokens.Spacing.xs)
-                .frame(minWidth: DesignTokens.Hit.minSize, minHeight: DesignTokens.Hit.minSize)
+                .padding(.horizontal, DesignTokens.FilterChip.hPadding)
+                .frame(height: DesignTokens.FilterChip.height)
                 .background(Capsule().fill(AppTheme.Surface.card))
                 .foregroundStyle(Color.primary)
         }
@@ -311,18 +280,15 @@ private struct ExploreCategoryFilterRow: View {
 private struct ExploreCategoryChip: View {
     let title: String
     let isSelected: Bool
-    let allowsWrapping: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .lineLimit(allowsWrapping ? nil : 1)
-                .padding(.horizontal, DesignTokens.Spacing.md)
-                .padding(.vertical, DesignTokens.Spacing.xs)
-                .frame(minWidth: DesignTokens.Hit.minSize, minHeight: DesignTokens.Hit.minSize)
-                .frame(maxWidth: allowsWrapping ? .infinity : nil)
+                .font(.system(size: DesignTokens.FontSize.filterChip, weight: isSelected ? .semibold : .regular))
+                .lineLimit(1)
+                .padding(.horizontal, DesignTokens.FilterChip.hPadding)
+                .frame(height: DesignTokens.FilterChip.height)
                 .background(
                     Capsule().fill(isSelected ? AppTheme.accent : AppTheme.Surface.card)
                 )
@@ -330,5 +296,51 @@ private struct ExploreCategoryChip: View {
         }
         .buttonStyle(PressableCardButtonStyle(shape: AnyShape(Capsule())))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// 流式布局：子视图按自然宽度从左到右排，放不下折到下一行（对齐 demo 的 `flex-wrap: wrap`）。
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = DesignTokens.Spacing.xs
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var usedWidth: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX > 0, currentX + size.width > maxWidth {
+                currentX = 0
+                currentY += rowHeight + spacing
+                rowHeight = 0
+            }
+            currentX += size.width + spacing
+            usedWidth = max(usedWidth, currentX - spacing)
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: proposal.width ?? usedWidth, height: currentY + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        var currentX = bounds.minX
+        var currentY = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX > bounds.minX, currentX + size.width > bounds.maxX {
+                currentX = bounds.minX
+                currentY += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(
+                at: CGPoint(x: currentX, y: currentY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(size)
+            )
+            currentX += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }

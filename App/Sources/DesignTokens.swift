@@ -77,4 +77,23 @@ enum DesignTokens {
         /// 18 —— 大容器 / 浮层（阅读页材质控制栏、sheet 内容块）。
         static let lg: CGFloat = 18
     }
+
+    /// 字号刻度（pt）。
+    enum FontSize {
+        /// 14 —— 书城筛选栏统一字号（标签 / 胶囊 / 展开 / 跳页），
+        /// 对齐 `ui-mockups/explore-page.html` 的 `--fs: 14px`。
+        static let filterChip: CGFloat = 14
+    }
+
+    /// 书城筛选胶囊几何（筛选栏胶囊 + 跳页按钮共用），对齐 `ui-mockups/explore-page.html`。
+    enum FilterChip {
+        /// 34 —— 胶囊高度（demo `--chip-h: 34px`）。
+        static let height: CGFloat = 34
+        /// 14 —— 胶囊左右内边距（demo `padding: 0 14px`）。
+        static let hPadding: CGFloat = 14
+        /// 34 —— 标签列宽（demo `.label { width: 34px }`）。
+        static let labelWidth: CGFloat = 34
+        /// 22 —— 完整栏跳页按钮右外边距，使右边缘与「展开」右边缘对齐（demo `margin-right: 22px`）。
+        static let jumpTrailing: CGFloat = 22
+    }
 }
