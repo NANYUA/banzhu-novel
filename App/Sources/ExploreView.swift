@@ -7,6 +7,9 @@ import UIKit
 /// 书城筛选栏滚动收缩：滚动多远后完整栏收缩成一行（对齐 demo 稿的 `RANGE = 60`）。
 private let exploreFilterCollapseRange: CGFloat = 60
 
+/// 「书城」大标题滚出可视区后才开始收缩（对齐 demo 稿的 `TITLE_H ≈ 52`）。
+private let exploreFilterCollapseTitleHeight: CGFloat = 52
+
 /// 书目列表的滚动偏移：内省承载 `ScrollView` 的 `UIScrollView`，用 KVO 监听 `contentOffset.y`。
 ///
 /// 为什么不用 SwiftUI 的 `.coordinateSpace` + GeometryReader：
@@ -286,7 +289,8 @@ private extension ExploreView {
         }
     }
 
-    /// 由滚动偏移驱动收缩进度。普通态按绝对偏移成比例收缩；
+    /// 由滚动偏移驱动收缩进度。普通态先等「书城」大标题滚出可视区（减去 `exploreFilterCollapseTitleHeight`），
+    /// 再按绝对偏移成比例收缩（对齐 demo 的 `t=(scrollY-TITLE_H)/RANGE`）；
     /// 「手动展开」态按滚动增量累加（对齐 demo 的 `collapseProgress += dy/RANGE`），
     /// 收缩到底后回到普通态。
     private func handleFilterScroll(offsetY: CGFloat) {
@@ -304,7 +308,7 @@ private extension ExploreView {
             }
         } else {
             filterCollapseProgress = min(
-                max(Double(offset) / Double(exploreFilterCollapseRange), 0),
+                max((Double(offset) - Double(exploreFilterCollapseTitleHeight)) / Double(exploreFilterCollapseRange), 0),
                 1
             )
         }

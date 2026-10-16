@@ -100,7 +100,6 @@ private struct ExploreCategoryFilters: View {
     var body: some View {
         ZStack(alignment: .top) {
             fullBar
-                .opacity(fullBarOpacity)
                 .allowsHitTesting(collapseProgress < 0.5)
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height
@@ -123,11 +122,6 @@ private struct ExploreCategoryFilters: View {
         .frame(height: interpolatedHeight, alignment: .top)
         .clipped()
         .background(AppTheme.Surface.page)
-    }
-
-    /// 完整栏淡出：`collapseProgress` 0→0.5 内从 1 降到 0。
-    private var fullBarOpacity: Double {
-        1 - min(collapseProgress / 0.5, 1)
     }
 
     /// 收缩栏淡入：`collapseProgress` 0.25→0.625 内从 0 升到 1；
