@@ -4,30 +4,49 @@ import NovelEngine
 import SwiftUI
 
 extension ExploreView {
-    /// 三个筛选维度各占一行；每组首行固定 3 个胶囊，行尾右对齐「展开 / 收起」
-    /// （「状态」行行尾改为跳页按钮），两者右边缘对齐；展开后其余选项折到下一行。
-    /// 跳页按钮点击弹输入框跳指定页码。
-    /// 滚动时按 `collapseProgress`（0 完整 / 1 收缩）把完整栏收缩成
-    /// 一行「3 个选中值 + 跳页按钮」：收缩态胶囊从「状态」行上方下滑、
-    /// 用不透明底色覆盖第一排，对齐 `ui-mockups/explore-page.html` 的收缩态。
-    func categoryBar(
-        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>,
-        collapseProgress: Double,
-        onExpand: @escaping () -> Void
+    /// 完整分组栏（三行筛选 + 底部分隔线）。
+    ///
+    /// owner 口径「书籍卡片上滑时先整体上移盖住分组，然后书籍卡片再从三个已选值下方划走」：
+    /// 完整栏放进滚动内容里、跟随书目列表一起滚出可视区，不再原位收缩；
+    /// 滚出后由 `compactBarOverlay(_:)` 挂在列表顶部接管。
+    func groupBarHeader(
+        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
-        VStack(spacing: 0) {
-            ExploreCategoryFilters(
+        let selected = exploreSelectedFilterItems(from: viewStore.selectedCategory)
+        return VStack(spacing: 0) {
+            ExploreGroupBar(
                 categories: viewStore.categories,
-                selectedCategory: viewStore.selectedCategory,
+                selected: selected,
                 page: viewStore.page,
                 onJump: { page in
                     viewStore.send(.jumpToPage(page))
                 },
                 onSelect: { category in
                     viewStore.send(.categorySelected(category))
+                }
+            )
+            Divider()
+        }
+        .background(AppTheme.Surface.page)
+    }
+
+    /// 吸顶收缩栏「三个已选值 + 跳页按钮」。调用方以 `.overlay(alignment: .top)` 挂在列表上：
+    /// 不占布局空间，出现 / 消失不会引起列表跳动；完整栏滚出的后半程淡入 + 从导航栏下缘
+    /// 下滑到位，书目卡片从它下方划过。点任意选中胶囊把列表滚回顶部重新展开完整栏。
+    func compactBarOverlay(
+        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
+    ) -> some View {
+        let selected = exploreSelectedFilterItems(from: viewStore.selectedCategory)
+        return VStack(spacing: 0) {
+            ExploreCompactBar(
+                selected: selected,
+                page: viewStore.page,
+                onJump: { page in
+                    viewStore.send(.jumpToPage(page))
                 },
-                collapseProgress: collapseProgress,
-                onExpand: onExpand
+                onExpand: {
+                    scrollToTopToken += 1
+                }
             )
             Divider()
         }
@@ -35,61 +54,54 @@ extension ExploreView {
     }
 }
 
-private struct ExploreCategoryFilters: View {
-    let categories: [ExploreCategory]
-    let selectedCategory: ExploreCategory?
-    let page: Int
-    let onJump: (Int) -> Void
-    let onSelect: (ExploreCategory) -> Void
-    let collapseProgress: Double
-    let onExpand: () -> Void
+/// 从选中分类的 `value`（"状态|排序|分类" 三段拼接）解析出的三个维度当前选中项。
+/// 完整分组栏与吸顶收缩栏共用同一份解析结果，保证两处显示一致。
+private struct ExploreSelectedFilterItems {
+    let status: ExploreCategory
+    let sort: ExploreCategory
+    let genre: ExploreCategory
 
-    @State private var fullBarHeight: CGFloat = 0
-    @State private var compactBarHeight: CGFloat = 0
-
-    private var selectedStatus: ExploreCategory {
-        option(in: ExploreCategoryCatalog.statuses, defaultIndex: 0)
-    }
-
-    private var selectedSort: ExploreCategory {
-        option(in: ExploreCategoryCatalog.sorts, defaultIndex: 0)
-    }
-
-    private var selectedGenre: ExploreCategory {
-        option(in: ExploreCategoryCatalog.genres, defaultIndex: 0)
-    }
-
-    private func option(in options: [ExploreCategory], defaultIndex: Int) -> ExploreCategory {
-        guard let value = selectedCategory?.value?.split(separator: "|").map(String.init),
-              value.count == 3
-        else {
-            return options[defaultIndex]
-        }
-        let selectedValue: String
-        switch options.first?.group {
-        case .status: selectedValue = value[0]
-        case .sort: selectedValue = value[1]
-        case .genre: selectedValue = value[2]
-        default: return options[defaultIndex]
-        }
-        return options.first(where: { $0.value == selectedValue }) ?? options[defaultIndex]
-    }
-
-    private func selectedItem(for group: ExploreCategoryGroup) -> ExploreCategory {
+    func item(for group: ExploreCategoryGroup) -> ExploreCategory {
         switch group {
-        case .status: selectedStatus
-        case .sort: selectedSort
-        case .genre: selectedGenre
+        case .status: status
+        case .sort: sort
+        case .genre: genre
         case .legacy: ExploreCategoryCatalog.defaultCategory
         }
     }
+}
 
-    private func select(_ item: ExploreCategory) {
-        let status = item.group == .status ? item : selectedStatus
-        let sort = item.group == .sort ? item : selectedSort
-        let genre = item.group == .genre ? item : selectedGenre
-        onSelect(ExploreCategoryCatalog.category(status: status, sort: sort, genre: genre))
+/// 把 `selectedCategory.value` 按 "状态|排序|分类" 拆成三段，分别映射回三个维度目录里的选项；
+/// 没有选中分类或 value 不是三段时，回退到各维度的默认项（第 0 个）。
+private func exploreSelectedFilterItems(
+    from selectedCategory: ExploreCategory?
+) -> ExploreSelectedFilterItems {
+    let segments = selectedCategory?.value?.split(separator: "|").map(String.init)
+    guard let segments, segments.count == 3 else {
+        return ExploreSelectedFilterItems(
+            status: ExploreCategoryCatalog.statuses[0],
+            sort: ExploreCategoryCatalog.sorts[0],
+            genre: ExploreCategoryCatalog.genres[0]
+        )
     }
+    func match(_ options: [ExploreCategory], _ selectedValue: String, defaultIndex: Int) -> ExploreCategory {
+        options.first(where: { $0.value == selectedValue }) ?? options[defaultIndex]
+    }
+    return ExploreSelectedFilterItems(
+        status: match(ExploreCategoryCatalog.statuses, segments[0], defaultIndex: 0),
+        sort: match(ExploreCategoryCatalog.sorts, segments[1], defaultIndex: 1),
+        genre: match(ExploreCategoryCatalog.genres, segments[2], defaultIndex: 2)
+    )
+}
+
+/// 滚动内容里的完整分组栏：三维筛选行各占一行，每组首行固定 3 个胶囊，
+/// 行尾右对齐「展开 / 收起」（「状态」行行尾是跳页按钮）；展开后其余选项折到下一行。
+private struct ExploreGroupBar: View {
+    let categories: [ExploreCategory]
+    let selected: ExploreSelectedFilterItems
+    let page: Int
+    let onJump: (Int) -> Void
+    let onSelect: (ExploreCategory) -> Void
 
     private var visibleGroups: [ExploreCategoryGroup] {
         ExploreCategoryGroup.allCases.filter { group in
@@ -97,54 +109,21 @@ private struct ExploreCategoryFilters: View {
         }
     }
 
+    /// 点某个胶囊：该维度换成所点项、其余维度保持不变，合成一个新的选中分类上报。
+    private func select(_ item: ExploreCategory) {
+        let status = item.group == .status ? item : selected.status
+        let sort = item.group == .sort ? item : selected.sort
+        let genre = item.group == .genre ? item : selected.genre
+        onSelect(ExploreCategoryCatalog.category(status: status, sort: sort, genre: genre))
+    }
+
     var body: some View {
-        ZStack(alignment: .top) {
-            fullBar
-                .allowsHitTesting(collapseProgress < 0.5)
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { height in
-                    guard height > 0 else { return }
-                    fullBarHeight = height
-                }
-            compactBar
-                .background(AppTheme.Surface.page)
-                .offset(y: -(1 - compactBarOpacity) * compactBarHeight)
-                .opacity(compactBarOpacity)
-                .allowsHitTesting(collapseProgress >= 0.5)
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { height in
-                    guard height > 0 else { return }
-                    compactBarHeight = height
-                }
-        }
-        .frame(height: interpolatedHeight, alignment: .top)
-        .clipped()
-        .background(AppTheme.Surface.page)
-    }
-
-    /// 收缩栏淡入：`collapseProgress` 0.25→0.625 内从 0 升到 1；
-    /// 同时从「状态」行上方（offset = −自身高度）下滑到原位。
-    private var compactBarOpacity: Double {
-        min(max((collapseProgress - 0.25) / 0.375, 0), 1)
-    }
-
-    /// 完整栏与收缩栏高度之间线性插值；首次测量完成前不约束高度（自然高度）。
-    private var interpolatedHeight: CGFloat? {
-        guard fullBarHeight > 0, compactBarHeight > 0 else {
-            return nil
-        }
-        return fullBarHeight - CGFloat(collapseProgress) * (fullBarHeight - compactBarHeight)
-    }
-
-    private var fullBar: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
             ForEach(visibleGroups, id: \.self) { group in
                 ExploreCategoryFilterRow(
                     title: group.title,
                     items: categories.filter { $0.group == group },
-                    selectedItem: selectedItem(for: group),
+                    selectedItem: selected.item(for: group),
                     page: group == .status ? page : nil,
                     onJump: group == .status ? onJump : nil,
                     onSelect: select
@@ -154,12 +133,22 @@ private struct ExploreCategoryFilters: View {
         .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.vertical, DesignTokens.Spacing.xs)
     }
+}
 
-    private var compactBar: some View {
+/// 吸顶收缩栏的单行内容：「3 个选中值胶囊 + 跳页按钮」。
+/// 胶囊点击整颗滚回顶部重新展开完整栏（不切换选择）；用选中态配色
+/// （accent 底 + 反色文字），沿用旧收缩栏的样式。
+private struct ExploreCompactBar: View {
+    let selected: ExploreSelectedFilterItems
+    let page: Int
+    let onJump: (Int) -> Void
+    let onExpand: () -> Void
+
+    var body: some View {
         HStack(spacing: DesignTokens.Spacing.xs) {
-            compactChip(for: selectedStatus)
-            compactChip(for: selectedSort)
-            compactChip(for: selectedGenre)
+            compactChip(for: selected.status)
+            compactChip(for: selected.sort)
+            compactChip(for: selected.genre)
             Spacer(minLength: DesignTokens.Spacing.xxs)
             PageJumpButton(page: page, onJump: onJump)
         }
@@ -167,8 +156,6 @@ private struct ExploreCategoryFilters: View {
         .padding(.vertical, DesignTokens.Spacing.xs)
     }
 
-    /// 收缩态的单个选中胶囊：点击整颗展开回完整栏（不切换选择，对应 demo 的「手动展开」）。
-    /// 用选中态配色（accent 底 + 反色文字），对齐 demo 收缩栏的 `.chip.selected`。
     private func compactChip(for category: ExploreCategory) -> some View {
         Button(action: onExpand) {
             Text(category.title)

@@ -4,12 +4,6 @@ import NovelEngine
 import SwiftUI
 import UIKit
 
-/// 书城筛选栏滚动收缩：滚动多远后完整栏收缩成一行（对齐 demo 稿的 `RANGE = 60`）。
-private let exploreFilterCollapseRange: CGFloat = 60
-
-/// 「书城」大标题滚出可视区后才开始收缩（对齐 demo 稿的 `TITLE_H ≈ 52`）。
-private let exploreFilterCollapseTitleHeight: CGFloat = 52
-
 /// 书目列表的滚动偏移：内省承载 `ScrollView` 的 `UIScrollView`，用 KVO 监听 `contentOffset.y`。
 ///
 /// 为什么不用 SwiftUI 的 `.coordinateSpace` + GeometryReader：
@@ -17,6 +11,8 @@ private let exploreFilterCollapseTitleHeight: CGFloat = 52
 /// 两次尝试（零高标记行 / `.background(GeometryReader)`）都没让收缩在真机生效。
 /// `contentOffset` 是 UIKit 滚动的真相源，KVO 一定拿得到。
 private struct ExploreScrollOffsetReporter: UIViewRepresentable {
+    /// 递增的「滚回顶部」请求令牌（0 = 无请求）；`updateUIView` 里比对并执行一次。
+    let scrollToTopToken: Int
     let onOffsetChange: (CGFloat) -> Void
 
     func makeUIView(context _: Context) -> ExploreScrollOffsetReporterView {
@@ -24,11 +20,17 @@ private struct ExploreScrollOffsetReporter: UIViewRepresentable {
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = false
         view.onOffsetChange = onOffsetChange
+        // 记下创建时的令牌：bookList 重建（切分类后回到列表）时不重复执行旧请求。
+        view.lastHandledToken = scrollToTopToken
         return view
     }
 
     func updateUIView(_ uiView: ExploreScrollOffsetReporterView, context _: Context) {
         uiView.onOffsetChange = onOffsetChange
+        if scrollToTopToken != uiView.lastHandledToken {
+            uiView.lastHandledToken = scrollToTopToken
+            uiView.scrollToTop()
+        }
     }
 }
 
@@ -37,7 +39,10 @@ private struct ExploreScrollOffsetReporter: UIViewRepresentable {
 /// 离开窗口时释放观察、让旧 `UIScrollView` 可被回收。
 private final class ExploreScrollOffsetReporterView: UIView {
     var onOffsetChange: ((CGFloat) -> Void)?
+    /// 最近已处理的「滚回顶部」令牌，避免 `updateUIView` 重复执行同一次请求。
+    var lastHandledToken = 0
     private var observation: NSKeyValueObservation?
+    private weak var scrollView: UIScrollView?
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -49,13 +54,22 @@ private final class ExploreScrollOffsetReporterView: UIView {
         var cursor: UIView? = self
         while let current = cursor {
             if let scrollView = current as? UIScrollView {
+                self.scrollView = scrollView
                 observation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
                     self?.onOffsetChange?(scrollView.contentOffset.y)
                 }
+                // push 详情返回 / 切 tab 回来时 contentOffset 没变、KVO 不补发，
+                // 手动上报一次当前偏移，避免吸顶栏进度停留在 0 而完整栏其实已经滚出。
+                onOffsetChange?(scrollView.contentOffset.y)
                 return
             }
             cursor = current.superview
         }
+    }
+
+    /// 点吸顶收缩栏的选中胶囊后把列表滚回顶部（动画期间 KVO 持续上报，进度随之归零）。
+    func scrollToTop() {
+        scrollView?.setContentOffset(.zero, animated: true)
     }
 }
 
@@ -87,12 +101,14 @@ public struct ExploreView: View {
     @State private var detailBook: Book?
     @State private var isShowingDetail = false
 
-    /// 筛选栏滚动收缩进度（0 = 完整三行，1 = 收缩成一行），由书目列表滚动偏移驱动。
-    @State private var filterCollapseProgress: Double = 0
-    /// 点收缩态胶囊后进入「手动展开」：进度改由滚动增量驱动，直到再次收缩到底。
-    @State private var isFilterManualExpanded = false
-    /// 上一次滚动偏移，用于计算滚动增量。
-    @State private var lastFilterScrollOffset: CGFloat = 0
+    /// 吸顶收缩栏出现进度：完整分组栏已随书目列表滚出可视区的比例（0 = 全在，1 = 完全滚出）。
+    @State private var groupBarScrollOutProgress: Double = 0
+    /// 完整分组栏的高度（在滚动内容里测量），用于把滚动偏移换算成滚出比例。
+    @State private var groupBarHeight: CGFloat = 0
+    /// 吸顶收缩栏自身高度，用于「从导航栏下缘下滑到位」的位移量。
+    @State private var compactBarHeight: CGFloat = 0
+    /// 点吸顶收缩栏的选中胶囊后递增，驱动 `ExploreScrollOffsetReporter` 把列表滚回顶部（重新展开完整栏）。
+    @State private var scrollToTopToken = 0
 
     init(
         store: StoreOf<ExploreFeature>,
@@ -109,58 +125,49 @@ public struct ExploreView: View {
     public var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             NavigationStack {
-                VStack(spacing: 0) {
-                    categoryBar(viewStore, collapseProgress: filterCollapseProgress) {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            isFilterManualExpanded = true
-                            filterCollapseProgress = 0
+                // 自撑满：内容区只剩一个 `ContentUnavailableView` 时不能跟着它缩水，
+                // 否则分组栏会被整体居中（同 `BookshelfView` 的 `body` 对内容区 `ZStack` 的自撑满写法与理由）。
+                // 完整分组栏在 `bookList` 的滚动内容里（跟随列表滚动），吸顶收缩栏以 overlay 挂在列表上。
+                content(viewStore)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // 切分类 / 首屏加载会让内容区离开 `bookList`（List 消失、滚动偏移归零），
+                    // 此时把吸顶栏出现进度归零，避免残留的收缩态盖在加载态上。
+                    .onChange(of: viewStore.isLoading) { _, isLoading in
+                        if isLoading {
+                            groupBarScrollOutProgress = 0
                         }
                     }
-
-                    // 自撑满：内容区只剩一个 `ContentUnavailableView` 时不能跟着它缩水，
-                    // 否则分类栏会被整体居中（同 `BookshelfView` 的 `body` 对内容区 `ZStack` 的自撑满写法与理由）。
-                    content(viewStore)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                // 切分类 / 首屏加载会让内容区离开 `bookList`（List 消失、滚动偏移归零），
-                // 此时把收缩进度归零，避免残留的收缩态盖在加载态上。
-                .onChange(of: viewStore.isLoading) { _, isLoading in
-                    if isLoading {
-                        filterCollapseProgress = 0
-                        isFilterManualExpanded = false
+                    // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`）。
+                    .background(AppTheme.Surface.page)
+                    .navigationTitle("书城")
+                    // 底栏可见性的**唯一所有者**就是每个 tab 根视图（同 `BookshelfView` / `SearchView`），
+                    // 由状态驱动。push 详情期间根的状态是 `.hidden` ⇒ 详情页没有底栏；pop 回根时
+                    // 翻回 `.visible` ⇒ 底栏可靠恢复。详情页自己不再声明底栏，所以「根视图声明胜出」
+                    // 与「最上层声明胜出」两种偏好解析模型下行为一致。
+                    .toolbar(isShowingDetail ? .hidden : .visible, for: .tabBar)
+                    // 底栏**背景**同样由根视图声明为「始终可见」：iOS 15+ 的底栏有 scroll-edge 外观，
+                    // 内容没滚动（空态 / 列表不够长）时背景本来就是透明的 —— 真机「底栏偶尔变透明」就是它。
+                    // 与上面的可见性同一层声明；阅读页整条底栏是 `.hidden`，专注模式不受影响。
+                    .toolbarBackground(.visible, for: .tabBar)
+                    // 每次出现都发 `.task`：reducer 内部对「已在加载中」做了去重，
+                    // 所以 pop 回来重复触发不会打两次首页（见 `ExploreFeature` 的 `.task` 分支）。
+                    .onAppear { viewStore.send(.task) }
+                    .navigationDestination(isPresented: $isShowingDetail) {
+                        if let book = detailBook {
+                            BookDetailView(
+                                book: book,
+                                downloadStore: downloadStore,
+                                // 详情页加入 / 移出书架后，书架 tab 立刻跟上，
+                                // 不依赖「切回书架时重拉一次」这种时序假设。
+                                onAddedToShelf: { row in
+                                    onBookAdded(row)
+                                },
+                                onRemovedFromShelf: { bookPath in
+                                    onBookRemoved(bookPath)
+                                }
+                            )
+                        }
                     }
-                }
-                // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`）。
-                .background(AppTheme.Surface.page)
-                .navigationTitle("书城")
-                // 底栏可见性的**唯一所有者**就是每个 tab 根视图（同 `BookshelfView` / `SearchView`），
-                // 由状态驱动。push 详情期间根的状态是 `.hidden` ⇒ 详情页没有底栏；pop 回根时
-                // 翻回 `.visible` ⇒ 底栏可靠恢复。详情页自己不再声明底栏，所以「根视图声明胜出」
-                // 与「最上层声明胜出」两种偏好解析模型下行为一致。
-                .toolbar(isShowingDetail ? .hidden : .visible, for: .tabBar)
-                // 底栏**背景**同样由根视图声明为「始终可见」：iOS 15+ 的底栏有 scroll-edge 外观，
-                // 内容没滚动（空态 / 列表不够长）时背景本来就是透明的 —— 真机「底栏偶尔变透明」就是它。
-                // 与上面的可见性同一层声明；阅读页整条底栏是 `.hidden`，专注模式不受影响。
-                .toolbarBackground(.visible, for: .tabBar)
-                // 每次出现都发 `.task`：reducer 内部对「已在加载中」做了去重，
-                // 所以 pop 回来重复触发不会打两次首页（见 `ExploreFeature` 的 `.task` 分支）。
-                .onAppear { viewStore.send(.task) }
-                .navigationDestination(isPresented: $isShowingDetail) {
-                    if let book = detailBook {
-                        BookDetailView(
-                            book: book,
-                            downloadStore: downloadStore,
-                            // 详情页加入 / 移出书架后，书架 tab 立刻跟上，
-                            // 不依赖「切回书架时重拉一次」这种时序假设。
-                            onAddedToShelf: { row in
-                                onBookAdded(row)
-                            },
-                            onRemovedFromShelf: { bookPath in
-                                onBookRemoved(bookPath)
-                            }
-                        )
-                    }
-                }
             }
         }
     }
@@ -252,6 +259,17 @@ private extension ExploreView {
         // 不再用 SwiftUI 的命名坐标空间（对 LazyVStack 解析不可靠）。
         ScrollView {
             LazyVStack(spacing: 0) {
+                // 完整分组栏放进滚动内容（不再固定在顶部）：上滑时书目卡片整体上移盖过分组栏，
+                // 完整栏随内容滚出可视区（owner 口径「先盖住分组，再从三个已选值下方划走」）。
+                // 滚出后由下面的吸顶收缩栏（overlay）接管。
+                groupBarHeader(viewStore)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        guard height > 0 else { return }
+                        groupBarHeight = height
+                    }
+
                 ForEach(ExploreDisplayRow.rows(
                     books: viewStore.books,
                     pageStarts: viewStore.pageStarts
@@ -282,36 +300,52 @@ private extension ExploreView {
             }
             // 滚动偏移由内省的 UIScrollView.contentOffset 上报（真相源），见 `ExploreScrollOffsetReporter`。
             .background(
-                ExploreScrollOffsetReporter { offsetY in
+                ExploreScrollOffsetReporter(scrollToTopToken: scrollToTopToken) { offsetY in
                     handleFilterScroll(offsetY: offsetY)
                 }
             )
         }
+        // 吸顶收缩栏以 overlay 挂在列表顶部（不占布局空间，出现/消失不引起列表跳动）。
+        .overlay(alignment: .top) {
+            compactBarAttachment(viewStore)
+        }
     }
 
-    /// 由滚动偏移驱动收缩进度。普通态先等「书城」大标题滚出可视区（减去 `exploreFilterCollapseTitleHeight`），
-    /// 再按绝对偏移成比例收缩（对齐 demo 的 `t=(scrollY-TITLE_H)/RANGE`）；
-    /// 「手动展开」态按滚动增量累加（对齐 demo 的 `collapseProgress += dy/RANGE`），
-    /// 收缩到底后回到普通态。
+    /// 吸顶收缩栏 + 出现动画：完整栏滚出的后半程淡入 + 从导航栏下缘下滑，
+    /// 书目卡片从它下方划过（owner 口径「先盖住分组，再从三个已选值下方划走」）。
+    private func compactBarAttachment(
+        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
+    ) -> some View {
+        compactBarOverlay(viewStore)
+            .opacity(compactBarOpacity)
+            .offset(y: -(1 - compactBarOpacity) * compactBarHeight)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                guard height > 0 else { return }
+                compactBarHeight = height
+            }
+            // 半透明以上才可交互；未出现时把触摸让给下面的列表。
+            .allowsHitTesting(compactBarOpacity >= 0.5)
+            // 裁掉下滑动画滑出到导航栏区域的部分（同旧收缩栏 ZStack + clipped 的写法）。
+            .clipped()
+    }
+
+    /// 吸顶收缩栏淡入比例：完整栏滚出 60% 后开始、完全滚出时到位
+    /// （对齐 owner 口径的时序——先盖住分组栏，卡片再从「三个已选值」下方划走）。
+    private var compactBarOpacity: Double {
+        min(max((groupBarScrollOutProgress - 0.6) / 0.4, 0), 1)
+    }
+
+    /// 由滚动偏移换算完整分组栏的滚出比例（0 = 完整栏全在，1 = 完全滚出）。
+    /// 完整栏已随内容滚动，这里不再有「原位收缩动画」，只驱动吸顶收缩栏的出现时机。
     private func handleFilterScroll(offsetY: CGFloat) {
         guard offsetY.isFinite else { return }
         let offset = max(offsetY, 0)
-        let delta = offset - lastFilterScrollOffset
-        lastFilterScrollOffset = offset
-        if isFilterManualExpanded {
-            filterCollapseProgress = min(
-                max(filterCollapseProgress + Double(delta) / Double(exploreFilterCollapseRange), 0),
-                1
-            )
-            if filterCollapseProgress >= 1 {
-                isFilterManualExpanded = false
-            }
-        } else {
-            filterCollapseProgress = min(
-                max((Double(offset) - Double(exploreFilterCollapseTitleHeight)) / Double(exploreFilterCollapseRange), 0),
-                1
-            )
-        }
+        groupBarScrollOutProgress = min(
+            max(Double(offset) / Double(max(groupBarHeight, 1)), 0),
+            1
+        )
     }
 }
 
