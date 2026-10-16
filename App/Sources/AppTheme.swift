@@ -128,6 +128,10 @@ enum AppTheme {
     /// ⇒ 因此这里**不写**字面 RGB、也不为深色另定义一版。
     static let readerTextAreaBorder = Color(.systemRed)
 
+    /// 弹层遮罩：点开「原地弹出的完整分组栏」时盖在列表上的半透明黑，表示下层暂时不可交互。
+    /// 黑在深色下仍是暗化（压在深色底上继续压暗），所以不随外观切换；不透明度固定 0.2。
+    static let scrim = Color.black.opacity(0.2)
+
     /// 卡片化视觉语言（U1-1）：**浅色底 + 卡面 + 细微分隔线**。
     ///
     /// ## 为什么放在这里

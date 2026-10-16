@@ -11,8 +11,6 @@ import UIKit
 /// 两次尝试（零高标记行 / `.background(GeometryReader)`）都没让收缩在真机生效。
 /// `contentOffset` 是 UIKit 滚动的真相源，KVO 一定拿得到。
 private struct ExploreScrollOffsetReporter: UIViewRepresentable {
-    /// 递增的「滚回顶部」请求令牌（0 = 无请求）；`updateUIView` 里比对并执行一次。
-    let scrollToTopToken: Int
     let onOffsetChange: (CGFloat) -> Void
 
     func makeUIView(context _: Context) -> ExploreScrollOffsetReporterView {
@@ -20,17 +18,11 @@ private struct ExploreScrollOffsetReporter: UIViewRepresentable {
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = false
         view.onOffsetChange = onOffsetChange
-        // 记下创建时的令牌：bookList 重建（切分类后回到列表）时不重复执行旧请求。
-        view.lastHandledToken = scrollToTopToken
         return view
     }
 
     func updateUIView(_ uiView: ExploreScrollOffsetReporterView, context _: Context) {
         uiView.onOffsetChange = onOffsetChange
-        if scrollToTopToken != uiView.lastHandledToken {
-            uiView.lastHandledToken = scrollToTopToken
-            uiView.scrollToTop()
-        }
     }
 }
 
@@ -39,10 +31,7 @@ private struct ExploreScrollOffsetReporter: UIViewRepresentable {
 /// 离开窗口时释放观察、让旧 `UIScrollView` 可被回收。
 private final class ExploreScrollOffsetReporterView: UIView {
     var onOffsetChange: ((CGFloat) -> Void)?
-    /// 最近已处理的「滚回顶部」令牌，避免 `updateUIView` 重复执行同一次请求。
-    var lastHandledToken = 0
     private var observation: NSKeyValueObservation?
-    private weak var scrollView: UIScrollView?
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -54,7 +43,6 @@ private final class ExploreScrollOffsetReporterView: UIView {
         var cursor: UIView? = self
         while let current = cursor {
             if let scrollView = current as? UIScrollView {
-                self.scrollView = scrollView
                 observation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
                     self?.onOffsetChange?(scrollView.contentOffset.y)
                 }
@@ -65,11 +53,6 @@ private final class ExploreScrollOffsetReporterView: UIView {
             }
             cursor = current.superview
         }
-    }
-
-    /// 点吸顶收缩栏的选中胶囊后把列表滚回顶部（动画期间 KVO 持续上报，进度随之归零）。
-    func scrollToTop() {
-        scrollView?.setContentOffset(.zero, animated: true)
     }
 }
 
@@ -107,9 +90,10 @@ public struct ExploreView: View {
     @State private var groupBarHeight: CGFloat = 0
     /// 吸顶收缩栏自身高度，用于「从导航栏下缘下滑到位」的位移量。
     @State private var compactBarHeight: CGFloat = 0
-    /// 点吸顶收缩栏的选中胶囊后递增，驱动 `ExploreScrollOffsetReporter` 把列表滚回顶部（重新展开完整栏）。
-    /// ⚠️ 不能 `private`：`ExploreView+CategoryBar.swift` 的 `compactBarOverlay` 需要从另一个文件递增它。
-    @State var scrollToTopToken = 0
+    /// 吸顶栏是否「原地弹出」成完整分组栏：点三个选中胶囊后展开（列表停在原地不滚），
+    /// 让用户改 状态/排序/分类；点外部遮罩或切换分类时收起。
+    /// ⚠️ 不能 `private`：`ExploreView+CategoryBar.swift` 的 `compactBarOverlay` 需要从另一个文件设置它。
+    @State var isGroupBarExpanded = false
 
     init(
         store: StoreOf<ExploreFeature>,
@@ -136,6 +120,8 @@ public struct ExploreView: View {
                     .onChange(of: viewStore.isLoading) { _, isLoading in
                         if isLoading {
                             groupBarScrollOutProgress = 0
+                            // 切分类会重载并回到列表顶部，原地展开的完整栏一并收起。
+                            isGroupBarExpanded = false
                         }
                     }
                     // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`）。
@@ -301,35 +287,53 @@ private extension ExploreView {
             }
             // 滚动偏移由内省的 UIScrollView.contentOffset 上报（真相源），见 `ExploreScrollOffsetReporter`。
             .background(
-                ExploreScrollOffsetReporter(scrollToTopToken: scrollToTopToken) { offsetY in
+                ExploreScrollOffsetReporter { offsetY in
                     handleFilterScroll(offsetY: offsetY)
                 }
             )
         }
-        // 吸顶收缩栏以 overlay 挂在列表顶部（不占布局空间，出现/消失不引起列表跳动）。
-        .overlay(alignment: .top) {
-            compactBarAttachment(viewStore)
+        // 吸顶栏以 overlay 挂在列表顶部（不占布局空间，出现/消失不引起列表跳动）：
+        // 完整栏滚出时显示收缩栏；点收缩栏胶囊原地弹出完整栏（`topBarOverlay` 两种形态）。
+        .overlay {
+            topBarOverlay(viewStore)
         }
     }
 
-    /// 吸顶收缩栏 + 出现动画：完整栏滚出的后半程淡入 + 从导航栏下缘下滑，
-    /// 书目卡片从它下方划过（owner 口径「先盖住分组，再从三个已选值下方划走」）。
-    private func compactBarAttachment(
+    /// 列表顶部的吸顶栏 overlay（两种形态）：
+    /// - 未展开：吸顶收缩栏，完整栏滚出的后半程淡入 + 从导航栏下缘下滑，书目卡片从它下方划过；
+    /// - 展开：原地弹出完整分组栏（列表停在原地），下面盖一层半透明遮罩，点遮罩收起。
+    private func topBarOverlay(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
-        compactBarOverlay(viewStore)
-            .opacity(compactBarOpacity)
-            .offset(y: -(1 - compactBarOpacity) * compactBarHeight)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.height
-            } action: { height in
-                guard height > 0 else { return }
-                compactBarHeight = height
+        ZStack(alignment: .top) {
+            if isGroupBarExpanded {
+                // 半透明遮罩：挡住列表触摸（「列表停在原地不滚」），点它收起展开的完整栏。
+                AppTheme.scrim
+                    .onTapGesture { isGroupBarExpanded = false }
+                    .transition(.opacity)
             }
-            // 半透明以上才可交互；未出现时把触摸让给下面的列表。
-            .allowsHitTesting(compactBarOpacity >= 0.5)
-            // 裁掉下滑动画滑出到导航栏区域的部分（同旧收缩栏 ZStack + clipped 的写法）。
-            .clipped()
+
+            if isGroupBarExpanded {
+                expandedGroupBarOverlay(viewStore)
+                    .transition(.opacity)
+            } else {
+                compactBarOverlay(viewStore)
+                    .opacity(compactBarOpacity)
+                    .offset(y: -(1 - compactBarOpacity) * compactBarHeight)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        guard height > 0 else { return }
+                        compactBarHeight = height
+                    }
+                    // 半透明以上才可交互；未出现时把触摸让给下面的列表。
+                    .allowsHitTesting(compactBarOpacity >= 0.5)
+                    // 裁掉下滑动画滑出到导航栏区域的部分（同旧收缩栏 ZStack + clipped 的写法）。
+                    .clipped()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: isGroupBarExpanded)
     }
 
     /// 吸顶收缩栏淡入比例：完整栏滚出 60% 后开始、完全滚出时到位

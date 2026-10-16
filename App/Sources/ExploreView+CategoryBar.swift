@@ -30,9 +30,9 @@ extension ExploreView {
         .background(AppTheme.Surface.page)
     }
 
-    /// 吸顶收缩栏「三个已选值 + 跳页按钮」。调用方以 `.overlay(alignment: .top)` 挂在列表上：
+    /// 吸顶收缩栏「三个已选值 + 跳页按钮」。调用方以 overlay 挂在列表上：
     /// 不占布局空间，出现 / 消失不会引起列表跳动；完整栏滚出的后半程淡入 + 从导航栏下缘
-    /// 下滑到位，书目卡片从它下方划过。点任意选中胶囊把列表滚回顶部重新展开完整栏。
+    /// 下滑到位，书目卡片从它下方划过。点任意选中胶囊**原地展开完整栏**（列表不滚）。
     func compactBarOverlay(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
@@ -45,7 +45,30 @@ extension ExploreView {
                     viewStore.send(.jumpToPage(page))
                 },
                 onExpand: {
-                    scrollToTopToken += 1
+                    isGroupBarExpanded = true
+                }
+            )
+            Divider()
+        }
+        .background(AppTheme.Surface.page)
+    }
+
+    /// 原地弹出的完整分组栏（点吸顶收缩栏的三个胶囊后展开，列表停在原地）。
+    /// 与滚动内容里的 `groupBarHeader` 同一套 `ExploreGroupBar`，保证两处外观一致。
+    func expandedGroupBarOverlay(
+        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
+    ) -> some View {
+        let selected = exploreSelectedFilterItems(from: viewStore.selectedCategory)
+        return VStack(spacing: 0) {
+            ExploreGroupBar(
+                categories: viewStore.categories,
+                selected: selected,
+                page: viewStore.page,
+                onJump: { page in
+                    viewStore.send(.jumpToPage(page))
+                },
+                onSelect: { category in
+                    viewStore.send(.categorySelected(category))
                 }
             )
             Divider()
@@ -136,7 +159,7 @@ private struct ExploreGroupBar: View {
 }
 
 /// 吸顶收缩栏的单行内容：「3 个选中值胶囊 + 跳页按钮」。
-/// 胶囊点击整颗滚回顶部重新展开完整栏（不切换选择）；用选中态配色
+/// 胶囊点击整颗原地展开完整栏（不切换选择）；用选中态配色
 /// （accent 底 + 反色文字），沿用旧收缩栏的样式。
 private struct ExploreCompactBar: View {
     let selected: ExploreSelectedFilterItems
