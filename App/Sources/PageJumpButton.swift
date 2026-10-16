@@ -21,7 +21,7 @@ struct PageJumpButton: View {
             isShowingInput = true
         } label: {
             Text("第 \(page) 页")
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(.regular))
                 .lineLimit(1)
                 .padding(.horizontal, DesignTokens.FilterChip.hPadding)
                 .padding(.vertical, DesignTokens.Spacing.xs)

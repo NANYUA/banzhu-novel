@@ -4,8 +4,9 @@ import NovelEngine
 import SwiftUI
 
 extension ExploreView {
-    /// 三个筛选维度各占一行；每组首行固定 3 个胶囊 + 「展开」，展开后其余选项折到下一行。
-    /// 跳页按钮并入「状态」行末（右边缘与「展开」右边缘对齐），点击弹输入框跳指定页码。
+    /// 三个筛选维度各占一行；每组首行固定 3 个胶囊，行尾右对齐「展开 / 收起」
+    /// （「状态」行行尾改为跳页按钮），两者右边缘对齐；展开后其余选项折到下一行。
+    /// 跳页按钮点击弹输入框跳指定页码。
     /// 滚动时按 `collapseProgress`（0 完整 / 1 收缩）把完整栏交叉淡入淡出成
     /// 一行「3 个选中值 + 跳页按钮」，对齐 `ui-mockups/explore-page.html` 的收缩态。
     func categoryBar(
@@ -195,8 +196,8 @@ private struct ExploreCategoryFilterRow: View {
     let onSelect: (ExploreCategory) -> Void
     @State private var isExpanded = false
 
-    /// 首行固定 3 个胶囊（对齐 demo `explore-page.html` 的「3 胶囊 + 展开」）；
-    /// 第 4 位是「展开 / 收起」。展开只把剩余选项折到下一行，首行不变 ⇒ 按钮不移动。
+    /// 首行固定 3 个胶囊；「展开 / 收起」右对齐到行尾（「状态」行改为跳页按钮）。
+    /// 展开只把剩余选项折到下一行，首行不变 ⇒ 按钮不移动。
     private static let firstRowCount = 3
 
     var body: some View {
@@ -213,9 +214,6 @@ private struct ExploreCategoryFilterRow: View {
                     ForEach(firstRowItems) { category in
                         chip(for: category)
                     }
-                    if items.count > Self.firstRowCount {
-                        toggleButton
-                    }
                 }
                 if isExpanded {
                     FlowLayout(spacing: DesignTokens.Spacing.xs) {
@@ -229,7 +227,8 @@ private struct ExploreCategoryFilterRow: View {
 
             if let page, let onJump {
                 PageJumpButton(page: page, onJump: onJump)
-                    .padding(.trailing, DesignTokens.FilterChip.jumpTrailing)
+            } else if items.count > Self.firstRowCount {
+                toggleButton
             }
         }
     }

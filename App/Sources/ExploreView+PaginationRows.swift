@@ -79,18 +79,3 @@ struct ExploreEndOfResultsRow: View {
             .accessibilityHidden(true)
     }
 }
-
-struct ExploreRowChrome: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .listRowInsets(.init())
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-    }
-}
-
-extension View {
-    func exploreRowChrome() -> some View {
-        modifier(ExploreRowChrome())
-    }
-}

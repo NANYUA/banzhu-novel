@@ -86,9 +86,5 @@ enum DesignTokens {
         static let hPadding: CGFloat = 14
         /// 34 —— 标签列宽（demo `.label { width: 34px }`）。
         static let labelWidth: CGFloat = 34
-        /// 8 —— 完整栏跳页按钮右外边距，使右边缘与「展开」右边缘对齐。
-        /// demo `margin-right: 22px` 是按 14px 字号算的；改用 `.subheadline`(15pt) 后
-        /// 「3 胶囊 + 展开」更宽，故缩到 8pt（按 390pt 屏「3 胶囊 + 展开 ≈ 316pt」估算）。
-        static let jumpTrailing: CGFloat = 8
     }
 }

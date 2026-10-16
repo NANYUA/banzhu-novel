@@ -202,58 +202,48 @@ private extension ExploreView {
     private func bookList(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
-        List {
-            scrollOffsetMarker
-            ForEach(ExploreDisplayRow.rows(
-                books: viewStore.books,
-                pageStarts: viewStore.pageStarts
-            )) { row in
-                if let page = row.pageLabel {
-                    ExplorePageLabelRow(page: page)
-                        .exploreRowChrome()
+        // 用 `ScrollView` + `LazyVStack` 而不是 `List`：
+        // `List` 上 `.coordinateSpace(name:)` 对行内 GeometryReader 不可靠（真机上报不出滚动偏移），
+        // 换 `ScrollView` 后命名坐标空间稳定，滚动收缩才生效；也顺带去掉 `List` 的默认顶部内边距。
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                scrollOffsetMarker
+                ForEach(ExploreDisplayRow.rows(
+                    books: viewStore.books,
+                    pageStarts: viewStore.pageStarts
+                )) { row in
+                    if let page = row.pageLabel {
+                        ExplorePageLabelRow(page: page)
+                    }
+
+                    ExploreBookRow(book: row.book) {
+                        detailBook = row.book
+                        isShowingDetail = true
+                    }
+                    .padding(.horizontal, DesignTokens.Spacing.md)
+                    .padding(.vertical, DesignTokens.Spacing.xs)
                 }
 
-                ExploreBookRow(book: row.book) {
-                    detailBook = row.book
-                    isShowingDetail = true
+                if viewStore.moreErrorMessage != nil {
+                    ExploreLoadMoreRetryRow {
+                        viewStore.send(.retry)
+                    }
+                } else if viewStore.hasMore {
+                    ExploreLoadMoreRow(isLoadingMore: viewStore.isLoadingMore) {
+                        viewStore.send(.loadMore)
+                    }
+                } else {
+                    ExploreEndOfResultsRow()
                 }
-                .listRowInsets(
-                    .init(
-                        top: DesignTokens.Spacing.xs,
-                        leading: DesignTokens.Spacing.md,
-                        bottom: DesignTokens.Spacing.xs,
-                        trailing: DesignTokens.Spacing.md
-                    )
-                )
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-            }
-
-            if viewStore.moreErrorMessage != nil {
-                ExploreLoadMoreRetryRow {
-                    viewStore.send(.retry)
-                }
-                .exploreRowChrome()
-            } else if viewStore.hasMore {
-                ExploreLoadMoreRow(isLoadingMore: viewStore.isLoadingMore) {
-                    viewStore.send(.loadMore)
-                }
-                .exploreRowChrome()
-            } else {
-                ExploreEndOfResultsRow()
-                    .exploreRowChrome()
             }
         }
-        .listStyle(.plain)
-        // 让 List 自己的滚动背景透出页面分组灰。
-        .scrollContentBackground(.hidden)
         .coordinateSpace(name: "exploreScroll")
         .onPreferenceChange(ExploreScrollOffsetKey.self) { minY in
             handleFilterScroll(minY: minY)
         }
     }
 
-    /// 零高的滚动偏移标记：放进 List 首行，随滚动上报 `minY`。
+    /// 零高的滚动偏移标记：放进滚动容器首行，随滚动上报 `minY`。
     private var scrollOffsetMarker: some View {
         GeometryReader { proxy in
             Color.clear.preference(
@@ -262,9 +252,6 @@ private extension ExploreView {
             )
         }
         .frame(height: 0)
-        .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
     }
 
     /// 由滚动偏移驱动收缩进度。普通态按绝对偏移成比例收缩；
