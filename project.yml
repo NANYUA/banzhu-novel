@@ -40,7 +40,7 @@ targets:
       path: App/Resources/Info.plist
       properties:
         CFBundleDevelopmentRegion: zh-Hans
-        CFBundleDisplayName: 小说阅读器
+        CFBundleDisplayName: BanXS
         CFBundleLocalizations:
           - zh-Hans
         CFBundleShortVersionString: $(MARKETING_VERSION)
