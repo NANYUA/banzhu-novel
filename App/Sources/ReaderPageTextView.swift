@@ -192,11 +192,7 @@ struct PageTextView: UIViewRepresentable {
             // ⚠️ 只换掉切片**第一个段落**那一份样式；本页后续段落照旧带缩进。
             attributed.addAttribute(
                 .paragraphStyle,
-                value: ReadingTextAttributes.paragraphStyle(
-                    lineSpacing: configuration.lineSpacing,
-                    paragraphSpacing: configuration.paragraphSpacing,
-                    firstLineHeadIndent: 0
-                ),
+                value: ReadingTextAttributes.continuationParagraphStyle(configuration: configuration),
                 range: firstParagraph
             )
         } else if showsChapterTitle {

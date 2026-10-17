@@ -65,6 +65,19 @@ public enum ReadingTextAttributes {
         return attributes
     }
 
+    /// 「续行」段落样式：本页从段落中间开始时的第一段用（首行**不缩进**）。
+    ///
+    /// 为什么单独开一个公开入口而不是把 `paragraphStyle(...)` 整个公开：
+    /// 让 App 层只能表达「这一段是续行」这一个意图，拿不到随意拼参数的余地 ——
+    /// 否则两端对齐 / 行距 / 段距又会出现第二个构造点。
+    public static func continuationParagraphStyle(configuration: PaginationConfiguration) -> NSParagraphStyle {
+        paragraphStyle(
+            lineSpacing: configuration.lineSpacing,
+            paragraphSpacing: configuration.paragraphSpacing,
+            firstLineHeadIndent: 0
+        )
+    }
+
     /// 段落样式：两端对齐 + 行距 / 段距 / 首行缩进。
     ///
     /// `alignment` 恒为 `.justified`：香色闺阁对正文与标题都设 `setAlignment:3`，
