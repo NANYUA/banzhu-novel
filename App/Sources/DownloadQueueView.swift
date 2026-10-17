@@ -46,6 +46,17 @@ struct DownloadQueueView: View {
     /// 若用户在阅读页再点「下载本章」，入队的 `bookTitle` 也会是空串，同样源于取不到真名。
     let onOpenBook: (String, String) -> Void
 
+    /// 本地导入书的那一段从哪儿重新读。
+    ///
+    /// 导入是在**「下载设置」sheet 里**发起的（owner 2026-10-17 第二轮口径：入口收进本地页右上角设置），
+    /// sheet 收起来时本页不会 `.onAppear`，所以由书架层给一个自增令牌，`task(id:)` 据此重读。
+    let localBooksReloadToken: Int
+
+    /// 本地导入书（`local/<hash>/` 前缀）。没有它，「导入的书在本地页看不见」。
+    @Dependency(\.localBooksLoader) private var localBooksLoader
+
+    @State private var localBooks: [LocalBookRow] = []
+
     /// 书卡的**书名 / 作者 / 封面**的唯一来源：按 `bookPath` 从书库查（`BookLibraryMetaLoader`）。
     ///
     /// 书名与作者优先取书库（`BookRecord`）、快照只当兜底，取值顺序见 `BookDownloadSummary`——
@@ -65,7 +76,7 @@ struct DownloadQueueView: View {
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             Group {
-                if viewStore.tasks.isEmpty {
+                if viewStore.tasks.isEmpty, localBooks.isEmpty {
                     emptyState
                 } else {
                     queueList(viewStore)
@@ -80,6 +91,11 @@ struct DownloadQueueView: View {
             // 切到「本地」分组时本视图出现 ⇒ 拉一次队列快照。
             .onAppear {
                 viewStore.send(.task)
+            }
+            // 本地导入书：出现在「本地」页（导入的书没有 DownloadTask，只有这一段能看见）。
+            // `id: localBooksReloadToken` 让「设置里刚导完」也能立刻刷新。
+            .task(id: localBooksReloadToken) {
+                localBooks = await localBooksLoader.load()
             }
             // 书名 / 作者 / 封面：队列里的书目变了才拉一次（一次读库；查不到的书回退快照与占位块）。
             .task(id: viewStore.bookPaths) {
@@ -143,11 +159,19 @@ struct DownloadQueueView: View {
         _ viewStore: ViewStore<DownloadFeature.State, DownloadFeature.Action>
     ) -> some View {
         VStack(spacing: 0) {
-            pinnedHeader(viewStore)
-                // 补回卡片搬出 `List` 后失效的那条 bottom 内缩（`Spacing.xs`），间距不变。
-                .padding(.bottom, DesignTokens.Spacing.xs)
+            // 只有真有下载任务时才画上栏：全是本地导入书时，进度卡片会是一张「0/0」的噪音。
+            if !viewStore.tasks.isEmpty {
+                pinnedHeader(viewStore)
+                    // 补回卡片搬出 `List` 后失效的那条 bottom 内缩（`Spacing.xs`），间距不变。
+                    .padding(.bottom, DesignTokens.Spacing.xs)
+            }
 
             List {
+                // 本地导入的书排在最上面：它们不带下载状态，混在队列卡之间会像「下载失败的书」。
+                if !localBooks.isEmpty {
+                    LocalImportBooksSection(books: localBooks, onOpenBook: onOpenBook)
+                }
+
                 if let notice = viewStore.notice {
                     Section {
                         DownloadNoticeRow(notice: notice) {
@@ -370,11 +394,33 @@ private struct DownloadNoticeRow: View {
 struct DownloadSettingsView: View {
     let store: StoreOf<DownloadFeature>
 
+    /// 导入完成后的收尾（书架那层：自增刷新令牌 + 重拉书架）。
+    ///
+    /// 入口在这里、书却在书架层：`DownloadQueueView` 只是渲染者，
+    /// 刷新令牌必须由 `BookshelfView` 持有（它同时是 `DownloadQueueView` 的构造者）。
+    let onImported: () -> Void
+
     @Environment(\.dismiss) private var dismiss
+
+    // 导入本地 TXT：picker 开关 / 选中的文件 / 选文件失败的提示。
+    //
+    // ⚠️ 呈现挂在**本页内容层**（下面的 `.importHost(...)`），不要挪进工具栏 ——
+    // 工具栏子视图不是稳定宿主，真机上 `.fileImporter` 点了完全没反应（owner 2026-10-17 首轮反馈）。
+    @State private var isPickingImportFile = false
+    @State private var pickedImportFile: PickedImportFile?
+    @State private var importFailureMessage: String?
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             Form {
+                Section {
+                    ImportTXTButton { isPickingImportFile = true }
+                } header: {
+                    Text("本地导入")
+                } footer: {
+                    Text("选一个 txt ⇒ 按目录正则切成章节后放进「本地」，全部章节存在本地，不需要联网。")
+                }
+
                 Section {
                     Toggle(
                         "允许蜂窝网络下载",
@@ -417,6 +463,18 @@ struct DownloadSettingsView: View {
                     }
                 }
             }
+            // 导入 TXT 的呈现宿主：picker → 填书名 sheet → 进度 / 成功 / 失败。
+            // 挂在内容层（Form）上，**不要**挪进工具栏子视图（真机不生效，见 `ImportTXTButton` 注释）。
+            .importHost(
+                isPicking: $isPickingImportFile,
+                picked: $pickedImportFile,
+                failureMessage: $importFailureMessage,
+                onImported: {
+                    onImported()
+                    // 导完就收起设置页：书已经在「本地」，停在设置页反而看不到结果。
+                    dismiss()
+                }
+            )
         }
     }
 
@@ -506,6 +564,7 @@ private extension DownloadNetworkKind {
             DownloadFeature()
         },
         // 预览里不接阅读页：落点在书架那层，这里给一个空实现即可。
-        onOpenBook: { _, _ in }
+        onOpenBook: { _, _ in },
+        localBooksReloadToken: 0
     )
 }

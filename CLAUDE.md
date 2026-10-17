@@ -13,8 +13,8 @@
 缓存后触发 LRU 淘汰。淘汰**只清「已读章号 + 预缓存章数」之外的陈旧预取** ——
 已读章节与当前预取窗口内的章节都保留（否则「点下一章 / 返回上一章」会重新联网加载）。
 
-**本地 TXT 导入（2026-10-17）**：书架工具栏「导入 TXT」→ 系统文件选择 → 解码
-（BOM → 严格 UTF-8 → GB18030）→ 按「导入目录正则」（设置 → 本地导入；内置 19 条，
+**本地 TXT 导入（2026-10-17）**：「本地」页右上角齿轮 →「下载设置」→「导入书籍」→ 系统文件选择 → 解码
+（BOM → 严格 UTF-8 → GB18030）→ 按「目录正则」（设置 → 目录正则；内置 19 条，
 用户可增删启停）切章，**一条都不命中时按 3000 字兜底**、章名「第 N 部分」→ 逐章落盘
 + 落库（一条 `BookRecord` + 全 `.downloaded` 的 `ChapterRecord`，**一次 save**）。
 书路径是 `local/<sha256 前 16 位>/`，`LocalBookPath.isLocal(_:)` 是「这本书是本地导入」的
@@ -23,11 +23,21 @@
 `ChapterCacheStore.saveCachedText`（它会把章标成 `.cached` ⇒ 被 LRU 删掉 ⇒ 破契约①）。
 
 ⚠️ **导入的呈现不能挂在工具栏按钮上**（2026-10-17 真机踩出来的）：`.fileImporter` /
-`.sheet` 挂在 `ToolbarItem` 的子视图上时真机「点了没反应」；现在工具栏只开开关
-（`ImportTXTButton { isPickingImportFile = true }`），picker / sheet / 失败提示都在
-`BookshelfView+Import.swift` 的 `.importHost(...)`（挂在内容层）。另外
-`allowedContentTypes` 用 **`.item`** 而不是 `.plainText` —— 后者会让某些来源的 txt
-在选择器里变灰、点了没反应。
+`.sheet` 挂在 `ToolbarItem` 的子视图上时真机「点了没反应」。入口现在是
+`DownloadSettingsView` 里的 `ImportTXTButton { isPickingImportFile = true }`（只开开关），
+picker / sheet / 失败提示都在 `BookshelfView+Import.swift` 的 `.importHost(...)`
+（挂在**内容层**）。另外 `allowedContentTypes` 用 **`.item`** 而不是 `.plainText` ——
+后者会让某些来源的 txt 在选择器里变灰、点了没反应。
+
+**第二轮真机反馈（2026-10-17，同一天改完）**：
+① 导入入口从书架工具栏搬进「本地」页右上角设置（即 `DownloadSettingsView`）；
+② 导入的书要出现在「本地」列表里 —— `LocalBooksLoader` 按 `LocalBookPath.isLocal`
+从 `BookRecord` 捞出，`DownloadQueueView` 顶部多渲染一段 `LocalImportBooksSection`
+（它们没有 `DownloadTask`，光靠下载队列永远看不见；全是本地书时上栏进度卡不显示）；
+③ 设置页三张卡（域名 / 手动过验证 / 目录正则）统一成单行「标题 + 右侧值 + ≥44pt」，
+域名列表与「添加域名」搬进二级页 `HostSettingsView`；
+④ 「目录正则」页右上角改成**弹出菜单**（菜单项「添加正则」）→ `.sheet` 弹
+`ImportRuleEditorView` 输入；左滑删除显式 `.tint(.red)`。
 
 阅读页排版有三条长期口径（改分页 / 正文样式前先读）：
 1. **任何一页都不得以换行开头** —— `Paginator` 会把紧随页末的连续换行并入本页
@@ -115,7 +125,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（49 文件）
+│   └── Sources/                     # SwiftUI 视图层（51 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -146,7 +156,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   ├── NovelEngine/                 # 纯逻辑层（10 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 固定三维书库目录 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（63 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（64 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
@@ -170,7 +180,8 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   │   │   ├── Import/              # 本地 TXT 导入（2026-10-17）：ImportChapterRule / BuiltinImportRules /
 │   │   │   │                        #   TextDecoder（BOM→UTF-8→GB18030）/ ChapterSplitter /
 │   │   │   │                        #   LocalBookPath（local/<hash>/ 前缀即「本地书」判据）/
-│   │   │   │                        #   ImportRuleStore / LocalBookImporter / ImportFeature / ImportRulesFeature
+│   │   │   │                        #   ImportRuleStore / LocalBookImporter / ImportFeature / ImportRulesFeature /
+│   │   │                        #   LocalBooksLoader（「本地」页那段本地书列表的数据源）
 │   │   │   └── Guard/               # GuardFeature / GuardCoordinator
 │   │   └── Tests/
 │   └── NovelPagination/             # TextKit 真实度量（UIKit 白名单包，2 文件）

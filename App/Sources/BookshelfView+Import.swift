@@ -11,11 +11,15 @@ struct PickedImportFile: Identifiable {
 }
 
 extension View {
-    /// 把「选文件 → 填书名 → 导入」这套呈现挂到书架的**内容层**上。
+    /// 把「选文件 → 填书名 → 导入」这套呈现挂到**内容层**上。
     ///
-    /// 状态留在 `BookshelfView`（`isPickingImportFile` / `pickedImportFile` / `importFailureMessage`），
+    /// 状态由调用方持有（`isPickingImportFile` / `pickedImportFile` / `importFailureMessage`），
     /// 这里只做修饰符拼装 —— 原因见 `ImportTXTButton` 的注释：挂在工具栏子视图上的
-    /// `.fileImporter` / `.sheet` 真机上可能起不来。
+    /// `.fileImporter` / `.sheet` 真机上点不出来。
+    ///
+    /// ⚠️ 当前唯一调用点是 `DownloadSettingsView`（下载设置页，owner 2026-10-17 第二轮口径：
+    /// 「将导入书籍按钮放在本地页面右上角设置中」），**不是** `BookshelfView`；
+    /// 文件名沿用旧名是因为改动只允许改内容、不允许在提交里出现重命名。
     func importHost(
         isPicking: Binding<Bool>,
         picked: Binding<PickedImportFile?>,

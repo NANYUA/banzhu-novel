@@ -1,21 +1,25 @@
 import SwiftUI
 
-/// 书架工具栏的「导入 TXT」按钮 —— **只管点击，不持有任何呈现状态**。
+/// 「导入书籍」这一行（下载设置页里）。
 ///
-/// ## 为什么把 `.fileImporter` / `.sheet` 从这里挪走（owner 2026-10-17 真机反馈）
-/// 第一版是「按钮自己带 `@State` + `.fileImporter` + `.sheet(item:)`」，
-/// 而按钮是 `ToolbarItem` 的内容 —— 真机表现是**点了 txt 没有任何反应**：
-/// 工具栏里的子视图不是稳定宿主，挂在它上面的呈现（picker / sheet）可能起不来。
-/// 现在状态归 `BookshelfView`，呈现挂在它的内容层（`BookshelfView+Import.swift`），
-/// 工具栏只负责「把开关打开」。
+/// ## 为什么这里只有一行按钮
+/// `.fileImporter` / `.sheet` 不能挂在工具栏子视图上 —— 真机上点了完全没反应
+/// （owner 2026-10-17 首轮反馈），呈现改挂在 `DownloadSettingsView` 的**内容层**
+/// （`.importHost(...)`，实现在 `BookshelfView+Import.swift`）。
+/// 本视图因此只负责「被点」，不持有任何呈现状态。
+///
+/// 入口位置也是 owner 定的：本地页右上角齿轮 → 下载设置页里，而不是书架工具栏。
 struct ImportTXTButton: View {
-    /// 点一下要做什么（由书架把 picker 开关置为 `true`）。
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            Image(systemName: "square.and.arrow.down")
+            Label("导入书籍", systemImage: "square.and.arrow.down")
+                // HIG §9：`.frame` 落在 label 上才撑开命中区（套在 Button 外面无效）。
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
-        .accessibilityLabel("导入 TXT")
+        .buttonStyle(.borderless)
+        .accessibilityLabel("导入书籍")
     }
 }

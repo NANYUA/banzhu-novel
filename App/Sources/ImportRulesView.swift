@@ -4,10 +4,10 @@ import SwiftUI
 
 /// 「目录正则」管理页：设置 → 目录正则。
 ///
-/// ## 交互口径（owner 2026-10-17）
+/// ## 交互口径（owner 2026-10-17，第二轮真机反馈后再改）
 /// - 内置规则只是**初始数据**，同样可以删除（删除按钮是**红色**）；
-/// - 新增入口在**右上角**，图标与书架分组栏的「新建分组」一致（`plus.circle.fill`），
-///   点它把表单收进列表上方；正则当场校验，编译不过不让加；
+/// - 新增入口在**右上角**的**弹出菜单**里（这一版 owner 要求「右上角改为弹出选项」），
+///   菜单只有一项「添加正则」，点它弹 **sheet** 输入（不再在列表底部摊开表单）；
 /// - 删掉的内置规则可用「恢复内置」补回，且**不会**覆盖用户自己新建的。
 ///
 /// 所有修改立即生效并写回（没有「保存」按钮），导入时读的就是这张表。
@@ -20,9 +20,6 @@ struct ImportRulesView: View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             Form {
                 rulesSection(viewStore)
-                if viewStore.isAdding {
-                    draftSection(viewStore)
-                }
                 restoreSection(viewStore)
             }
             .navigationTitle("目录正则")
@@ -30,15 +27,32 @@ struct ImportRulesView: View {
             .onAppear { viewStore.send(.onAppear) }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        viewStore.send(.addTapped)
+                    // 弹出菜单（不是直接开表单）：后续要加「导入 / 导出规则」时，
+                    // 这里继续加菜单项即可，不必再动右上角的结构。
+                    Menu {
+                        Button {
+                            viewStore.send(.addTapped)
+                        } label: {
+                            Label("添加正则", systemImage: "plus")
+                        }
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
-                    // 表单已经摊开时再点没有意义，置灰比「点了没反应」清楚。
-                    .disabled(viewStore.isAdding)
-                    .accessibilityLabel("新建规则")
+                    .accessibilityLabel("添加正则")
                 }
+            }
+            // 输入界面用 sheet：正则可能很长，摊在列表里会把下面的规则挤走。
+            .sheet(
+                isPresented: Binding(
+                    get: { viewStore.isAdding },
+                    set: { isPresented in
+                        if !isPresented {
+                            viewStore.send(.cancelAddTapped)
+                        }
+                    }
+                )
+            ) {
+                ImportRuleEditorView(store: store)
             }
         }
     }
@@ -86,49 +100,6 @@ struct ImportRulesView: View {
             // 显式红色：`role: .destructive` 在本页的 Form / Toggle 组合下会被系统染成蓝色
             // （owner 2026-10-17 真机反馈「左滑删除是蓝色」）。
             .tint(.red)
-        }
-    }
-
-    // MARK: - 新建（由右上角 + 触发）
-
-    private func draftSection(
-        _ viewStore: ViewStore<ImportRulesFeature.State, ImportRulesFeature.Action>
-    ) -> some View {
-        Section {
-            TextField(
-                "名称（例如：我的规则）",
-                text: viewStore.binding(
-                    get: \.draftName,
-                    send: ImportRulesFeature.Action.draftNameChanged
-                )
-            )
-            TextField(
-                "正则",
-                text: viewStore.binding(
-                    get: \.draftPattern,
-                    send: ImportRulesFeature.Action.draftPatternChanged
-                )
-            )
-            .font(.system(.footnote, design: .monospaced))
-            .autocorrectionDisabled()
-            .textInputAutocapitalization(.never)
-            if let error = viewStore.draftError {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
-            HStack {
-                Button("取消") { viewStore.send(.cancelAddTapped) }
-                    .buttonStyle(.borderless)
-                Spacer()
-                Button("添加") { viewStore.send(.addConfirmed) }
-                    .buttonStyle(.borderless)
-                    .disabled(!viewStore.canSubmitDraft)
-            }
-        } header: {
-            Text("新建规则")
-        } footer: {
-            Text("正则会按「整行」匹配：命中即把这一行当章标题。")
         }
     }
 

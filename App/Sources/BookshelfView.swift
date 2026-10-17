@@ -69,13 +69,10 @@ struct BookshelfView: View {
     /// 的写法（与 `readerTarget` 那一组一致）。
     @State var pressedBookPath: String?
 
-    // 导入本地 TXT（owner 2026-10-17）：picker 开关 / 选中的文件 / 选文件失败的提示。
-    // 状态留在这里、呈现挂在 `BookshelfView+Import.swift` —— 工具栏里的子视图不是稳定宿主，
-    // 把 `.fileImporter` / `.sheet` 挂在它上面真机上「点了没反应」（见 `ImportTXTButton` 注释）。
-    // ⚠️ 同样刻意不加 `private`：`BookshelfView+Import.swift` 的 extension 要读它们。
-    @State var isPickingImportFile = false
-    @State var pickedImportFile: PickedImportFile?
-    @State var importFailureMessage: String?
+    /// 本地导入书的刷新令牌（owner 2026-10-17 第二轮口径：导入入口收进「本地」页右上角设置里）。
+    /// 导入在「下载设置」sheet 内完成，sheet 收起时 `DownloadQueueView` 不会 `.onAppear`，
+    /// 所以由这里给一个自增数，`DownloadQueueView` 用 `.task(id:)` 据此重读本地书。
+    @State private var localBooksReloadToken = 0
 
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
@@ -98,7 +95,8 @@ struct BookshelfView: View {
                                 store: downloadStore,
                                 onOpenBook: { bookPath, bookTitle in
                                     prepareReader(bookPath: bookPath, bookTitle: bookTitle)
-                                }
+                                },
+                                localBooksReloadToken: localBooksReloadToken
                             )
                         } else if viewStore.isLoading, viewStore.rows.isEmpty {
                             // 首次加载中，还没数据也不确定是否失败
@@ -138,14 +136,6 @@ struct BookshelfView: View {
                 .readerPreparation(
                     isPreparing: preparingBookPath != nil,
                     failureMessage: $prepareErrorMessage
-                )
-                // 导入 TXT 的呈现宿主（picker / 填书名 sheet / 失败提示）。
-                // 挂在内容层而不是工具栏：工具栏子视图不是稳定宿主（见 `ImportTXTButton` 注释）。
-                .importHost(
-                    isPicking: $isPickingImportFile,
-                    picked: $pickedImportFile,
-                    failureMessage: $importFailureMessage,
-                    onImported: { viewStore.send(.onAppear) }
                 )
                 .navigationTitle("书架")
                 // 底栏（tabBar）可见性的**唯一所有者**就是每个 tab 根视图，且由状态驱动：
@@ -204,21 +194,22 @@ struct BookshelfView: View {
                 }
                 .toolbar {
                     toolbarContent(viewStore)
-                    // 导入本地 TXT（owner 2026-10-17 口径：只做 App 内选择文件，
-                    // 不做「用其它 App 打开」的 Info.plist 入口）。
-                    // 这里**只开开关**：picker 与导入 sheet 挂在下面的 `.importHost(...)` 上，
-                    // 导入成功后重发 `.onAppear` 让书架重拉一次（与「从阅读页返回」同一条刷新路径）。
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ImportTXTButton { isPickingImportFile = true }
-                    }
                 }
                 // U9-8：「下载设置」的载体。它**自带一层 `NavigationStack`** ——
                 // 所以撤掉 `DownloadQueueView` 自己那层栈，不影响设置页的标题与「完成」按钮。
                 // sheet 挂在书架这一层而不是 `DownloadQueueView` 里：入口按钮现在归外层工具栏所有，
                 // 两者必须共用同一个开关（`isShowingDownloadSettings`）。
+                //
+                // 导入本地 TXT 的入口在**这一页里**（owner 2026-10-17 第二轮口径：
+                // 「将导入书籍按钮放在本地页面右上角设置中」），picker / 填书名 sheet 也挂在这一页的
+                // 内容层上（`DownloadSettingsView` 里的 `.importHost(...)`）——
+                // 工具栏子视图不是稳定宿主，这正是第一版「点了没反应」的成因。
                 .sheet(isPresented: $isShowingDownloadSettings) {
                     NavigationStack {
-                        DownloadSettingsView(store: downloadStore)
+                        DownloadSettingsView(store: downloadStore) {
+                            localBooksReloadToken += 1
+                            viewStore.send(.onAppear)
+                        }
                     }
                 }
                 .alert("新建分组", isPresented: $isShowingNewGroupAlert) {
