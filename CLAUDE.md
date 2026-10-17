@@ -49,6 +49,22 @@ picker / sheet / 失败提示都在 `BookshelfView+Import.swift` 的 `.importHos
 ③ `DownloadSettingsView` 拆成独立文件（`App/Sources/DownloadSettingsView.swift`）—— 原先
 `DownloadQueueView.swift` 涨到 598 行、贴着 `file_length` 600 红线。
 
+**香色闺阁排版规则移植（2026-10-18）**：参数域抄自它的 `plist_paibanKeyInfo.plist`，默认值取
+`plist_localConfig.plist` 的「默认排版」一套（`titleFontSizeOffset = 1`、`titleFontWeight = 3`、
+`headIndent = 2 字`）。落地：① 首行缩进从「开关」升级成 **0…5 字**（宽度仍由
+`firstLineIndentChars × fontSize` 派生，`isFirstLineIndentOn == false` 一票否决）；② 行距 / 段距
+域扩到 **-10…100**、字距 **-10…20**、新增「字体粗细」**-10…10**（`NSStrokeWidthAttributeName = -weight`）；
+③ 章标题独立五参数（字号增量 / 粗细 / 字距 / 行距 / 段距，后三项 `nil` = 跟随正文）；④ 正文与标题
+**两端对齐**（`.justified`）。
+⚠️ 正文 / 章标题属性现在**只有一个来源**：`Packages/NovelPagination/Sources/NovelPagination/ReadingTextAttributes.swift`
+（font / paragraphStyle / kern / strokeWidth）。度量侧 `TextKitMeasuring` 与渲染侧
+`App/Sources/ReaderPageTextView.swift` 都只调它 —— 原先两处各手抄一份，属性从 4 项涨到 8 项后必漂。
+章标题 = 正文第一段（`displayText` = 章名 + `"\n\n"` + 正文）：度量侧判 `from == 0`、渲染侧判
+`showsChapterTitle`（页序号 == 0），⚠️ 两侧判据必须同步，且**不能**只判「段落开头」
+（那样章中每页第一段都会被当成标题加粗放大）。
+未做：一屏双栏（`textViewL`/`textViewR`）、「默认/紧凑/宽松」三套预设、页内底部信息条。
+对照文档在工作区 `_reference_xiangse/排版规则对照.md` 与 `翻页机制对照.md`。
+
 阅读页排版有三条长期口径（改分页 / 正文样式前先读）：
 1. **任何一页都不得以换行开头** —— `Paginator` 会把紧随页末的连续换行并入本页
    （第 4 条守恒律）。否则页首空行会让各页正文首行的纵向位置不一致，
@@ -135,7 +151,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（52 文件）
+│   └── Sources/                     # SwiftUI 视图层（53 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -195,7 +211,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   │   │                        #   LocalBooksLoader（「本地」页那段本地书列表的数据源）
 │   │   │   └── Guard/               # GuardFeature / GuardCoordinator
 │   │   └── Tests/
-│   └── NovelPagination/             # TextKit 真实度量（UIKit 白名单包，2 文件）
+│   └── NovelPagination/             # TextKit 真实度量（UIKit 白名单包，3 文件）
 ├── scripts/
 │   └── check-architecture.sh        # 5 条架构约束
 └── .github/workflows/

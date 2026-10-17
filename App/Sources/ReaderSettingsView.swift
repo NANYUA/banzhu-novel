@@ -32,7 +32,10 @@ struct ReaderSettingsView: View {
     /// 键盘工具栏「完成」把焦点置 `nil` 即收起键盘并提交草稿 —— **全页只有这一处工具栏**
     /// （见 `body` 的 `.toolbar`）。改造前是**每一行**各挂一份（10 份堆叠）：既冒出 10 个
     /// 「完成」，聚焦时装配 10 份工具栏也正是「打开输入框调边距很卡」的根因。
-    @FocusState private var focusedField: String?
+    ///
+    /// ⚠️ 刻意**不写 `private`**：`ReaderSettingsView+Typesetting.swift` 的扩展要用 `$focusedField`
+    /// （香色闺阁排版参数那一组行搬到了那个文件，见那里的说明）。
+    @FocusState var focusedField: String?
 
     /// 字体白名单：默认系统字体（SF Pro），另给几个适合中文正文阅读的字体族。
     /// 不用 `UIFont.familyNames`，避免把 Roboto / Inter 等第三方字体灌进 Picker。
@@ -55,6 +58,7 @@ struct ReaderSettingsView: View {
         NavigationStack {
             Form {
                 textSection
+                titleSection
                 appearanceSection
                 readingSection
             }
@@ -91,10 +95,16 @@ struct ReaderSettingsView: View {
             // 四条数值项改输入式控件（`NumberInputRow`）：可点 `−` / `+` 微调、也可直接键入。
             // 「字间距」步长 0.5 ⇒ 该控件按**带小数**处理：`.decimalPad` 键盘 + 保留一位小数
             // （旧写法 `Int(...)` 会把小数截断，显示与设置值不符）。
+            //
+            // 取值范围对齐香色闺阁的排版参数表（`plist_paibanKeyInfo.plist`）：
+            // 行距 / 段距 `-10 … 100`、字距 `-10 … 20`、字重 `-10 … 10`。
             NumberInputRow(title: "字号", value: binding(\.fontSize), range: 12 ... 30, step: 1, focus: $focusedField)
-            NumberInputRow(title: "行距", value: binding(\.lineSpacing), range: 0 ... 20, step: 1, focus: $focusedField)
-            NumberInputRow(title: "段间距", value: binding(\.paragraphSpacing), range: 0 ... 30, step: 2, focus: $focusedField)
-            NumberInputRow(title: "字间距", value: binding(\.characterSpacing), range: -1 ... 5, step: 0.5, focus: $focusedField)
+            NumberInputRow(title: "行距", value: binding(\.lineSpacing), range: -10 ... 100, step: 1, focus: $focusedField)
+            NumberInputRow(title: "段间距", value: binding(\.paragraphSpacing), range: -10 ... 100, step: 2, focus: $focusedField)
+            NumberInputRow(title: "字间距", value: binding(\.characterSpacing), range: -10 ... 20, step: 0.5, focus: $focusedField)
+            // 字体粗细（香色闺阁 `fontWeight`）：连续档位，描边与填充同色 ⇒ 视觉加粗。
+            // 与下面的「字体加粗」并存：加粗是字体 trait（会换字形），粗细是描边（不换字形）。
+            NumberInputRow(title: "字体粗细", value: fontWeightBinding, range: -10 ... 10, step: 1, focus: $focusedField)
 
             Toggle("字体加粗", isOn: binding(\.isBold))
             Toggle("字体倾斜", isOn: binding(\.isItalic))
@@ -184,10 +194,17 @@ struct ReaderSettingsView: View {
 
     private var readingSection: some View {
         Section("阅读") {
-            // 首行缩进**默认打开**（owner 口径）：开关状态单独存（`isFirstLineIndentOn`），
-            // 缩进宽度由 `fontSize × 2` 派生（`PaginationConfiguration.firstLineHeadIndent`）
-            // ⇒ 改字号不再需要在这里手动同步缩进值。
-            Toggle("首行缩进", isOn: binding(\.isFirstLineIndentOn))
+            // 首行缩进**默认 2 字**（owner 口径：默认打开）：宽度 = 字数 × 字号，
+            // 由 `PaginationConfiguration.firstLineHeadIndent` 派生 ⇒ 改字号不必手动同步缩进值。
+            // 香色闺阁的 `headIndent` 就是「字数」语义（0…5，推荐排版取 2），这里从「开关」升级成
+            // 连续字数；`0` 即等于原来的「关掉」。
+            NumberInputRow(
+                title: "首行缩进（字）",
+                value: firstLineIndentCharsBinding,
+                range: 0 ... 5,
+                step: 1,
+                focus: $focusedField
+            )
 
             // 预缓存章数（owner 2026-10-11）：与其余数值项**同一个控件**（可点 `−` / `+`、也可键入），
             // 不再用系统 `Stepper` —— 那样这一行的控件宽度与观感都跟其他行不一致。

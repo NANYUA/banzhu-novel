@@ -114,6 +114,7 @@ extension ReaderView {
             panPage(
                 text: slot.text,
                 startsAtParagraphStart: slot.startsAtParagraphStart,
+                showsChapterTitle: slot.id.index == 0,
                 configuration: viewStore.config
             )
             .offset(x: slideOffset + CGFloat(slot.relativeIndex) * availableWidth)
@@ -178,12 +179,14 @@ extension ReaderView {
     private func panPage(
         text: String,
         startsAtParagraphStart: Bool,
+        showsChapterTitle: Bool,
         configuration: PaginationConfiguration
     ) -> some View {
         PageTextView(
             text: text,
             configuration: configuration,
-            startsAtParagraphStart: startsAtParagraphStart
+            startsAtParagraphStart: startsAtParagraphStart,
+            showsChapterTitle: showsChapterTitle
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)

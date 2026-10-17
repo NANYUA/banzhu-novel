@@ -25,6 +25,24 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
     /// 首行缩进开关。`nil` = 老数据里没有这个 key（**不是**「关掉」）⇒ 按 owner 口径当「打开」；
     /// `false` = 用户主动关掉。缩进宽度不落盘，由 `fontSize × 2` 派生。
     public var isFirstLineIndentOn: Bool?
+    /// 首行缩进**字数**（`0 … 5`，`0` = 不缩进）。
+    ///
+    /// `nil` = 老数据里没有这个 key ⇒ 由 `mergedConfiguration(containerSize:)` 按
+    /// `isFirstLineIndentOn` 兜底（关着 ⇒ `0`、否则 `2`，与旧行为逐值一致）。
+    /// 非 `nil` 时**它就是唯一真相**，`isFirstLineIndentOn` 只留作老数据语义。
+    public var firstLineIndentChars: Int?
+    /// 正文字重（`-10 … 10`，`0` = 常规）。`nil` ⇒ `0`。香色闺阁的 `fontWeight`。
+    public var fontWeight: Int?
+    /// 章标题字号增量（`0 … 10`）。`nil` ⇒ `1`。香色闺阁的 `titleFontSizeOffset`。
+    public var titleFontSizeOffset: CGFloat?
+    /// 章标题字重（`-10 … 10`）。`nil` ⇒ `3`。香色闺阁的 `titleFontWeight`。
+    public var titleFontWeight: Int?
+    /// 章标题字距。`nil` ⇒ 跟随正文字距。
+    public var titleCharacterSpacing: CGFloat?
+    /// 章标题行距。`nil` ⇒ 跟随正文行距。
+    public var titleLineSpacing: CGFloat?
+    /// 章标题段距。`nil` ⇒ 跟随正文段距。
+    public var titleParagraphSpacing: CGFloat?
     public var inset: PageInset
     /// 角落标签距屏幕左右边缘的距离。`nil` = 老数据里没有这个 key ⇒ 按 `16`（= `Spacing.md`）。
     public var hudHorizontalInset: CGFloat?
@@ -63,6 +81,13 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         isBold: Bool = false,
         isItalic: Bool = false,
         isFirstLineIndentOn: Bool? = true,
+        firstLineIndentChars: Int? = nil,
+        fontWeight: Int? = nil,
+        titleFontSizeOffset: CGFloat? = nil,
+        titleFontWeight: Int? = nil,
+        titleCharacterSpacing: CGFloat? = nil,
+        titleLineSpacing: CGFloat? = nil,
+        titleParagraphSpacing: CGFloat? = nil,
         inset: PageInset = PageInset(),
         hudHorizontalInset: CGFloat? = 16,
         topBarInset: CGFloat? = 0,
@@ -87,6 +112,13 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
         self.isBold = isBold
         self.isItalic = isItalic
         self.isFirstLineIndentOn = isFirstLineIndentOn
+        self.firstLineIndentChars = firstLineIndentChars
+        self.fontWeight = fontWeight
+        self.titleFontSizeOffset = titleFontSizeOffset
+        self.titleFontWeight = titleFontWeight
+        self.titleCharacterSpacing = titleCharacterSpacing
+        self.titleLineSpacing = titleLineSpacing
+        self.titleParagraphSpacing = titleParagraphSpacing
         self.inset = inset
         self.hudHorizontalInset = hudHorizontalInset
         self.topBarInset = topBarInset
@@ -114,6 +146,13 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             isBold: configuration.isBold,
             isItalic: configuration.isItalic,
             isFirstLineIndentOn: configuration.isFirstLineIndentOn,
+            firstLineIndentChars: configuration.firstLineIndentChars,
+            fontWeight: configuration.fontWeight,
+            titleFontSizeOffset: configuration.titleFontSizeOffset,
+            titleFontWeight: configuration.titleFontWeight,
+            titleCharacterSpacing: configuration.titleCharacterSpacing,
+            titleLineSpacing: configuration.titleLineSpacing,
+            titleParagraphSpacing: configuration.titleParagraphSpacing,
             inset: configuration.inset,
             hudHorizontalInset: configuration.hudHorizontalInset,
             topBarInset: configuration.topBarInset,
@@ -130,6 +169,15 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             appearanceMode: configuration.appearanceMode,
             precacheCount: precacheCount
         )
+    }
+
+    /// 首行缩进字数的**唯一**兜底规则：新 key 优先（并夹到 `0 … 5`）；老数据没有它时按
+    /// `isFirstLineIndentOn` 回落（`false` ⇒ 0 字、否则 2 字 = 旧实现的固定宽度）。
+    public var resolvedFirstLineIndentChars: Int {
+        guard let firstLineIndentChars else {
+            return isFirstLineIndentOn == false ? 0 : 2
+        }
+        return min(max(firstLineIndentChars, 0), 5)
     }
 
     /// 用当前页面容器尺寸合并出完整分页配置。
@@ -150,6 +198,15 @@ public struct ReadingSettings: Equatable, Sendable, Codable {
             isItalic: isItalic,
             // `nil` = 老数据里没有这个 key ⇒ 打开（**不是**「关掉」）。
             isFirstLineIndentOn: isFirstLineIndentOn ?? true,
+            // 老数据没有「字数」这个 key（那时只有开 / 关）⇒ 关着当 0 字、开着当 2 字
+            // （= 旧实现 `fontSize × 2` 的宽度，逐值一致）。
+            firstLineIndentChars: resolvedFirstLineIndentChars,
+            fontWeight: fontWeight ?? 0,
+            titleFontSizeOffset: titleFontSizeOffset ?? 1,
+            titleFontWeight: titleFontWeight ?? 3,
+            titleCharacterSpacing: titleCharacterSpacing,
+            titleLineSpacing: titleLineSpacing,
+            titleParagraphSpacing: titleParagraphSpacing,
             backgroundStyle: backgroundStyle,
             customBackgroundColor: customBackgroundColor,
             customBackgroundColorDark: customBackgroundColorDark,

@@ -122,7 +122,9 @@ extension ReaderView {
         PageTextView(
             text: slice.text,
             configuration: configuration,
-            startsAtParagraphStart: slice.startsAtParagraphStart
+            startsAtParagraphStart: slice.startsAtParagraphStart,
+            // 章首第一页时第一段是章标题（与全景图路径判据一致：页序号 == 0）。
+            showsChapterTitle: viewStore.currentPageIndex == 0
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 正文永远不接受命中测试：手势统一挂在外层（`slideGesture`），

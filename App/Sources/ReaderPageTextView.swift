@@ -34,6 +34,16 @@ struct PageTextView: UIViewRepresentable {
     /// 只影响本页**第一个段落**，本页后续段落照旧加缩进。
     let startsAtParagraphStart: Bool
 
+    /// 本页是否**章首第一页**（第一段就是章标题）。
+    ///
+    /// 章标题在正文文本里就是第一段（`ReaderFeature.displayText` = 章名 + `"\n\n"` + 正文），
+    /// 香色闺阁给标题单独一套字号 / 字重 / 字距 / 行距 / 段距，这里照搬：
+    /// 为 `true` 时第一段套 `ReadingTextAttributes.title(configuration:)`。
+    ///
+    /// ⚠️ 必须与度量侧 `TextKitMeasuring` 的判据一致（它用 `from == 0`）：两边不同步就会
+    /// 度量盒与渲染盒错位（B0-2 几何契约）。
+    let showsChapterTitle: Bool
+
     /// 渲染盒 ≠ 分页盒时的回写回调（见 `ReaderBoxMismatchKey`）。
     ///
     /// ⚠️ 刻意**不写 `private`**：`private` 存储属性会让**隐式 memberwise 初始化器**变成
@@ -41,11 +51,17 @@ struct PageTextView: UIViewRepresentable {
     /// 构造 —— 那会直接编译不过。下面另写了显式 `init`，把这条歧义彻底去掉。
     @Environment(\.readerBoxMismatchHandler) var onBoxMismatch: ((CGSize) -> Void)?
 
-    /// 显式初始化器：只吃三个渲染输入（环境值由 SwiftUI 注入，不参与构造）。
-    init(text: String, configuration: PaginationConfiguration, startsAtParagraphStart: Bool) {
+    /// 显式初始化器：只吃四个渲染输入（环境值由 SwiftUI 注入，不参与构造）。
+    init(
+        text: String,
+        configuration: PaginationConfiguration,
+        startsAtParagraphStart: Bool,
+        showsChapterTitle: Bool = false
+    ) {
         self.text = text
         self.configuration = configuration
         self.startsAtParagraphStart = startsAtParagraphStart
+        self.showsChapterTitle = showsChapterTitle
     }
 
     func makeCoordinator() -> Coordinator {
@@ -148,54 +164,49 @@ struct PageTextView: UIViewRepresentable {
 
     /// 本页正文的 attributed string。
     ///
-    /// ⚠️ 与度量侧 `Packages/NovelPagination/Sources/NovelPagination/TextKitMeasuring.swift`
-    /// 是**同一条口径**（段落样式逐字段同值 + 首行缩进的抑制规则同源，都调 `ParagraphBoundary`）：
-    /// 改一处必须改另一处，否则度量盒与渲染盒错位 —— 每页多塞 / 少塞正文，正文被裁
-    /// （B0-2 几何契约）。
+    /// ⚠️ 属性**不在本文件手写**：统一走 NovelPagination 的 `ReadingTextAttributes`
+    /// （度量侧 `TextKitMeasuring` 用的是同一份），两份手抄必然漂 —— 每页多塞 / 少塞正文、
+    /// 正文被裁（B0-2 几何契约）。本文件只负责**颜色**（要按背景明暗解析）与
+    /// 「第一段是续行 / 章标题」这两处局部覆盖。
     private func makeAttributedString() -> NSAttributedString {
         let backgroundColor = configuration.backgroundStyle.uiColor(
             custom: configuration.customBackgroundColor,
             customDark: configuration.customBackgroundColorDark
         )
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: ReadingFontFactory.makeFont(configuration: configuration),
-            .paragraphStyle: makeParagraphStyle(
-                firstLineHeadIndent: configuration.firstLineHeadIndent
-            ),
-            .kern: configuration.characterSpacing,
-            .foregroundColor: configuration.textColorMode.uiColor(
-                on: backgroundColor,
-                custom: configuration.customTextColor
-            ),
-        ]
+        var attributes = ReadingTextAttributes.body(
+            configuration: configuration,
+            firstLineHeadIndent: configuration.firstLineHeadIndent
+        )
+        attributes[.foregroundColor] = configuration.textColorMode.uiColor(
+            on: backgroundColor,
+            custom: configuration.customTextColor
+        )
         let attributed = NSMutableAttributedString(string: text, attributes: attributes)
 
-        // 本页从**段落中间**开始时，第一行是续行，不该有首行缩进。
-        // ⚠️ 只换掉切片**第一个段落**那一份样式；本页后续段落照旧带缩进。
+        let firstParagraph = NSRange(
+            location: 0,
+            length: ParagraphBoundary.firstParagraphUTF16Length(in: text)
+        )
         if !startsAtParagraphStart {
+            // 本页从**段落中间**开始时，第一行是续行，不该有首行缩进。
+            // ⚠️ 只换掉切片**第一个段落**那一份样式；本页后续段落照旧带缩进。
             attributed.addAttribute(
                 .paragraphStyle,
-                value: makeParagraphStyle(firstLineHeadIndent: 0),
-                range: NSRange(
-                    location: 0,
-                    length: ParagraphBoundary.firstParagraphUTF16Length(in: text)
-                )
+                value: ReadingTextAttributes.paragraphStyle(
+                    lineSpacing: configuration.lineSpacing,
+                    paragraphSpacing: configuration.paragraphSpacing,
+                    firstLineHeadIndent: 0
+                ),
+                range: firstParagraph
+            )
+        } else if showsChapterTitle {
+            // 章首第一页：第一段是章标题，换掉字号 / 字重 / 字距 / 行距 / 段距（颜色保留）。
+            attributed.addAttributes(
+                ReadingTextAttributes.title(configuration: configuration),
+                range: firstParagraph
             )
         }
         return attributed
-    }
-
-    /// 段落样式：`firstLineHeadIndent` 单独作参数，**其余字段与度量侧逐值一致**
-    /// （`TextKitMeasuring.swift` 的 `makeParagraphStyle`）—— 两处必须同时改。
-    ///
-    /// `firstLineHeadIndent` 传 `0` 就是「本行不加首行缩进」：缩进宽度本身仍只有
-    /// `PaginationConfiguration.firstLineHeadIndent` 一个来源，这里不引入第二个宽度。
-    private func makeParagraphStyle(firstLineHeadIndent: CGFloat) -> NSMutableParagraphStyle {
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = configuration.lineSpacing
-        style.paragraphSpacing = configuration.paragraphSpacing
-        style.firstLineHeadIndent = firstLineHeadIndent
-        return style
     }
 
     final class Coordinator: NSObject {

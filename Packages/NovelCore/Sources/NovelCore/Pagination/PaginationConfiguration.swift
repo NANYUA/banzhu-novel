@@ -161,15 +161,71 @@ public struct PaginationConfiguration: Equatable, Sendable {
     public var isItalic: Bool
 
     /// 是否打开首行缩进（owner 口径：**默认打开**）。
+    ///
+    /// ⚠️ 已由 `firstLineIndentChars` 取代（2026-10-18，香色闺阁排版参数移植）：
+    /// 保留它只为**老 JSON 的语义**——`false`（用户主动关掉）在老数据里必须仍然是「不缩进」，
+    /// 而老数据没有 `firstLineIndentChars` 这个 key。新数据一律写 `firstLineIndentChars`。
     public var isFirstLineIndentOn: Bool
 
-    /// 首行缩进宽度：由 `isFirstLineIndentOn` 与 `fontSize` **派生**（2 个字符宽，与旧实现逐值一致）。
+    /// 首行缩进宽度：**按字数**算，`0 … 5`，`0` = 不缩进。
     ///
-    /// 派生而不是各存一份：两份状态一旦不同步就会出现「开关开着但缩进是 0」这种自相矛盾的配置
-    /// （旧实现靠设置页在改字号时手动同步，漏一处就漂）。它仍是排版层的公开读接口
-    /// （`PageTextView` / `TextKitMeasuring` 直接读它），调用方不需要知道开关。
+    /// 香色闺阁 `plist_paibanKeyInfo.plist` 的 `headIndent` 就是这个语义（单位是「字」，
+    /// 不是 pt），它的三套推荐排版都用 `2`。本项目原先只有「开 / 关」两档（固定 2 字），
+    /// 这里把它做成连续值：`firstLineHeadIndent = 字数 × fontSize`。
+    public var firstLineIndentChars: Int
+
+    /// 首行缩进宽度（pt）：由 `firstLineIndentChars` 与 `fontSize` **派生**，开关关掉时恒为 0。
+    ///
+    /// 派生而不是各存一份：两份状态一旦不同步就会出现「字数写着 2 但缩进是 0」这种自相矛盾的配置。
+    /// 它仍是排版层的公开读接口（`PageTextView` / `TextKitMeasuring` 直接读它），
+    /// 调用方不需要知道字与 pt 的换算。
+    /// ⚠️ `isFirstLineIndentOn == false` 仍然能一票否决（老数据 / 老测试的语义）——
+    /// 设置页改字数时会把它同步成「字数 > 0」，两者不会打架。
     public var firstLineHeadIndent: CGFloat {
-        isFirstLineIndentOn ? fontSize * 2 : 0
+        guard isFirstLineIndentOn else { return 0 }
+        return CGFloat(firstLineIndentChars) * fontSize
+    }
+
+    /// 正文「字体粗细」，`-10 … 10`，`0` = 常规。
+    ///
+    /// 香色闺阁的做法是 `NSStrokeWidthAttributeName = -fontWeight`（负值 = 描边与填充同色 ⇒ 视觉加粗，
+    /// 见 `pseudocode/PaibanManager.contentAttributes_paibanInfo_.c`）。正数在 TextKit 里是「空心字」，
+    /// 这里**沿用它的取值域**，由 `ReadingTextAttributes` 统一换算成 stroke width。
+    public var fontWeight: Int
+
+    /// 章标题字号相对正文的增量（pt），`0 … 10`。香色闺阁的 `titleFontSizeOffset`，三套推荐排版都取 `1`。
+    public var titleFontSizeOffset: CGFloat
+
+    /// 章标题的字体粗细，`-10 … 10`。香色闺阁 `titleFontWeight`，推荐排版取 `3`（比正文粗一点）。
+    public var titleFontWeight: Int
+
+    /// 章标题的字间距；`nil` = 跟随正文字间距。
+    public var titleCharacterSpacing: CGFloat?
+
+    /// 章标题的行距；`nil` = 跟随正文行距。
+    public var titleLineSpacing: CGFloat?
+
+    /// 章标题的段间距；`nil` = 跟随正文段间距。
+    public var titleParagraphSpacing: CGFloat?
+
+    /// 章标题实际用的字号（正文 + 增量）。
+    public var resolvedTitleFontSize: CGFloat {
+        fontSize + titleFontSizeOffset
+    }
+
+    /// 章标题实际用的字间距。
+    public var resolvedTitleCharacterSpacing: CGFloat {
+        titleCharacterSpacing ?? characterSpacing
+    }
+
+    /// 章标题实际用的行距。
+    public var resolvedTitleLineSpacing: CGFloat {
+        titleLineSpacing ?? lineSpacing
+    }
+
+    /// 章标题实际用的段间距。
+    public var resolvedTitleParagraphSpacing: CGFloat {
+        titleParagraphSpacing ?? paragraphSpacing
     }
 
     // MARK: - 只影响渲染的字段
@@ -273,6 +329,13 @@ public struct PaginationConfiguration: Equatable, Sendable {
         isBold: Bool = false,
         isItalic: Bool = false,
         isFirstLineIndentOn: Bool = true,
+        firstLineIndentChars: Int = 2,
+        fontWeight: Int = 0,
+        titleFontSizeOffset: CGFloat = 1,
+        titleFontWeight: Int = 3,
+        titleCharacterSpacing: CGFloat? = nil,
+        titleLineSpacing: CGFloat? = nil,
+        titleParagraphSpacing: CGFloat? = nil,
         backgroundStyle: ReadingBackgroundStyle = .white,
         customBackgroundColor: ReadingColor = .defaultCustomBackground,
         customBackgroundColorDark: ReadingColor = .defaultCustomBackground,
@@ -297,6 +360,13 @@ public struct PaginationConfiguration: Equatable, Sendable {
         self.isBold = isBold
         self.isItalic = isItalic
         self.isFirstLineIndentOn = isFirstLineIndentOn
+        self.firstLineIndentChars = firstLineIndentChars
+        self.fontWeight = fontWeight
+        self.titleFontSizeOffset = titleFontSizeOffset
+        self.titleFontWeight = titleFontWeight
+        self.titleCharacterSpacing = titleCharacterSpacing
+        self.titleLineSpacing = titleLineSpacing
+        self.titleParagraphSpacing = titleParagraphSpacing
         self.backgroundStyle = backgroundStyle
         self.customBackgroundColor = customBackgroundColor
         self.customBackgroundColorDark = customBackgroundColorDark
@@ -315,16 +385,46 @@ public struct PaginationConfiguration: Equatable, Sendable {
     /// 判断这次配置变化是否需要重新分页。
     ///
     /// 背景色、文字颜色、翻页方式等只影响渲染，跳过重排可以避免无意义的开销。
+    ///
+    /// ⚠️ 拆成四个小判定再取或：SwiftLint 的 `cyclomatic_complexity` 把每个 `||` 都算一个分支，
+    /// 17 个字段写在一行会直接顶穿 10 的上限（CI `--strict` 下即红）。
     public func affectsPagination(comparedTo other: PaginationConfiguration) -> Bool {
+        affectsBox(comparedTo: other)
+            || affectsFont(comparedTo: other)
+            || affectsSpacing(comparedTo: other)
+            || affectsTitle(comparedTo: other)
+    }
+
+    /// 盒与边距。
+    private func affectsBox(comparedTo other: PaginationConfiguration) -> Bool {
         containerSize != other.containerSize
-            || fontSize != other.fontSize
-            || lineSpacing != other.lineSpacing
             || inset != other.inset
-            || fontName != other.fontName
-            || paragraphSpacing != other.paragraphSpacing
-            || characterSpacing != other.characterSpacing
+    }
+
+    /// 字体族 / 字号 / 粗斜体 / 连续字重。
+    private func affectsFont(comparedTo other: PaginationConfiguration) -> Bool {
+        fontName != other.fontName
+            || fontSize != other.fontSize
             || isBold != other.isBold
             || isItalic != other.isItalic
+            || fontWeight != other.fontWeight
+    }
+
+    /// 行距 / 段距 / 字距 / 首行缩进。
+    private func affectsSpacing(comparedTo other: PaginationConfiguration) -> Bool {
+        lineSpacing != other.lineSpacing
+            || paragraphSpacing != other.paragraphSpacing
+            || characterSpacing != other.characterSpacing
             || isFirstLineIndentOn != other.isFirstLineIndentOn
+            || firstLineIndentChars != other.firstLineIndentChars
+    }
+
+    /// 章标题的独立排版参数。
+    private func affectsTitle(comparedTo other: PaginationConfiguration) -> Bool {
+        titleFontSizeOffset != other.titleFontSizeOffset
+            || titleFontWeight != other.titleFontWeight
+            || titleCharacterSpacing != other.titleCharacterSpacing
+            || titleLineSpacing != other.titleLineSpacing
+            || titleParagraphSpacing != other.titleParagraphSpacing
     }
 }
