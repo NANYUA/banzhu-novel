@@ -495,11 +495,11 @@ public extension BookDetailFeature.State {
     /// 🔴 脱敏硬约束：这里不允许出现任何写死的域名 / IP / 路径特征。
     /// - host 来自 `SiteSettings.currentHostValue`（用户配置，可为 `example.com` 这种无协议写法，
     ///   先用 `SiteRoutingConfiguration.normalizedHost` 补全协议再拼）；
-    /// - 返回 `nil` 表示**没有可用 host**，界面据此隐藏入口。
+    /// - 返回 `nil` 表示**没有可用 host**（界面据此隐藏入口）；本地导入的书也恒为 `nil` —— 它的 `bookPath` 是 `local/<hash>/`，拼到站点上只会是 404。
     var sourceURL: URL? {
         let normalizedHost = SiteRoutingConfiguration.normalizedHost(host)
-        guard !normalizedHost.isEmpty else { return nil }
         let bookPath = detail.bookPath
+        guard !normalizedHost.isEmpty, !LocalBookPath.isLocal(bookPath) else { return nil }
         let path = bookPath.hasPrefix("/") ? bookPath : "/" + bookPath
         return SiteConfig(host: normalizedHost).url(path)
     }

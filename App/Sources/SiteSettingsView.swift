@@ -28,6 +28,7 @@ struct SiteSettingsView: View {
                     navigationSection(viewStore)
                     hostSection(viewStore)
                     manualGuardSection(viewStore)
+                    importSection()
 
                     if let notice = viewStore.notice {
                         Section {
@@ -168,6 +169,24 @@ struct SiteSettingsView: View {
             } else if let outcome = lastGuardOutcome {
                 Text(outcome ? "验证已通过。" : "验证未通过。")
             }
+        }
+    }
+
+    /// 「本地导入」节：导入 txt 时的目录正则管理入口。
+    ///
+    /// 为什么放在设置页而不是导入 sheet 里：规则是**一次性配好、长期复用**的配置，
+    /// 导入 sheet 是每次都要走一遍的流程页；把管理入口塞进流程页会让「导入」这件事变重。
+    private func importSection() -> some View {
+        Section {
+            NavigationLink {
+                ImportRulesView()
+            } label: {
+                Label("导入目录正则", systemImage: "text.magnifyingglass")
+            }
+        } header: {
+            Text("本地导入")
+        } footer: {
+            Text("导入 txt 时按这里的规则识别章标题。内置规则也能删，删掉的可以用「恢复内置」找回。")
         }
     }
 

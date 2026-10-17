@@ -188,6 +188,12 @@ struct BookshelfView: View {
                 }
                 .toolbar {
                     toolbarContent(viewStore)
+                    // 导入本地 TXT（owner 2026-10-17 口径：只做 App 内选择文件，
+                    // 不做「用其它 App 打开」的 Info.plist 入口）。
+                    // 导入成功后重发 `.onAppear` 让书架重拉一次 —— 与「从阅读页返回」同一条刷新路径。
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ImportTXTButton { viewStore.send(.onAppear) }
+                    }
                 }
                 // U9-8：「下载设置」的载体。它**自带一层 `NavigationStack`** ——
                 // 所以撤掉 `DownloadQueueView` 自己那层栈，不影响设置页的标题与「完成」按钮。

@@ -58,7 +58,9 @@ enum ReaderLoaderLive {
         fetch: (String) async throws -> String
     ) async throws -> String {
         let local = try? load(chapterPath: chapterPath, in: context, epoch: epoch)
-        if let local, !local.isStale {
+        // 本地导入的书没有可「自愈」的对端：章节路径是 `local/<hash>/<n>`，发给站点引擎只会 404。
+        // 所以只要本地有正文就直接用，不看世代 —— 它是用户给的原文件切出来的，不存在「旧构建写坏」。
+        if let local, !local.isStale || LocalBookPath.isLocal(chapterPath) {
             return local.text
         }
         do {

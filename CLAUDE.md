@@ -13,6 +13,15 @@
 缓存后触发 LRU 淘汰。淘汰**只清「已读章号 + 预缓存章数」之外的陈旧预取** ——
 已读章节与当前预取窗口内的章节都保留（否则「点下一章 / 返回上一章」会重新联网加载）。
 
+**本地 TXT 导入（2026-10-17）**：书架工具栏「导入 TXT」→ 系统文件选择 → 解码
+（BOM → 严格 UTF-8 → GB18030）→ 按「导入目录正则」（设置 → 本地导入；内置 19 条，
+用户可增删启停）切章，**一条都不命中时按 3000 字兜底**、章名「第 N 部分」→ 逐章落盘
++ 落库（一条 `BookRecord` + 全 `.downloaded` 的 `ChapterRecord`，**一次 save**）。
+书路径是 `local/<sha256 前 16 位>/`，`LocalBookPath.isLocal(_:)` 是「这本书是本地导入」的
+**唯一判据**（详情页「转到原网站」「下载章节」据此隐藏；`ReaderLoader` 据此跳过远端自愈）。
+同一份文件重复导入会被 SHA256 查重拦下。⚠️ 导入的章**绝不能**走
+`ChapterCacheStore.saveCachedText`（它会把章标成 `.cached` ⇒ 被 LRU 删掉 ⇒ 破契约①）。
+
 阅读页排版有三条长期口径（改分页 / 正文样式前先读）：
 1. **任何一页都不得以换行开头** —— `Paginator` 会把紧随页末的连续换行并入本页
    （第 4 条守恒律）。否则页首空行会让各页正文首行的纵向位置不一致，
@@ -99,7 +108,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（44 文件）
+│   └── Sources/                     # SwiftUI 视图层（47 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -130,7 +139,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   ├── NovelEngine/                 # 纯逻辑层（10 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 固定三维书库目录 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（54 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（63 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner
@@ -151,6 +160,10 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │   │   │   ├── Pagination/          # Paginator / TextCursor / TextMeasuring / PageRange /
 │   │   │   │                        #   ParagraphBoundary（段落边界判据，度量与渲染共用）
 │   │   │   ├── Site/                # SiteFeature / SiteStore / NavigationRenderer
+│   │   │   ├── Import/              # 本地 TXT 导入（2026-10-17）：ImportChapterRule / BuiltinImportRules /
+│   │   │   │                        #   TextDecoder（BOM→UTF-8→GB18030）/ ChapterSplitter /
+│   │   │   │                        #   LocalBookPath（local/<hash>/ 前缀即「本地书」判据）/
+│   │   │   │                        #   ImportRuleStore / LocalBookImporter / ImportFeature / ImportRulesFeature
 │   │   │   └── Guard/               # GuardFeature / GuardCoordinator
 │   │   └── Tests/
 │   └── NovelPagination/             # TextKit 真实度量（UIKit 白名单包，2 文件）

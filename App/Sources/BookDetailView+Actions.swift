@@ -59,7 +59,12 @@ extension BookDetailView {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             HStack(spacing: DesignTokens.Spacing.sm) {
                 shelfButton(viewStore)
-                downloadChaptersButton
+                // 导入的本地 txt 全部章节都已落盘（`source == .downloaded`），没有可下载的章：
+                // 摆一个点开只有空面板的按钮没有意义 ⇒ 这本隐藏该入口（这一行变成两按钮各占一半，
+                // 与下面 `primaryActions` 缺省时的处理同一口径）。
+                if !LocalBookPath.isLocal(viewStore.detail.bookPath) {
+                    downloadChaptersButton
+                }
                 // 目录还没加载出来时 `primaryActions` 一个视图都不产出 ⇒ 那一格不占位
                 // （这一行会暂时变成两个按钮各占一半宽）。**不**给它加占位视图：
                 // 一个点不动的灰按钮比暂时少一个按钮更糟（同 `primaryActions` 的既有口径）。
