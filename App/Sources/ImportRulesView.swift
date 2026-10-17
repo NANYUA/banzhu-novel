@@ -2,11 +2,12 @@ import ComposableArchitecture
 import NovelCore
 import SwiftUI
 
-/// 「导入目录正则」管理页：设置 → 本地导入 → 导入目录正则。
+/// 「目录正则」管理页：设置 → 目录正则。
 ///
 /// ## 交互口径（owner 2026-10-17）
-/// - 内置规则只是**初始数据**，同样可以删除；
-/// - 用户可以自己新增规则（名称 + 正则），正则当场校验，编译不过不让加；
+/// - 内置规则只是**初始数据**，同样可以删除（删除按钮是**红色**）；
+/// - 新增入口在**右上角**，图标与书架分组栏的「新建分组」一致（`plus.circle.fill`），
+///   点它把表单收进列表上方；正则当场校验，编译不过不让加；
 /// - 删掉的内置规则可用「恢复内置」补回，且**不会**覆盖用户自己新建的。
 ///
 /// 所有修改立即生效并写回（没有「保存」按钮），导入时读的就是这张表。
@@ -19,12 +20,26 @@ struct ImportRulesView: View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             Form {
                 rulesSection(viewStore)
-                addSection(viewStore)
+                if viewStore.isAdding {
+                    draftSection(viewStore)
+                }
                 restoreSection(viewStore)
             }
-            .navigationTitle("导入目录正则")
+            .navigationTitle("目录正则")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { viewStore.send(.onAppear) }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        viewStore.send(.addTapped)
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    // 表单已经摊开时再点没有意义，置灰比「点了没反应」清楚。
+                    .disabled(viewStore.isAdding)
+                    .accessibilityLabel("新建规则")
+                }
+            }
         }
     }
 
@@ -68,55 +83,50 @@ struct ImportRulesView: View {
             } label: {
                 Label("删除", systemImage: "trash")
             }
+            // 显式红色：`role: .destructive` 在本页的 Form / Toggle 组合下会被系统染成蓝色
+            // （owner 2026-10-17 真机反馈「左滑删除是蓝色」）。
+            .tint(.red)
         }
     }
 
-    // MARK: - 新建
+    // MARK: - 新建（由右上角 + 触发）
 
-    private func addSection(
+    private func draftSection(
         _ viewStore: ViewStore<ImportRulesFeature.State, ImportRulesFeature.Action>
     ) -> some View {
         Section {
-            if viewStore.isAdding {
-                TextField(
-                    "名称（例如：我的规则）",
-                    text: viewStore.binding(
-                        get: \.draftName,
-                        send: ImportRulesFeature.Action.draftNameChanged
-                    )
+            TextField(
+                "名称（例如：我的规则）",
+                text: viewStore.binding(
+                    get: \.draftName,
+                    send: ImportRulesFeature.Action.draftNameChanged
                 )
-                TextField(
-                    "正则",
-                    text: viewStore.binding(
-                        get: \.draftPattern,
-                        send: ImportRulesFeature.Action.draftPatternChanged
-                    )
+            )
+            TextField(
+                "正则",
+                text: viewStore.binding(
+                    get: \.draftPattern,
+                    send: ImportRulesFeature.Action.draftPatternChanged
                 )
-                .font(.system(.footnote, design: .monospaced))
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                if let error = viewStore.draftError {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-                HStack {
-                    Button("取消") { viewStore.send(.cancelAddTapped) }
-                        .buttonStyle(.borderless)
-                    Spacer()
-                    Button("添加") { viewStore.send(.addConfirmed) }
-                        .buttonStyle(.borderless)
-                        .disabled(!viewStore.canSubmitDraft)
-                }
-            } else {
-                Button {
-                    viewStore.send(.addTapped)
-                } label: {
-                    Label("新建规则", systemImage: "plus.circle")
-                }
+            )
+            .font(.system(.footnote, design: .monospaced))
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            if let error = viewStore.draftError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+            HStack {
+                Button("取消") { viewStore.send(.cancelAddTapped) }
+                    .buttonStyle(.borderless)
+                Spacer()
+                Button("添加") { viewStore.send(.addConfirmed) }
+                    .buttonStyle(.borderless)
+                    .disabled(!viewStore.canSubmitDraft)
             }
         } header: {
-            Text("自定义")
+            Text("新建规则")
         } footer: {
             Text("正则会按「整行」匹配：命中即把这一行当章标题。")
         }

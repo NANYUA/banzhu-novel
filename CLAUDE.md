@@ -22,6 +22,13 @@
 同一份文件重复导入会被 SHA256 查重拦下。⚠️ 导入的章**绝不能**走
 `ChapterCacheStore.saveCachedText`（它会把章标成 `.cached` ⇒ 被 LRU 删掉 ⇒ 破契约①）。
 
+⚠️ **导入的呈现不能挂在工具栏按钮上**（2026-10-17 真机踩出来的）：`.fileImporter` /
+`.sheet` 挂在 `ToolbarItem` 的子视图上时真机「点了没反应」；现在工具栏只开开关
+（`ImportTXTButton { isPickingImportFile = true }`），picker / sheet / 失败提示都在
+`BookshelfView+Import.swift` 的 `.importHost(...)`（挂在内容层）。另外
+`allowedContentTypes` 用 **`.item`** 而不是 `.plainText` —— 后者会让某些来源的 txt
+在选择器里变灰、点了没反应。
+
 阅读页排版有三条长期口径（改分页 / 正文样式前先读）：
 1. **任何一页都不得以换行开头** —— `Paginator` 会把紧随页末的连续换行并入本页
    （第 4 条守恒律）。否则页首空行会让各页正文首行的纵向位置不一致，
@@ -108,7 +115,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（47 文件）
+│   └── Sources/                     # SwiftUI 视图层（49 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）

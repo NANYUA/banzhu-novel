@@ -3,6 +3,11 @@ import NovelCore
 import SwiftUI
 
 /// 站点入口管理页（手动模式）。
+///
+/// ## 「域名 / 手动过验证 / 目录正则」三张卡统一口径（owner 2026-10-17 真机反馈）
+/// 三张卡**各只有一行**、结构相同：左侧标题 + 右侧当前值（次级色）+ 行高 ≥ 44pt。
+/// 因此：域名列表与「添加域名」都搬进二级页（`HostSettingsView`），
+/// 目录正则也进二级页（`ImportRulesView`），首页不再出现输入框 / 图标 / 多行内容。
 struct SiteSettingsView: View {
     let store: StoreOf<SiteFeature>
 
@@ -19,8 +24,6 @@ struct SiteSettingsView: View {
     /// 也就不会出现两个验证会话 / 两份 Cookie 写入。
     let onManualGuard: () -> Void
 
-    @State private var newHost = ""
-
     var body: some View {
         WithViewStore(store, observe: { $0 }) { viewStore in
             NavigationStack {
@@ -28,7 +31,7 @@ struct SiteSettingsView: View {
                     navigationSection(viewStore)
                     hostSection(viewStore)
                     manualGuardSection(viewStore)
-                    importSection()
+                    rulesSection()
 
                     if let notice = viewStore.notice {
                         Section {
@@ -50,6 +53,8 @@ struct SiteSettingsView: View {
             .toolbarBackground(.visible, for: .tabBar)
         }
     }
+
+    // MARK: - 导航地址
 
     private func navigationSection(
         _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
@@ -90,46 +95,46 @@ struct SiteSettingsView: View {
             .disabled(viewStore.isFetchingNavigation)
 
             if !viewStore.discoveredHosts.isEmpty {
-                Text("本次发现 \(viewStore.discoveredHosts.count) 个域名，已并入下方列表")
+                Text("本次发现 \(viewStore.discoveredHosts.count) 个域名，已并入域名列表")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
+    // MARK: - 三张统一卡片
+
+    /// 首页「三个入口」的统一行长：标题 + 右侧值（次级色）+ 44pt 行高。
+    private func settingRow(_ title: String, value: String?) -> some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Text(title)
+            Spacer()
+            if let value {
+                Text(value)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
     private func hostSection(
         _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
     ) -> some View {
         Section {
-            if viewStore.settings.hosts.isEmpty {
-                Text("暂无域名。点上方「拉取域名」或手动添加。")
-                    .foregroundStyle(.secondary)
-            } else {
-                hostListSection(viewStore)
+            NavigationLink {
+                HostSettingsView(store: store)
+            } label: {
+                settingRow(
+                    "域名",
+                    value: viewStore.settings.currentHost?.value ?? "未选择"
+                )
             }
-
-            HStack {
-                TextField("请输入域名", text: $newHost)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                Button {
-                    viewStore.send(.addHost(newHost))
-                    newHost = ""
-                } label: {
-                    Text("添加")
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        } header: {
-            Text("域名")
-        } footer: {
-            Text("相同域名只保留一条；始终使用选中的域名，不会自动切换。")
         }
     }
 
-    /// 「验证」节：随时主动触发一次人机验证，不必等盾页自己弹出来。
+    /// 「手动过验证」：随时主动触发一次人机验证，不必等盾页自己弹出来。
     ///
     /// 触发能力由 `RootView` 注入（`onManualGuard`），落到 `GuardCoordinator.requestPass`
     /// —— 与网络层命中盾、盾页弹窗是**同一条路径**；本页只负责发起与展示状态。
@@ -141,107 +146,43 @@ struct SiteSettingsView: View {
             Button {
                 onManualGuard()
             } label: {
-                HStack(spacing: DesignTokens.Spacing.sm) {
-                    if guardIsPresented {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityHidden(true)
-                    }
-                    Text("手动过验证")
-                    Spacer()
-                }
-                // 自定义 `ButtonStyle` 不会自己变灰（同 `DownloadSelectionCard` 的口径）：
-                // 不可用时整行换次级色，避免「看着能点却没反应」。
-                .foregroundStyle(isAvailable ? Color.primary : Color.secondary)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+                settingRow("手动过验证", value: guardValue(isAvailable: isAvailable))
+                    // 自定义 `ButtonStyle` 不会自己变灰（同 `DownloadSelectionCard` 的口径）：
+                    // 不可用时整行换次级色，避免「看着能点却没反应」。
+                    .foregroundStyle(isAvailable ? Color.primary : Color.secondary)
             }
             .buttonStyle(PressableCardButtonStyle(
                 shape: AnyShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
             ))
             .disabled(!isAvailable)
             .accessibilityLabel(isAvailable ? "手动过验证" : "手动过验证，不可用")
-        } header: {
-            Text("验证")
-        } footer: {
-            if viewStore.settings.currentHostValue == nil {
-                Text("请先在下方配置并选择一个域名。")
-            } else if let outcome = lastGuardOutcome {
-                Text(outcome ? "验证已通过。" : "验证未通过。")
-            }
         }
     }
 
-    /// 「本地导入」节：导入 txt 时的目录正则管理入口。
+    private func guardValue(isAvailable: Bool) -> String? {
+        if guardIsPresented {
+            return "验证中"
+        }
+        if !isAvailable {
+            return "先选域名"
+        }
+        if let outcome = lastGuardOutcome {
+            return outcome ? "已通过" : "未通过"
+        }
+        return nil
+    }
+
+    /// 「目录正则」：导入 txt 时认章标题的规则管理。
     ///
     /// 为什么放在设置页而不是导入 sheet 里：规则是**一次性配好、长期复用**的配置，
     /// 导入 sheet 是每次都要走一遍的流程页；把管理入口塞进流程页会让「导入」这件事变重。
-    private func importSection() -> some View {
+    /// owner 2026-10-17：卡片行前**不要图标**，标题就叫「目录正则」。
+    private func rulesSection() -> some View {
         Section {
             NavigationLink {
                 ImportRulesView()
             } label: {
-                Label("导入目录正则", systemImage: "text.magnifyingglass")
-            }
-        } header: {
-            Text("本地导入")
-        } footer: {
-            Text("导入 txt 时按这里的规则识别章标题。内置规则也能删，删掉的可以用「恢复内置」找回。")
-        }
-    }
-
-    /// 域名列表本体：默认收起，收起态只展示「当前选中的那条 host」；
-    /// 展开后才显示完整列表（可切换 / 删除）。
-    private func hostListSection(
-        _ viewStore: ViewStore<SiteFeature.State, SiteFeature.Action>
-    ) -> some View {
-        DisclosureGroup(
-            isExpanded: Binding(
-                get: { viewStore.isHostListExpanded },
-                set: { _ in viewStore.send(.toggleHostList) }
-            )
-        ) {
-            ForEach(viewStore.settings.hosts) { entry in
-                let isSelected = entry.id == viewStore.settings.currentHostID
-                Button {
-                    viewStore.send(.selectHost(entry.id))
-                } label: {
-                    hostRow(
-                        entry,
-                        isSelected: isSelected
-                    )
-                }
-                .buttonStyle(PressableCardButtonStyle())
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-                .swipeActions {
-                    Button("删除", role: .destructive) {
-                        viewStore.send(.deleteHost(entry.id))
-                    }
-                }
-            }
-        } label: {
-            Text(viewStore.settings.currentHost?.value ?? "未选择域名")
-                .lineLimit(1)
-        }
-    }
-
-    private func hostRow(_ entry: SiteEntry, isSelected: Bool) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                Text(entry.value)
-                    .lineLimit(1)
-                if entry.isFromNavigation {
-                    Text("导航发现")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.tint)
-                    // 装饰性图形：选中语义交给行 Button 的 `.isSelected` trait。
-                    .accessibilityHidden(true)
+                settingRow("目录正则", value: nil)
             }
         }
     }
