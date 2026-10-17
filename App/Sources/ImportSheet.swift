@@ -51,6 +51,7 @@ struct ImportSheet: View {
 
     // MARK: - 四种状态
 
+    @ViewBuilder
     private func formContent(_ viewStore: ViewStore<ImportFeature.State, ImportFeature.Action>) -> some View {
         Section("文件") {
             LabeledContent("文件", value: viewStore.fileName)

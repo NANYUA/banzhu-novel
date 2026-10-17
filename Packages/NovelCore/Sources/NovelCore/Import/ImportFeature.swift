@@ -15,15 +15,6 @@ public struct ImportFeature: Reducer {
     public init() {}
 
     public struct State: Equatable {
-        public enum Phase: Equatable, Sendable {
-            /// 填书名 / 作者，还没开始
-            case form
-            /// 正在跑导入管线
-            case working
-            case finished
-            case failed
-        }
-
         public var phase: Phase = .form
         /// 选中的文件。**生命周期比 URL 本身长**：导入过程中一直持有它。
         public var fileURL: URL
@@ -58,6 +49,17 @@ public struct ImportFeature: Reducer {
         public var isWorking: Bool {
             phase == .working
         }
+    }
+
+    /// 导入流程的四个阶段。放 `ImportFeature` 这一层而不是塞进 `State`：
+    /// SwiftLint 的 `nesting` 规则只允许类型嵌套 1 层（`State.Phase` 会到第 2 层）。
+    public enum Phase: Equatable, Sendable {
+        /// 填书名 / 作者，还没开始
+        case form
+        /// 正在跑导入管线
+        case working
+        case finished
+        case failed
     }
 
     public enum Action: Equatable {

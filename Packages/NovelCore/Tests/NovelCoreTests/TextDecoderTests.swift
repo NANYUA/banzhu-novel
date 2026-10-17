@@ -17,7 +17,7 @@ final class TextDecoderTests: XCTestCase {
     /// 正则 `^` 对不上，标题会被吞进正文。
     func testUTF8带BOM_剥掉BOM() throws {
         var data = Data([0xEF, 0xBB, 0xBF])
-        try data.append(XCTUnwrap("第一章 起点".data(using: .utf8)))
+        try data.append(XCTUnwrap(Data("第一章 起点".utf8)))
         let decoded = try TextDecoder.decode(data)
         XCTAssertEqual(decoded, "第一章 起点")
         XCTAssertFalse(decoded.hasPrefix("\u{FEFF}"))
