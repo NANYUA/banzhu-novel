@@ -294,7 +294,7 @@ private extension ExploreView {
         }
         // 吸顶栏以 overlay 挂在列表顶部（不占布局空间，出现/消失不引起列表跳动）：
         // 完整栏滚出时显示收缩栏；点收缩栏胶囊原地弹出完整栏（`topBarOverlay` 两种形态）。
-        .overlay {
+        .overlay(alignment: .top) {
             topBarOverlay(viewStore)
         }
     }
