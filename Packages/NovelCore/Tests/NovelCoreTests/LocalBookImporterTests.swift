@@ -45,7 +45,7 @@ final class LocalBookImporterTests: XCTestCase {
     }
 
     func test导入两章_落库与落盘都正确() async throws {
-        try writeFile("第一章 起点\n正文一\n第二章 终点\n正文二\n")
+        try writeFile("第一章 起点\n第一段内容。\n第二章 终点\n第二段内容。\n")
         let result = try await runImport(title: "测试书", author: "某某")
         defer { cleanup(result.bookPath) }
 
@@ -77,16 +77,16 @@ final class LocalBookImporterTests: XCTestCase {
 
         XCTAssertEqual(
             try NovelStore.loadChapterText(bookPath: result.bookPath, number: 1),
-            "正文一"
+            "第一段内容。"
         )
         XCTAssertEqual(
             try NovelStore.loadChapterText(bookPath: result.bookPath, number: 2),
-            "正文二"
+            "第二段内容。"
         )
     }
 
     func test重复导入同一文件_报已在书架() async throws {
-        try writeFile("第一章 起点\n正文一\n")
+        try writeFile("第一章 起点\n第一段内容。\n")
         let first = try await runImport(title: "测试书")
         defer { cleanup(first.bookPath) }
 
@@ -109,7 +109,7 @@ final class LocalBookImporterTests: XCTestCase {
     }
 
     func test书名留空_用文件名兜底() async throws {
-        try writeFile("第一章 起点\n正文一\n")
+        try writeFile("第一章 起点\n第一段内容。\n")
         let result = try await runImport(title: "   ")
         defer { cleanup(result.bookPath) }
         XCTAssertEqual(result.title, fileURL.deletingPathExtension().lastPathComponent)
@@ -117,7 +117,7 @@ final class LocalBookImporterTests: XCTestCase {
 
     /// 🔴 契约 ②：整本书都是 .downloaded ⇒ 缓存淘汰一个字节都不该动它。
     func test导入书永不被缓存淘汰() async throws {
-        try writeFile("第一章 起点\n正文一\n第二章 终点\n正文二\n")
+        try writeFile("第一章 起点\n第一段内容。\n第二章 终点\n第二段内容。\n")
         let result = try await runImport(title: "测试书")
         defer { cleanup(result.bookPath) }
 
@@ -131,7 +131,7 @@ final class LocalBookImporterTests: XCTestCase {
         XCTAssertTrue(chapters.allSatisfy { $0.source == .downloaded })
         XCTAssertEqual(
             try NovelStore.loadChapterText(bookPath: result.bookPath, number: 1),
-            "正文一",
+            "第一段内容。",
             "正文文件也不该被删"
         )
     }

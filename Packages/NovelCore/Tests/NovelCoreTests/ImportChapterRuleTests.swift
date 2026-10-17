@@ -19,10 +19,10 @@ final class ImportChapterRuleTests: XCTestCase {
         }
     }
 
-    /// owner 给的那份 JSON 里启用 9 条（-1/-2/-7/-8/-9/-10/-12/-14/-15/-19 中为 true 的项）。
+    /// owner 给的那份 JSON 里启用 10 条（`-1`/`-2`/`-7`/`-8`/`-9`/`-10`/`-12`/`-14`/`-15`/`-19`）。
     /// 落库时**逐条照抄**了 `enable` 字段，这里把它钉住：以后有人批量改启用状态会立刻红。
-    func test内置规则_默认启用9条() {
-        XCTAssertEqual(BuiltinImportRules.all.filter(\.isEnabled).count, 9)
+    func test内置规则_默认启用10条() {
+        XCTAssertEqual(BuiltinImportRules.all.filter(\.isEnabled).count, 10)
     }
 
     func test内置规则_没有一条是可淘汰或已下载这类业务字段() {

@@ -3,6 +3,9 @@ import Foundation
 import XCTest
 
 /// 切章器测试：标题识别、正文归属、兜底切分。
+///
+/// ⚠️ 夹具里的正文行**不能以 `正文` 开头**：内置规则 `-2`（`目录`）里有
+/// `正文(?!完|结)` 分支，`正文一` 这种行本身就会被当成标题 ⇒ 测试会退化成兜底切分。
 final class ChapterSplitterTests: XCTestCase {
     private var rules: [ImportChapterRule] {
         BuiltinImportRules.all
@@ -13,28 +16,28 @@ final class ChapterSplitterTests: XCTestCase {
     func test两个标题_各成一章() {
         let text = """
         第一章 起点
-        正文一
+        第一段内容。
         第二章 终点
-        正文二
+        第二段内容。
         """
         let chapters = ChapterSplitter.split(text: text, rules: rules)
         XCTAssertEqual(chapters.map(\.title), ["第一章 起点", "第二章 终点"])
-        XCTAssertEqual(chapters.map(\.body), ["正文一", "正文二"])
+        XCTAssertEqual(chapters.map(\.body), ["第一段内容。", "第二段内容。"])
     }
 
     /// 书名页 / 简介 / 广告：合并进第一章正文，**不丢也不单独成章**。
     func test首个标题之前的内容并入第一章() {
         let text = """
-        这是简介
-        作者的话
+        书名页文字。
+        作者的话。
         第一章 起点
-        正文一
+        第一段内容。
         """
         let chapters = ChapterSplitter.split(text: text, rules: rules)
         XCTAssertEqual(chapters.count, 1)
         XCTAssertEqual(chapters[0].title, "第一章 起点")
-        XCTAssertTrue(chapters[0].body.contains("这是简介"))
-        XCTAssertTrue(chapters[0].body.hasSuffix("正文一"))
+        XCTAssertTrue(chapters[0].body.contains("书名页文字。"))
+        XCTAssertTrue(chapters[0].body.hasSuffix("第一段内容。"))
     }
 
     /// 目录页 = 连续几十行只有标题没有正文。丢掉空章，不要把正文也丢掉。
@@ -43,12 +46,12 @@ final class ChapterSplitterTests: XCTestCase {
         目录
         第一章 起点
         第二章 终点
-        正文一
+        第一段内容。
         """
         let chapters = ChapterSplitter.split(text: text, rules: rules)
         XCTAssertEqual(chapters.count, 1)
         XCTAssertEqual(chapters[0].title, "第二章 终点")
-        XCTAssertTrue(chapters[0].body.contains("正文一"))
+        XCTAssertTrue(chapters[0].body.contains("第一段内容。"))
     }
 
     /// 超长行不参与匹配：`第 3 章` 出现在段落中间时不能把段落当标题。
@@ -71,7 +74,7 @@ final class ChapterSplitterTests: XCTestCase {
         }
         let text = """
         第一章 起点
-        正文一
+        第一段内容。
         """
         let chapters = ChapterSplitter.split(text: text, rules: disabled, fallbackChunkSize: 1000)
         XCTAssertEqual(chapters.count, 1)
@@ -82,17 +85,17 @@ final class ChapterSplitterTests: XCTestCase {
         let bad = ImportChapterRule(id: "bad", name: "坏", pattern: "第(章")
         let text = """
         第一章 起点
-        正文一
+        第一段内容。
         """
         let chapters = ChapterSplitter.split(text: text, rules: [bad] + rules)
         XCTAssertEqual(chapters.map(\.title), ["第一章 起点"])
     }
 
     func testCRLF换行也能切() {
-        let text = "第一章 起点\r\n正文一\r\n第二章 终点\r\n正文二\r\n"
+        let text = "第一章 起点\r\n第一段内容。\r\n第二章 终点\r\n第二段内容。\r\n"
         let chapters = ChapterSplitter.split(text: text, rules: rules)
         XCTAssertEqual(chapters.map(\.title), ["第一章 起点", "第二章 终点"])
-        XCTAssertEqual(chapters[0].body, "正文一")
+        XCTAssertEqual(chapters[0].body, "第一段内容。")
     }
 
     // MARK: - 兜底：按字数切
