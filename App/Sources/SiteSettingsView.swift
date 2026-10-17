@@ -145,9 +145,6 @@ struct SiteSettingsView: View {
                         ProgressView()
                             .controlSize(.small)
                             .accessibilityHidden(true)
-                    } else {
-                        Image(systemName: "checkmark.shield")
-                            .accessibilityHidden(true)
                     }
                     Text("手动过验证")
                     Spacer()
