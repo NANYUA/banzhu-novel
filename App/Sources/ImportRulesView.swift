@@ -62,14 +62,14 @@ struct ImportRulesView: View {
     private func rulesSection(
         _ viewStore: ViewStore<ImportRulesFeature.State, ImportRulesFeature.Action>
     ) -> some View {
+        // owner 2026-10-17：「将目录正则最下面的小字提示删除」⇒ 规则列表下面那行 footer 已去掉，
+        // 只留 header 的「启用中的规则（n/m）」。
         Section {
             ForEach(viewStore.rules) { rule in
                 ruleRow(rule, viewStore)
             }
         } header: {
             Text("启用中的规则（\(viewStore.enabledCount)/\(viewStore.rules.count)）")
-        } footer: {
-            Text("导入时逐行尝试这些正则，命中即视为章标题。左滑可删除（内置的也能删）。")
         }
     }
 

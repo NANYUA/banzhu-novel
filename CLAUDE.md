@@ -38,6 +38,16 @@ picker / sheet / 失败提示都在 `BookshelfView+Import.swift` 的 `.importHos
 域名列表与「添加域名」搬进二级页 `HostSettingsView`；
 ④ 「目录正则」页右上角改成**弹出菜单**（菜单项「添加正则」）→ `.sheet` 弹
 `ImportRuleEditorView` 输入；左滑删除显式 `.tint(.red)`。
+**第三轮真机反馈（2026-10-17，同一天改完）**：
+① 「本地导入的书籍与其他下载的本地书籍应该完全相同，包括 UI 操作方式等」⇒ 本地导入书不再有独立段落：
+`BookDownloadSummary` 改成存 `chapterCount` / `finishedCount` / `status`（不再持有 `tasks` 数组），
+`localBookSummaries(from:metas:)`（在 `LocalImportBooksSection.swift`，文件名沿用旧名）把它们换算成
+**同一套书卡**，与下载书混进 `DownloadQueueView` 的同一个 `ForEach`；那段带 header 的 `Section` 与
+「不需要联网」footer 一并删除。选择模式只列下载书（批量暂停 / 重试 / 删除下载对没有 `DownloadTask` 的书无意义，
+删除导入书走书架的分组批量删除，会连正文文件一起清）。
+② 「目录正则」规则列表底下那行 footer 小字已删除。
+③ `DownloadSettingsView` 拆成独立文件（`App/Sources/DownloadSettingsView.swift`）—— 原先
+`DownloadQueueView.swift` 涨到 598 行、贴着 `file_length` 600 红线。
 
 阅读页排版有三条长期口径（改分页 / 正文样式前先读）：
 1. **任何一页都不得以换行开头** —— `Paginator` 会把紧随页末的连续换行并入本页
@@ -125,7 +135,7 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 ```
 ├── App/
 │   ├── Resources/Info.plist
-│   └── Sources/                     # SwiftUI 视图层（51 文件）
+│   └── Sources/                     # SwiftUI 视图层（52 文件）
 │       ├── AppMain.swift            # @main 入口
 │       ├── RootView.swift           # 四 tab 根视图（书架/书城/搜索/设置）+ 全局盾页覆盖层
 │       ├── BookshelfView*.swift     # 书架（+GroupBar 分组条 / +Reader 单点进阅读页）
@@ -144,8 +154,9 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       │                            #   DownloadPicker（阅读页「下载」弹的章节选择面板）
 │       ├── SearchView.swift         # 搜索（+PaginationRows：底部页码标签 / 加载行 / 重试行）
 │       ├── ExploreView*.swift       # 书城：三维分类条（组内原位展开）/ 页码提示 / 上拉加载
-│       ├── DownloadQueueView.swift  # 下载队列 + 下载设置（卡片常驻上栏）
+│       ├── DownloadQueueView.swift  # 下载队列（书卡列表 = 下载书 + 本地导入书，同卡同点击）
 │       ├── DownloadBookCard.swift   # 下载书卡 + 卡片装饰（downloadQueueCard/Row）+ 共享尺度
+│       ├── DownloadSettingsView.swift # 下载设置页（蜂窝 / 网络类型 / 速度 + 「导入书籍」入口）
 │       ├── DownloadSummaryCard.swift # 总进度卡片（与选择卡片**同位交替**）
 │       ├── DownloadSelectionCard.swift # 选择模式四项操作卡片（横排一行）
 │       ├── SiteSettingsView.swift   # 站点设置

@@ -145,7 +145,7 @@ private extension DownloadBookCard {
 
                 // 字号档位与书架 `BookRow` 的第 3 行（「上次读到…」）对齐：都是 `.caption2`。
                 // ⚠️ 它同时是文字列高度算式的一项（见 `DownloadCardMetrics.contentHeight`），改字号要同步改那个算式。
-                Text("已下载 \(summary.finishedCount)/\(summary.tasks.count) 章")
+                Text("已下载 \(summary.finishedCount)/\(summary.chapterCount) 章")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -258,54 +258,17 @@ struct BookDownloadSummary: Identifiable {
     /// 封面地址（来自书库 `BookRecord.coverUrl`）；库里没有这本书、或地址为空时是 `nil`
     /// ⇒ 书卡回退占位块。`DownloadTaskSnapshot` 里没有这个字段，由 `bookSummaries` 并进来。
     let coverUrl: String?
-    let tasks: [DownloadTaskSnapshot]
+    /// 总章数。下载队列 = 这本书的 `DownloadTask` 数；本地导入书 = 章节数。
+    let chapterCount: Int
+    /// 已完成章数。
+    let finishedCount: Int
+    /// 书一级状态。下载队列按任务聚合（见 `bookSummaries`）；本地导入书恒 `.finished`。
+    let status: BookDownloadStatus
 
-    var finishedCount: Int {
-        tasks.filter(\.state.isFinished).count
-    }
-
-    /// 已完成 / 总数（书卡按「队列里有这本书」建立，`tasks` 不会为空）。
+    /// 已完成 / 总数（书卡按「队列里有这本书」建立，`chapterCount` 不会为 0；
+    /// 本地导入书的总数来自 `BookRecord.latestChapterCount`，同样不会为 0）。
     var progress: Double {
-        tasks.isEmpty ? 0 : Double(finishedCount) / Double(tasks.count)
-    }
-
-    private var failedCount: Int {
-        tasks.filter { $0.state == .failed }.count
-    }
-
-    private var blockedCount: Int {
-        tasks.filter(\.blockedByGuard).count
-    }
-
-    private var pausedCount: Int {
-        tasks.filter { $0.state == .paused }.count
-    }
-
-    private func hasTask(in state: DownloadState) -> Bool {
-        tasks.contains { $0.state == state }
-    }
-
-    /// 状态行：把原先逐章行上的状态**聚合到书一级**。
-    ///
-    /// 优先级：需要验证 > 失败 > 下载中 > 等待 > 已暂停 > 全部完成。
-    /// 阻塞与失败必须排在「下载中」之前 —— 它们要用户处理，不能被一个正在跑的分支盖掉。
-    var status: BookDownloadStatus {
-        if blockedCount > 0 {
-            return .blocked(blockedCount)
-        }
-        if failedCount > 0 {
-            return .failed(failedCount)
-        }
-        if hasTask(in: .downloading) {
-            return .downloading
-        }
-        if hasTask(in: .queued) {
-            return .queued
-        }
-        if pausedCount > 0 {
-            return .paused
-        }
-        return .finished
+        chapterCount == 0 ? 0 : Double(finishedCount) / Double(chapterCount)
     }
 }
 
@@ -375,16 +338,43 @@ func bookSummaries(
             title: firstNonEmpty(meta?.title, first.bookTitle),
             author: firstNonEmpty(meta?.author),
             coverUrl: firstNonEmpty(meta?.coverUrl),
-            tasks: bookTasks
+            chapterCount: bookTasks.count,
+            finishedCount: bookTasks.filter(\.state.isFinished).count,
+            status: bookStatus(for: bookTasks)
         )
     }
+}
+
+/// 书一级状态：把原先逐章行上的状态**聚合到书一级**。
+///
+/// 优先级：需要验证 > 失败 > 下载中 > 等待 > 已暂停 > 全部完成。
+/// 阻塞与失败必须排在「下载中」之前 —— 它们要用户处理，不能被一个正在跑的分支盖掉。
+func bookStatus(for tasks: [DownloadTaskSnapshot]) -> BookDownloadStatus {
+    let blockedCount = tasks.filter(\.blockedByGuard).count
+    if blockedCount > 0 {
+        return .blocked(blockedCount)
+    }
+    let failedCount = tasks.filter { $0.state == .failed }.count
+    if failedCount > 0 {
+        return .failed(failedCount)
+    }
+    if tasks.contains(where: { $0.state == .downloading }) {
+        return .downloading
+    }
+    if tasks.contains(where: { $0.state == .queued }) {
+        return .queued
+    }
+    if tasks.contains(where: { $0.state == .paused }) {
+        return .paused
+    }
+    return .finished
 }
 
 /// 按顺序取第一个**非空**值；全空（或都没值）⇒ `nil`（调用方据此不渲染那一行）。
 ///
 /// `BookRecord` 的字段是非可选 `String`（可能为空串），而 `BookDownloadSummary` 用 `nil`
 /// 表示「不显示」—— 这个函数是两者之间**唯一**的换算处（不要在别处再写一次 `?? ""`）。
-private func firstNonEmpty(_ values: String?...) -> String? {
+func firstNonEmpty(_ values: String?...) -> String? {
     for value in values {
         if let value, !value.isEmpty {
             return value
