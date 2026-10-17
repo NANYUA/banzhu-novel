@@ -240,8 +240,15 @@ enum LocalBookImporterLive {
     }
 
     /// 逐章落盘。几千章时这是整条链路最慢的一步，所以它**支持取消**：
-    /// 主 actor 上的调用方（sheet 被关掉 ⇒ effect 被取消）能通过
-    /// `withTaskCancellationHandler` 把取消传给这个 detached task。
+    /// 每章开头 `Task.checkCancellation()`，调用方（sheet 被关掉 ⇒ effect 被取消）
+    /// 一取消，下一次检查就抛出 `CancellationError`。
+    ///
+    /// ## 为什么每章单独丢进 `Task.detached`，而不是整段包一个
+    /// `onProgress` 是**非逃逸**参数（调用方不需要把回调存起来），
+    /// 而 `Task.detached` 的闭包是逃逸的 —— 整段包起来会报
+    /// 「escaping closure captures non-escaping parameter 'onProgress'」（CI 实测）。
+    /// 只把「纯文件 IO」放进 detached、进度回报留在原地，就绕开了这个约束，
+    /// 同时 IO 依旧不占主线程。
     private static func write(
         _ chapters: [ChapterSplitter.Chapter],
         bookPath: String,
@@ -249,20 +256,15 @@ enum LocalBookImporterLive {
     ) async throws {
         let total = chapters.count
         await onProgress(.writing(done: 0, total: total))
-        let task = Task.detached(priority: .userInitiated) {
-            for (index, chapter) in chapters.enumerated() {
-                try Task.checkCancellation()
-                try NovelStore.saveChapterText(chapter.body, bookPath: bookPath, number: index + 1)
-                let done = index + 1
-                if done % ImportLimits.progressStride == 0 || done == total {
-                    await onProgress(.writing(done: done, total: total))
-                }
+        for (index, chapter) in chapters.enumerated() {
+            try Task.checkCancellation()
+            let number = index + 1
+            try await Task.detached(priority: .userInitiated) {
+                _ = try NovelStore.saveChapterText(chapter.body, bookPath: bookPath, number: number)
+            }.value
+            if number % ImportLimits.progressStride == 0 || number == total {
+                await onProgress(.writing(done: number, total: total))
             }
-        }
-        try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: {
-            task.cancel()
         }
     }
 
