@@ -48,7 +48,7 @@
 | 排版度量 | NovelPagination（TextKit：NSTextStorage / NSLayoutManager） |
 | 工程生成 | XcodeGen |
 | 格式化 / 静态检查 | SwiftFormat + SwiftLint |
-| CI | GitHub Actions，五道关卡 + 独立打包 workflow |
+| CI | GitHub Actions，五道关卡 + 独立打包 workflow；CI 验证与未签名打包使用 `macos-15-intel` |
 
 ## 架构
 
