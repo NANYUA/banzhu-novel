@@ -37,20 +37,17 @@ extension ExploreView {
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         let selected = exploreSelectedFilterItems(from: viewStore.selectedCategory)
-        return VStack(spacing: 0) {
-            ExploreCompactBar(
-                selected: selected,
-                page: viewStore.page,
-                onJump: { page in
-                    viewStore.send(.jumpToPage(page))
-                },
-                onExpand: {
-                    isGroupBarExpanded = true
-                }
-            )
-            Divider()
-        }
-        .background(AppTheme.Surface.page)
+        return ExploreCompactBar(
+            selected: selected,
+            page: viewStore.page,
+            onJump: { page in
+                viewStore.send(.jumpToPage(page))
+            },
+            onExpand: {
+                viewStore.send(.groupBarExpansionChanged(true))
+            }
+        )
+        .modifier(ExploreFloatingBarSurface())
     }
 
     /// 原地弹出的完整分组栏（点吸顶收缩栏的三个胶囊后展开，列表停在原地）。
@@ -59,21 +56,51 @@ extension ExploreView {
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         let selected = exploreSelectedFilterItems(from: viewStore.selectedCategory)
-        return VStack(spacing: 0) {
-            ExploreGroupBar(
-                categories: viewStore.categories,
-                selected: selected,
-                page: viewStore.page,
-                onJump: { page in
-                    viewStore.send(.jumpToPage(page))
-                },
-                onSelect: { category in
-                    viewStore.send(.categorySelected(category))
+        return ExploreGroupBar(
+            categories: viewStore.categories,
+            selected: selected,
+            page: viewStore.page,
+            onJump: { page in
+                viewStore.send(.jumpToPage(page))
+            },
+            onSelect: { category in
+                viewStore.send(.categorySelected(category))
+            }
+        )
+        .modifier(ExploreFloatingBarSurface())
+    }
+}
+
+private struct ExploreFloatingBarSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private let fadeHeight: CGFloat = 24
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.bottom, reduceTransparency ? 0 : fadeHeight)
+            .background {
+                Group {
+                    if reduceTransparency {
+                        AppTheme.Surface.page
+                    } else {
+                        Rectangle()
+                            .fill(.regularMaterial)
+                            .mask {
+                                VStack(spacing: 0) {
+                                    Rectangle()
+                                    LinearGradient(
+                                        colors: [.black, .clear],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                    .frame(height: fadeHeight)
+                                }
+                            }
+                    }
                 }
-            )
-            Divider()
-        }
-        .background(AppTheme.Surface.page)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
     }
 }
 

@@ -154,6 +154,7 @@ public struct ReaderFeature: Reducer {
         case containerSizeChanged(CGSize)
         /// 持久化设置读取完成（带页面容器尺寸，恢复时合并出完整配置）
         case settingsLoaded(ReadingSettings, CGSize)
+        case catalogUpdated([ChapterItem])
     }
 
     @Dependency(\.readerLoader) var readerLoader
@@ -165,6 +166,9 @@ public struct ReaderFeature: Reducer {
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
+            case let .catalogUpdated(chapters):
+                return updateCatalog(chapters, in: &state)
+
             case let .loadChapter(path):
                 state.chapterPath = path
                 state.chapterName = ""

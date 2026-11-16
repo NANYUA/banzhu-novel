@@ -23,10 +23,7 @@ private struct PanSlot: Identifiable {
     }
 
     let id: Identity
-    let text: String
-
-    /// 本格是否**从段落开头**开始（首行缩进判据；由 `pageText` 一并算出，见那里的说明）。
-    let startsAtParagraphStart: Bool
+    let content: ReaderPageContent
 
     let relativeIndex: Int
 }
@@ -111,15 +108,11 @@ extension ReaderView {
         availableWidth: CGFloat
     ) -> some View {
         ForEach(panSlots(viewStore)) { slot in
-            panPage(
-                text: slot.text,
-                startsAtParagraphStart: slot.startsAtParagraphStart,
-                configuration: viewStore.config
-            )
-            .offset(x: slideOffset + CGFloat(slot.relativeIndex) * availableWidth)
-            // §13：相邻格只是「露出来的下一张」，不该进 VoiceOver 焦点 ——
-            // 否则读屏会顺着把下一章内容也念一遍（单页时代只有一页，不存在这个问题）。
-            .accessibilityHidden(slot.relativeIndex != 0)
+            panPage(content: slot.content, configuration: viewStore.config)
+                .offset(x: slideOffset + CGFloat(slot.relativeIndex) * availableWidth)
+                // §13：相邻格只是「露出来的下一张」，不该进 VoiceOver 焦点 ——
+                // 否则读屏会顺着把下一章内容也念一遍（单页时代只有一页，不存在这个问题）。
+                .accessibilityHidden(slot.relativeIndex != 0)
         }
     }
 
@@ -140,35 +133,39 @@ extension ReaderView {
         return [-1, 0, 1].compactMap { relative in
             let index = current + relative
             if pages.indices.contains(index) {
-                let slice = pageText(at: index, in: pages, text: viewStore.displayText)
                 return PanSlot(
                     id: PanSlot.Identity(path: viewStore.chapterPath, index: index),
-                    text: slice.text,
-                    startsAtParagraphStart: slice.startsAtParagraphStart,
+                    content: ReaderPageContent(
+                        text: viewStore.text,
+                        chapterName: viewStore.chapterName,
+                        page: pages[index]
+                    ),
                     relativeIndex: relative
                 )
             }
             guard !pages.isEmpty else { return nil }
             if relative == 1, current == pages.count - 1, !viewStore.nextPages.isEmpty {
-                let slice = pageText(at: 0, in: viewStore.nextPages, text: viewStore.nextDisplayText)
+                let next = viewStore.nextChapter
                 return PanSlot(
-                    id: PanSlot.Identity(path: viewStore.nextChapter?.path ?? "", index: 0),
-                    text: slice.text,
-                    startsAtParagraphStart: slice.startsAtParagraphStart,
+                    id: PanSlot.Identity(path: next?.path ?? "", index: 0),
+                    content: ReaderPageContent(
+                        text: next == nil ? "" : viewStore.nextText,
+                        chapterName: next?.name ?? "",
+                        page: viewStore.nextPages[0]
+                    ),
                     relativeIndex: 1
                 )
             }
             guard relative == -1, current == 0, !viewStore.previousPages.isEmpty else { return nil }
             let lastIndex = viewStore.previousPages.count - 1
-            let slice = pageText(
-                at: lastIndex,
-                in: viewStore.previousPages,
-                text: viewStore.previousDisplayText
-            )
+            let previous = viewStore.previousChapter
             return PanSlot(
-                id: PanSlot.Identity(path: viewStore.previousChapter?.path ?? "", index: lastIndex),
-                text: slice.text,
-                startsAtParagraphStart: slice.startsAtParagraphStart,
+                id: PanSlot.Identity(path: previous?.path ?? "", index: lastIndex),
+                content: ReaderPageContent(
+                    text: previous == nil ? "" : viewStore.previousText,
+                    chapterName: previous?.name ?? "",
+                    page: viewStore.previousPages[lastIndex]
+                ),
                 relativeIndex: -1
             )
         }
@@ -176,39 +173,12 @@ extension ReaderView {
 
     /// 全景图里的一格。**不接受命中测试**：手势挂在外面那层（见 `slideGesture`）。
     private func panPage(
-        text: String,
-        startsAtParagraphStart: Bool,
+        content: ReaderPageContent,
         configuration: PaginationConfiguration
     ) -> some View {
-        PageTextView(
-            text: text,
-            configuration: configuration,
-            startsAtParagraphStart: startsAtParagraphStart
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
-    }
-
-    /// 指定页的文本片段 + 「本页是否从段落开头开始」（首行缩进的判据）；
-    /// 越界返回空串 + `true`（与 `currentPageSlice` 的区别：不做「整章兜底」）。
-    ///
-    /// 文本**显式传入**：当前章（`displayText`）与预加载的下一章（`nextDisplayText`）
-    /// 共用这一份切片逻辑，不复制第二份。
-    ///
-    /// 段落判据走 NovelCore 的 `ParagraphBoundary`（度量侧 `TextKitMeasuring` 用的是**同一条**），
-    /// 不在 App 里另写一份。
-    private func pageText(
-        at pageIndex: Int,
-        in pages: [PageRange],
-        text: String
-    ) -> (text: String, startsAtParagraphStart: Bool) {
-        guard pages.indices.contains(pageIndex), !text.isEmpty else { return ("", true) }
-        let page = pages[pageIndex]
-        let chars = Array(text)
-        let start = min(page.location, chars.count)
-        let end = min(page.location + page.length, chars.count)
-        guard start < end else { return ("", true) }
-        return (String(chars[start ..< end]), ParagraphBoundary.isParagraphStart(chars, at: start))
+        PageTextView(content: content, configuration: configuration)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
     }
 
     // MARK: - 滑动手势

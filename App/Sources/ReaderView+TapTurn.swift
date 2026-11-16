@@ -118,11 +118,9 @@ extension ReaderView {
         configuration: PaginationConfiguration,
         usesPan: Bool
     ) -> some View {
-        let slice = currentPageSlice(viewStore)
         PageTextView(
-            text: slice.text,
-            configuration: configuration,
-            startsAtParagraphStart: slice.startsAtParagraphStart
+            content: currentPageSlice(viewStore),
+            configuration: configuration
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 正文永远不接受命中测试：手势统一挂在外层（`slideGesture`），
@@ -144,25 +142,12 @@ extension ReaderView {
         "\(viewStore.chapterPath)-\(viewStore.currentPageIndex)"
     }
 
-    /// 取当前页对应的文本片段 + 「本页是否从段落开头开始」（首行缩进的判据）。
-    ///
-    /// 判据只此一处：调 NovelCore 的 `ParagraphBoundary`，度量侧 `TextKitMeasuring` 用的是同一条。
+    /// 保留未分页 / 定位不到时的整章兜底；文本及段首判据由文本视图缓存。
     func currentPageSlice(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
-    ) -> (text: String, startsAtParagraphStart: Bool) {
-        let pages = viewStore.pages
+    ) -> ReaderPageContent {
         let offset = viewStore.currentOffset
-        let text = viewStore.displayText
-
-        // 兜底（还没分页 / 定位不到）时整章当一页渲染、从 0 起排 ⇒ 一定是段落开头。
-        guard !pages.isEmpty, !text.isEmpty else { return (text, true) }
-        guard let page = pages.first(where: { offset >= $0.location && offset < $0.location + $0.length }) else {
-            return (text, true)
-        }
-        let chars = Array(text)
-        let start = min(page.location, chars.count)
-        let end = min(page.location + page.length, chars.count)
-        guard start < end else { return ("", true) }
-        return (String(chars[start ..< end]), ParagraphBoundary.isParagraphStart(chars, at: start))
+        let page = viewStore.pages.first { offset >= $0.location && offset < $0.location + $0.length }
+        return ReaderPageContent(text: viewStore.text, chapterName: viewStore.chapterName, page: page)
     }
 }

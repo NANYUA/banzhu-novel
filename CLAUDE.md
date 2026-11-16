@@ -10,7 +10,11 @@
 站点设置、阅读设置持久化均已落地；章节级 LRU 缓存淘汰规则与执行器已实现。
 
 缓存闭环已接通：阅读成功后写入 `lastReadAt`；阅读时自动缓存后续章节，
-缓存后触发 LRU 淘汰。淘汰**只清「已读章号 + 预缓存章数」之外的陈旧预取** ——
+缓存后触发 LRU 淘汰。目录刷新按稳定章节标识合并，保留下载、缓存和阅读位置；
+读取失败不以部分结果替换旧目录。正文视图在归一化和切片前比较输入，复用未改变的一页；
+无关控制项不触发正文富文本重建。
+
+淘汰**只清「已读章号 + 预缓存章数」之外的陈旧预取** ——
 已读章节与当前预取窗口内的章节都保留（否则「点下一章 / 返回上一章」会重新联网加载）。
 
 阅读页排版有三条长期口径（改分页 / 正文样式前先读）：
@@ -127,10 +131,10 @@ Xcode 16.4 + macos-15 runner 下，宏插件报 `produced malformed response`，
 │       └── AppTheme / DesignTokens / PressableCardButtonStyle / PageJumpButton / NumberInputRow.swift
 │                                    # NumberInputRow = 设置页「− 数字框 +」输入行（替代 Slider）
 ├── Packages/
-│   ├── NovelEngine/                 # 纯逻辑层（10 文件）
+│   ├── NovelEngine/                 # 纯逻辑层（11 文件）
 │   │   ├── Sources/NovelEngine/     # 网络 / 解析 / 解码 / 固定三维书库目录 / 重试 / 日志
 │   │   └── Tests/                   # 含 Fixtures 快照测试（12 个 .html）
-│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（54 文件）
+│   ├── NovelCore/                   # 状态 + 存储 + 分页算法（57 文件）
 │   │   ├── Sources/NovelCore/
 │   │   │   ├── Models/              # BookRecord / ChapterRecord / BookGroup / DownloadTask(+Snapshot)
 │   │   │   ├── Storage/             # NovelStore (SwiftData) / CacheEvictionPlanner

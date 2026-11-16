@@ -31,6 +31,7 @@ struct BookDetailView: View {
     /// （`ReaderView.detailSheet`），那里若仍走本页自己的 push，就会在 sheet 里再全屏压一层
     /// 阅读页 ⇒ 卡死（owner 真机反馈）。故那条路径注入「关掉 sheet + 让下层阅读页跳章」。
     let onOpenReader: ((ChapterItem) -> Void)?
+    let onCatalogRefreshed: ([ChapterItem]) -> Void
 
     @State private var isIntroExpanded = false
     /// 简介「不被截断时的高度」与「4 行截断后的高度」，用来判断是否真的被截断（U1-5）。
@@ -53,12 +54,14 @@ struct BookDetailView: View {
         downloadStore: StoreOf<DownloadFeature>,
         onAddedToShelf: @escaping (ShelfRow) -> Void = { _ in },
         onRemovedFromShelf: @escaping (String) -> Void = { _ in },
-        onOpenReader: ((ChapterItem) -> Void)? = nil
+        onOpenReader: ((ChapterItem) -> Void)? = nil,
+        onCatalogRefreshed: @escaping ([ChapterItem]) -> Void = { _ in }
     ) {
         self.downloadStore = downloadStore
         self.onAddedToShelf = onAddedToShelf
         self.onRemovedFromShelf = onRemovedFromShelf
         self.onOpenReader = onOpenReader
+        self.onCatalogRefreshed = onCatalogRefreshed
         store = Store(initialState: BookDetailFeature.State(fallback: BookDetail(book: book))) {
             BookDetailFeature()
         }
@@ -70,12 +73,14 @@ struct BookDetailView: View {
         downloadStore: StoreOf<DownloadFeature>,
         onAddedToShelf: @escaping (ShelfRow) -> Void = { _ in },
         onRemovedFromShelf: @escaping (String) -> Void = { _ in },
-        onOpenReader: ((ChapterItem) -> Void)? = nil
+        onOpenReader: ((ChapterItem) -> Void)? = nil,
+        onCatalogRefreshed: @escaping ([ChapterItem]) -> Void = { _ in }
     ) {
         self.downloadStore = downloadStore
         self.onAddedToShelf = onAddedToShelf
         self.onRemovedFromShelf = onRemovedFromShelf
         self.onOpenReader = onOpenReader
+        self.onCatalogRefreshed = onCatalogRefreshed
         store = Store(
             initialState: BookDetailFeature.State(
                 fallback: BookDetail(bookPath: bookPath, title: title)
@@ -131,6 +136,9 @@ struct BookDetailView: View {
             // 下载进行中：观察下载队列的**纯内存**完成信号，把新增完成的章节就地标成已下载
             // （不重读目录 —— 500 章批量下载那样会退化成 O(n²)，见 `BookDetailView+DownloadRefresh`）。
             .background { downloadCompletionObserver(viewStore) }
+            .onChange(of: viewStore.chapters) { _, chapters in
+                if !chapters.isEmpty { onCatalogRefreshed(chapters) }
+            }
             .onChange(of: viewStore.lastAddedRow) { _, row in
                 if let row {
                     onAddedToShelf(row)
@@ -381,11 +389,13 @@ private extension BookDetailView {
                 downloadedCount: viewStore.downloadedChapterCount,
                 hasHiddenChapters: viewStore.hasHiddenChapters,
                 isShowingAll: viewStore.isShowingAllChapters,
-                isLoading: viewStore.isLoadingChapters,
-                errorMessage: viewStore.chapterErrorMessage
+                isLoading: viewStore.isLoadingChapters || viewStore.isLoading || viewStore.isPreviewLoading,
+                errorMessage: viewStore.catalogRefreshError ?? viewStore.chapterErrorMessage
             ),
             onToggleShowAll: { viewStore.send(.toggleAllChapters) },
-            onRetry: { viewStore.send(.reloadChapters) },
+            onRetry: {
+                viewStore.send(viewStore.catalogRefreshError == nil ? .reloadChapters : .refreshChapters)
+            },
             onSelect: { chapter in openReader(chapter) },
             onDownloadChapter: { chapter in
                 enqueue(
@@ -393,7 +403,9 @@ private extension BookDetailView {
                     bookPath: viewStore.detail.bookPath,
                     bookTitle: viewStore.detail.title
                 )
-            }
+            },
+            onRefresh: { viewStore.send(.refreshChapters) },
+            isRefreshing: viewStore.isRefreshingChapters
         )
     }
 

@@ -90,10 +90,7 @@ public struct ExploreView: View {
     @State private var groupBarHeight: CGFloat = 0
     /// 吸顶收缩栏自身高度，用于「从导航栏下缘下滑到位」的位移量。
     @State private var compactBarHeight: CGFloat = 0
-    /// 吸顶栏是否「原地弹出」成完整分组栏：点三个选中胶囊后展开（列表停在原地不滚），
-    /// 让用户改 状态/排序/分类；点外部遮罩或切换分类时收起。
-    /// ⚠️ 不能 `private`：`ExploreView+CategoryBar.swift` 的 `compactBarOverlay` 需要从另一个文件设置它。
-    @State var isGroupBarExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         store: StoreOf<ExploreFeature>,
@@ -120,8 +117,6 @@ public struct ExploreView: View {
                     .onChange(of: viewStore.isLoading) { _, isLoading in
                         if isLoading {
                             groupBarScrollOutProgress = 0
-                            // 切分类会重载并回到列表顶部，原地展开的完整栏一并收起。
-                            isGroupBarExpanded = false
                         }
                     }
                     // U1-1：页面底 = 浅色分组灰（`AppTheme.Surface.page`），卡面 = 白（`AppTheme.Surface.card`）。
@@ -139,6 +134,7 @@ public struct ExploreView: View {
                     // 每次出现都发 `.task`：reducer 内部对「已在加载中」做了去重，
                     // 所以 pop 回来重复触发不会打两次首页（见 `ExploreFeature` 的 `.task` 分支）。
                     .onAppear { viewStore.send(.task) }
+                    .onDisappear { viewStore.send(.groupBarExpansionChanged(false)) }
                     .navigationDestination(isPresented: $isShowingDetail) {
                         if let book = detailBook {
                             BookDetailView(
@@ -285,6 +281,7 @@ private extension ExploreView {
                     ExploreEndOfResultsRow()
                 }
             }
+            .accessibilityHidden(viewStore.isGroupBarExpanded)
             // 滚动偏移由内省的 UIScrollView.contentOffset 上报（真相源），见 `ExploreScrollOffsetReporter`。
             .background(
                 ExploreScrollOffsetReporter { offsetY in
@@ -299,27 +296,18 @@ private extension ExploreView {
         }
     }
 
-    /// 列表顶部的吸顶栏 overlay（两种形态）：
-    /// - 未展开：吸顶收缩栏，完整栏滚出的后半程淡入 + 从导航栏下缘下滑，书目卡片从它下方划过；
-    /// - 展开：原地弹出完整分组栏（列表停在原地），下面盖一层半透明遮罩，点遮罩收起。
+    /// 列表顶部的吸顶栏；展开时可点击遮罩或向上滑动收起。
     private func topBarOverlay(
         _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
     ) -> some View {
         ZStack(alignment: .top) {
-            if isGroupBarExpanded {
-                // 半透明遮罩：挡住列表触摸（「列表停在原地不滚」），点它收起展开的完整栏。
-                AppTheme.scrim
-                    .onTapGesture { isGroupBarExpanded = false }
-                    .transition(.opacity)
-            }
-
-            if isGroupBarExpanded {
-                expandedGroupBarOverlay(viewStore)
+            if viewStore.isGroupBarExpanded {
+                expandedTopBarOverlay(viewStore)
                     .transition(.opacity)
             } else {
                 compactBarOverlay(viewStore)
                     .opacity(compactBarOpacity)
-                    .offset(y: -(1 - compactBarOpacity) * compactBarHeight)
+                    .offset(y: reduceMotion ? 0 : -(1 - compactBarOpacity) * compactBarHeight)
                     .onGeometryChange(for: CGFloat.self) { proxy in
                         proxy.size.height
                     } action: { height in
@@ -328,12 +316,43 @@ private extension ExploreView {
                     }
                     // 半透明以上才可交互；未出现时把触摸让给下面的列表。
                     .allowsHitTesting(compactBarOpacity >= 0.5)
+                    .accessibilityHidden(compactBarOpacity < 0.5)
                     // 裁掉下滑动画滑出到导航栏区域的部分（同旧收缩栏 ZStack + clipped 的写法）。
                     .clipped()
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: isGroupBarExpanded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: viewStore.isGroupBarExpanded)
+    }
+
+    private func expandedTopBarOverlay(
+        _ viewStore: ViewStore<ExploreFeature.State, ExploreFeature.Action>
+    ) -> some View {
+        ZStack(alignment: .top) {
+            Button {
+                viewStore.send(.groupBarExpansionChanged(false))
+            } label: {
+                AppTheme.scrim
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("收起分类面板")
+
+            expandedGroupBarOverlay(viewStore)
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12, coordinateSpace: .global)
+                .onChanged { value in
+                    viewStore.send(.groupBarDragged(
+                        horizontal: Double(value.translation.width),
+                        vertical: Double(value.translation.height)
+                    ))
+                }
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(.escape) {
+            viewStore.send(.groupBarExpansionChanged(false))
+        }
     }
 
     /// 吸顶收缩栏淡入比例：完整栏滚出 60% 后开始、完全滚出时到位

@@ -430,10 +430,10 @@ private extension ReaderView {
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> some View {
         NavigationStack {
-            List(chapters) { chapter in
+            List(viewStore.chapters) { chapter in
                 // `insetGrouped` 只在分组首 / 末行给卡面圆角，强调层必须逐角跟随（见下面的 `shape`）。
-                let isFirstChapter = chapter.path == chapters.first?.path
-                let isLastChapter = chapter.path == chapters.last?.path
+                let isFirstChapter = chapter.path == viewStore.chapters.first?.path
+                let isLastChapter = chapter.path == viewStore.chapters.last?.path
                 Button {
                     viewStore.send(.loadChapterWithName(chapter.path, chapter.name))
                     isShowingDirectory = false
@@ -526,7 +526,8 @@ private extension ReaderView {
                     onOpenReader: { chapter in
                         isShowingDetail = false
                         viewStore.send(.loadChapterWithName(chapter.path, chapter.name))
-                    }
+                    },
+                    onCatalogRefreshed: { viewStore.send(.catalogUpdated($0)) }
                 )
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {

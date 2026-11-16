@@ -138,7 +138,8 @@ final class ExploreFeatureTests: XCTestCase {
             page: 2,
             pageStarts: [ExplorePageStart(page: 1, index: 0), ExplorePageStart(page: 2, index: 30)],
             requestID: 3,
-            hasMore: true
+            hasMore: true,
+            isGroupBarExpanded: true
         )) {
             ExploreFeature()
         } withDependencies: {
@@ -156,6 +157,7 @@ final class ExploreFeatureTests: XCTestCase {
             $0.hasMore = false
             $0.isLoading = true
             $0.requestID = 4
+            $0.isGroupBarExpanded = false
             $0.moreErrorMessage = nil
             $0.failedStep = nil
         }
@@ -416,7 +418,8 @@ final class ExplorePagingTests: XCTestCase {
                 selectedCategory: selected,
                 books: pageOne,
                 pageStarts: [ExplorePageStart(page: 1, index: 0)],
-                hasMore: true
+                hasMore: true,
+                isGroupBarExpanded: true
             )
         ) {
             ExploreFeature()
@@ -429,6 +432,7 @@ final class ExplorePagingTests: XCTestCase {
 
         await store.send(.jumpToPage(2)) {
             $0.books = []
+            $0.isGroupBarExpanded = false
             $0.page = 2
             $0.pageStarts = []
             $0.hasMore = false
@@ -446,5 +450,96 @@ final class ExplorePagingTests: XCTestCase {
 
         let pages = await recorder.pageNumbers()
         XCTAssertEqual(pages, [2], "跳页应只请求目标页码")
+    }
+}
+
+@MainActor
+final class ExploreGroupBarTests: XCTestCase {
+    func test上滑阈值与垂直方向判定() {
+        XCTAssertTrue(ExploreFeature.shouldCollapseGroupBar(horizontal: 0, vertical: -40))
+        XCTAssertTrue(ExploreFeature.shouldCollapseGroupBar(horizontal: 20, vertical: -60))
+        XCTAssertTrue(ExploreFeature.shouldCollapseGroupBar(horizontal: -20, vertical: -60))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: 0, vertical: -39.9))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: 0, vertical: 0))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: 0, vertical: 60))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: 80, vertical: -60))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: -80, vertical: -60))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: 40, vertical: -40))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: .nan, vertical: -60))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: 0, vertical: .nan))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: .infinity, vertical: -60))
+        XCTAssertFalse(ExploreFeature.shouldCollapseGroupBar(horizontal: 0, vertical: -.infinity))
+    }
+
+    func test无效拖动不收起面板() async {
+        let store = TestStore(initialState: ExploreFeature.State(isGroupBarExpanded: true)) {
+            ExploreFeature()
+        }
+        await store.send(.groupBarDragged(horizontal: 0, vertical: -39.9))
+        await store.send(.groupBarDragged(horizontal: 80, vertical: -60))
+        await store.send(.groupBarDragged(horizontal: 0, vertical: 60))
+        await store.send(.groupBarDragged(horizontal: 40, vertical: -40))
+        await store.finish()
+    }
+
+    func test上滑只收起面板保留筛选分页与错误() async {
+        let store = TestStore(initialState: ExploreFeature.State(
+            categories: [ExploreTestData.category],
+            moreErrorMessage: "下一页加载失败",
+            failedStep: .more,
+            selectedCategory: ExploreTestData.category,
+            books: [Book(path: "/book/current/", title: "当前书目")],
+            page: 3,
+            pageStarts: [ExplorePageStart(page: 3, index: 0)],
+            requestID: 8,
+            hasMore: true,
+            isGroupBarExpanded: true
+        )) {
+            ExploreFeature()
+        } withDependencies: {
+            $0.exploreService.books = { _, _ in
+                XCTFail("收起面板不得请求书目")
+                return []
+            }
+        }
+        await store.send(.groupBarDragged(horizontal: 10, vertical: -60)) {
+            $0.isGroupBarExpanded = false
+        }
+        await store.send(.groupBarDragged(horizontal: 10, vertical: -60))
+        await store.finish()
+    }
+
+    func test显式开关幂等且上滑不打断正在加载的分页() async {
+        let store = TestStore(initialState: ExploreFeature.State(
+            selectedCategory: ExploreTestData.category,
+            books: [Book(path: "/book/current/", title: "当前书目")],
+            pageStarts: [ExplorePageStart(page: 1, index: 0)],
+            requestID: 7,
+            isLoadingMore: true,
+            hasMore: true
+        )) {
+            ExploreFeature()
+        } withDependencies: {
+            $0.exploreService.books = { _, _ in
+                XCTFail("面板开关不得请求书目")
+                return []
+            }
+        }
+        await store.send(.groupBarDragged(horizontal: 0, vertical: -60))
+        await store.send(.groupBarExpansionChanged(true)) {
+            $0.isGroupBarExpanded = true
+        }
+        await store.send(.groupBarExpansionChanged(true))
+        await store.send(.groupBarExpansionChanged(false)) {
+            $0.isGroupBarExpanded = false
+        }
+        await store.send(.groupBarExpansionChanged(false))
+        await store.send(.groupBarExpansionChanged(true)) {
+            $0.isGroupBarExpanded = true
+        }
+        await store.send(.groupBarDragged(horizontal: 0, vertical: -60)) {
+            $0.isGroupBarExpanded = false
+        }
+        await store.finish()
     }
 }

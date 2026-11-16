@@ -165,10 +165,41 @@ public actor NovelEngine {
 
     // MARK: - 目录
 
+    static let maxCatalogPages = 512
+
     public func chapters(bookPath: String) async throws -> [Chapter] {
-        let html = try await fetch(path: bookPath, body: nil)
-        guard let url = config.url(bookPath) else { throw NetworkError.invalidURL(bookPath) }
-        return HTMLParser.parseChapters(html, baseURL: url)
+        guard let initial = config.url(bookPath),
+              let bookURL = ChapterCatalogPagination.normalized(initial) else {
+            throw NetworkError.invalidURL(bookPath)
+        }
+        var pending = [bookURL]
+        var scheduled: Set<URL> = [bookURL]
+        var chaptersByPath: [String: Chapter] = [:]
+        var expectedPages = 1
+        var cursor = 0
+        while cursor < pending.count {
+            try Task.checkCancellation()
+            guard cursor < Self.maxCatalogPages else { throw ChapterCatalogError.pageLimitExceeded }
+            let pageURL = pending[cursor]
+            cursor += 1
+            let html = try await performWithGuard(url: pageURL, body: nil)
+            expectedPages = max(expectedPages, ChapterCatalogPagination.expectedPageCount(in: html) ?? 1)
+            guard expectedPages <= Self.maxCatalogPages else { throw ChapterCatalogError.pageLimitExceeded }
+            let chapters = HTMLParser.parseChapters(html, baseURL: pageURL, bookURL: bookURL)
+            guard !chapters.isEmpty else { throw ChapterCatalogError.emptyPage }
+            for chapter in chapters where chaptersByPath[chapter.path] == nil {
+                chaptersByPath[chapter.path] = chapter
+            }
+            let pages = try ChapterCatalogPagination.pages(in: html, currentURL: pageURL, bookURL: bookURL)
+            for next in pages where scheduled.insert(next).inserted {
+                guard scheduled.count <= Self.maxCatalogPages else { throw ChapterCatalogError.pageLimitExceeded }
+                pending.append(next)
+            }
+        }
+        guard cursor >= expectedPages else { throw ChapterCatalogError.invalidPageLink }
+        return chaptersByPath.values.sorted {
+            $0.number == $1.number ? $0.path < $1.path : $0.number < $1.number
+        }
     }
 
     // MARK: - 正文（含解码还原）

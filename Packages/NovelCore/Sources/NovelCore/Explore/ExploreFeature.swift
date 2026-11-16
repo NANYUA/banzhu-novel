@@ -34,7 +34,8 @@ public struct ExploreFeature: Reducer {
             pageStarts: [ExplorePageStart] = [],
             requestID: Int = 0,
             isLoadingMore: Bool = false,
-            hasMore: Bool = false
+            hasMore: Bool = false,
+            isGroupBarExpanded: Bool = false
         ) {
             self.categories = categories
             self.isLoading = isLoading
@@ -48,6 +49,7 @@ public struct ExploreFeature: Reducer {
             self.requestID = requestID
             self.isLoadingMore = isLoadingMore
             self.hasMore = hasMore
+            self.isGroupBarExpanded = isGroupBarExpanded
         }
 
         /// 固定三维筛选目录。
@@ -96,11 +98,16 @@ public struct ExploreFeature: Reducer {
 
         /// 是否还有下一页（判定口径见类型注释）。
         public var hasMore = false
+
+        /// 吸顶分类面板是否展开。
+        public var isGroupBarExpanded = false
     }
 
     public enum Action: Equatable {
         /// 进页面：同步提供固定分类；仅首次自动加载默认组合。
         case task
+        case groupBarExpansionChanged(Bool)
+        case groupBarDragged(horizontal: Double, vertical: Double)
         /// 选中分类：拉它的第 1 页。
         case categorySelected(ExploreCategory)
         /// 第 1 页就绪。
@@ -130,6 +137,17 @@ public struct ExploreFeature: Reducer {
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
+            case let .groupBarExpansionChanged(isExpanded):
+                state.isGroupBarExpanded = isExpanded
+                return .none
+
+            case let .groupBarDragged(horizontal, vertical):
+                guard Self.shouldCollapseGroupBar(horizontal: horizontal, vertical: vertical) else {
+                    return .none
+                }
+                state.isGroupBarExpanded = false
+                return .none
+
             case .task:
                 state.categories = ExploreCategoryCatalog.allItems
                 guard state.selectedCategory == nil else { return .none }
@@ -234,6 +252,14 @@ public struct ExploreFeature: Reducer {
     }
 }
 
+extension ExploreFeature {
+    /// 位移以点为单位；只有达到阈值且垂直占优的上滑才收起面板。
+    static func shouldCollapseGroupBar(horizontal: Double, vertical: Double) -> Bool {
+        guard horizontal.isFinite, vertical.isFinite else { return false }
+        return vertical <= -40 && -vertical > abs(horizontal)
+    }
+}
+
 public extension ExploreFeature {
     /// 加载失败发生在哪一步（`State.failedStep`）。
     ///
@@ -262,6 +288,7 @@ private func loadFirstPage(
     state.hasMore = false
     state.isLoadingMore = false
     state.isLoading = true
+    state.isGroupBarExpanded = false
     state.requestID += 1
     let requestID = state.requestID
     clearFailure(&state)
@@ -320,6 +347,7 @@ private func jumpToPage(
     state.hasMore = false
     state.isLoadingMore = false
     state.isLoading = true
+    state.isGroupBarExpanded = false
     state.requestID += 1
     let requestID = state.requestID
     clearFailure(&state)

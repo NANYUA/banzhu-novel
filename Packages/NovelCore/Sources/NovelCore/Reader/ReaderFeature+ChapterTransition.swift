@@ -471,3 +471,23 @@ extension ReaderFeature {
         return .send(.loadChapterWithName(chapter.path, chapter.name))
     }
 }
+
+// MARK: - 目录更新
+
+extension ReaderFeature {
+    func updateCatalog(_ chapters: [ChapterItem], in state: inout State) -> Effect<Action> {
+        guard !chapters.isEmpty, chapters != state.chapters else { return .none }
+        let next = state.nextChapter
+        let previous = state.previousChapter
+        state.chapters = chapters
+        let nextChanged = next?.path != state.nextChapter?.path || next?.name != state.nextChapter?.name
+        let previousChanged = previous?.path != state.previousChapter?.path || previous?.name != state.previousChapter?.name
+        if nextChanged { invalidateNextChapter(&state) }
+        if previousChanged { invalidatePreviousChapter(&state) }
+        guard !state.isLoading, !state.text.isEmpty else { return .none }
+        return .concatenate(
+            nextChanged ? preloadNextChapter(state, loader: readerLoader) : .none,
+            previousChanged ? preloadPreviousChapter(state, loader: readerLoader) : .none
+        )
+    }
+}

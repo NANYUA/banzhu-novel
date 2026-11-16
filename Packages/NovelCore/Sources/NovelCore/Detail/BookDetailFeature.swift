@@ -134,6 +134,9 @@ public struct BookDetailFeature: Reducer {
         case chaptersDownloaded([String])
         /// 目录加载失败后点「重试」：只重发目录请求，不重新读详情。
         case reloadChapters
+        case refreshChapters
+        case chaptersRefreshed([ChapterItem])
+        case chapterRefreshFailed(String)
         /// 远端兜底失败。`String` 是**真实原因**（含「没配站点」这类前提说明）：
         /// 失败时首屏只剩搜索列表的回退字段（列表页没有简介）与空目录，阅读按钮也不出现，
         /// 不说出来，「没联网成功」与「这本书本来就是空的」长得一模一样。
@@ -171,7 +174,7 @@ public struct BookDetailFeature: Reducer {
         Reduce { state, action in
             switch action {
             case .onAppear:
-                guard !state.isLoading else { return .none }
+                guard !state.isLoading, !state.isRefreshingChapters else { return .none }
                 state.isLoading = true
                 state.errorMessage = nil
                 state.isLoadingChapters = true
@@ -272,20 +275,8 @@ public struct BookDetailFeature: Reducer {
                 markChaptersDownloaded(paths, in: &state.chapters)
                 return .none
 
-            case .reloadChapters:
-                guard !state.isLoadingChapters else { return .none }
-                state.isLoadingChapters = true
-                state.chapterErrorMessage = nil
-                let bookPath = state.detail.bookPath
-                let chapterListLoader = chapterListLoader
-                return .run { send in
-                    do {
-                        let chapters = try await chapterListLoader.load(bookPath)
-                        await send(.chaptersLoaded(chapters))
-                    } catch {
-                        await send(.chaptersFailed(error.localizedDescription))
-                    }
-                }
+            case .reloadChapters, .refreshChapters, .chaptersRefreshed, .chapterRefreshFailed:
+                return reduceCatalogRefresh(into: &state, action: action)
 
             case .reloadDetail:
                 guard !state.isLoading else { return .none }
@@ -435,6 +426,8 @@ public extension BookDetailFeature {
 
         /// 目录首次加载中。
         public var isLoadingChapters = false
+        public var isRefreshingChapters = false
+        public var catalogRefreshError: String?
 
         /// 目录加载失败原因。与详情本身的 `errorMessage` **分开**：一个失败不该把另一个拖下水。
         public var chapterErrorMessage: String?

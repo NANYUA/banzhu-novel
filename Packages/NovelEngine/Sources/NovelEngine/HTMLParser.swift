@@ -240,37 +240,32 @@ enum HTMLParser {
     }
 
     // MARK: - 目录
-    /// 解析章节链接 /区/书号/章号.html，按章号升序去重
-    static func parseChapters(_ html: String, baseURL: URL?) -> [Chapter] {
-        guard let re = try? NSRegularExpression(
-            pattern: "href=\"([^\"#]*?/(\\d+)\\.html)\"[^>]*>\\s*([^<]*)</a>",
-            options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return [] }
-        let ns = html as NSString
-        var seen = Set<String>()
-        var out: [Chapter] = []
-        re.enumerateMatches(in: html, options: [], range: NSRange(location: 0, length: ns.length)) { m, _, _ in
-            guard let m = m, m.numberOfRanges > 3 else { return }
-            let href = ns.substring(with: m.range(at: 1))
-            let num = Int(ns.substring(with: m.range(at: 2))) ?? 0
-            let title = ns.substring(with: m.range(at: 3)).trimmingCharacters(in: .whitespacesAndNewlines)
-            // 归一成相对路径
-            let path: String
-            if href.hasPrefix("http"), let u = URL(string: href) {
-                path = u.path
-            } else if href.hasPrefix("/") {
-                path = href
-            } else if let base = baseURL {
-                path = URL(string: href, relativeTo: base)?.path ?? href
-            } else {
-                path = href
-            }
-            if !seen.contains(path) {
-                seen.insert(path)
-                out.append(Chapter(number: num, name: title, path: path))
-            }
+    static func parseChapters(_ html: String, baseURL: URL?, bookURL: URL? = nil) -> [Chapter] {
+        let html = ChapterCatalogPagination.chapterSection(in: html)
+        let pattern = #"<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a\s*>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return []
         }
-        out.sort { $0.number < $1.number }
-        return out
+        let source = html as NSString
+        var seen = Set<String>()
+        var chapters: [Chapter] = []
+        for match in regex.matches(in: html, range: NSRange(location: 0, length: source.length)) {
+            let reference = source.substring(with: match.range(at: 1))
+                .replacingOccurrences(of: "&amp;", with: "&")
+            guard let url = URL(string: reference, relativeTo: baseURL)?.absoluteURL.standardized,
+                  url.pathExtension.lowercased() == "html",
+                  let number = Int(url.deletingPathExtension().lastPathComponent) else { continue }
+            if let root = bookURL ?? baseURL {
+                let directory = root.hasDirectoryPath ? root : root.deletingLastPathComponent()
+                guard url.deletingLastPathComponent().path == directory.path else { continue }
+            }
+            let title = anchorTitle(source.substring(with: match.range(at: 2)))
+            guard !title.isEmpty, seen.insert(url.path).inserted else { continue }
+            chapters.append(Chapter(number: number, name: title, path: url.path))
+        }
+        return chapters.sorted {
+            $0.number == $1.number ? $0.path < $1.path : $0.number < $1.number
+        }
     }
 
     // MARK: - 快照测试接口

@@ -21,6 +21,8 @@ struct ChapterListView: View {
     let onRetry: () -> Void
     let onSelect: (ChapterItem) -> Void
     let onDownloadChapter: (ChapterItem) -> Void
+    var onRefresh: (() -> Void)?
+    var isRefreshing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
@@ -60,10 +62,20 @@ struct ChapterListView: View {
 private extension ChapterListView {
     var header: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-            // 标题右侧原先摆着「下载章节…」按钮（U1-8 移到详情页按钮组），
-            // 那个只为把它推到右边而存在的 `HStack` + `Spacer` 已一并清掉。
-            Text("目录")
-                .font(.headline)
+            HStack {
+                Text("目录")
+                    .font(.headline)
+                Spacer(minLength: DesignTokens.Spacing.xs)
+                if let onRefresh {
+                    Button(action: onRefresh) {
+                        Label(isRefreshing ? "刷新中…" : "刷新目录", systemImage: "arrow.clockwise")
+                            .frame(minHeight: 44)
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .disabled(data.isLoading || isRefreshing)
+                }
+            }
 
             // U1-7：入口就给「已下载 N 章」，点进去之前就知道这本下过多少。
             // 措辞与选择面板 header 保持一致（同一口径、同一句式）。

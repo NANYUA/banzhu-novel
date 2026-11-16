@@ -25,14 +25,8 @@ extension EnvironmentValues {
 ///
 /// `PageTurnMode` 只剩 `.slide`：恒为单页渲染，滚动恒关闭。
 struct PageTextView: UIViewRepresentable {
-    let text: String
+    let content: ReaderPageContent
     let configuration: PaginationConfiguration
-
-    /// 本页是否**从段落开头**开始（由切片函数调 NovelCore 的 `ParagraphBoundary` 判定后传入）。
-    ///
-    /// 为 `false` 时本页第一行是**续行**（本页从段落中间开始），不加首行缩进；
-    /// 只影响本页**第一个段落**，本页后续段落照旧加缩进。
-    let startsAtParagraphStart: Bool
 
     /// 渲染盒 ≠ 分页盒时的回写回调（见 `ReaderBoxMismatchKey`）。
     ///
@@ -41,11 +35,10 @@ struct PageTextView: UIViewRepresentable {
     /// 构造 —— 那会直接编译不过。下面另写了显式 `init`，把这条歧义彻底去掉。
     @Environment(\.readerBoxMismatchHandler) var onBoxMismatch: ((CGSize) -> Void)?
 
-    /// 显式初始化器：只吃三个渲染输入（环境值由 SwiftUI 注入，不参与构造）。
-    init(text: String, configuration: PaginationConfiguration, startsAtParagraphStart: Bool) {
-        self.text = text
+    /// 显式初始化器：接收未展开内容与样式，环境值仍由 SwiftUI 注入。
+    init(content: ReaderPageContent, configuration: PaginationConfiguration) {
+        self.content = content
         self.configuration = configuration
-        self.startsAtParagraphStart = startsAtParagraphStart
     }
 
     func makeCoordinator() -> Coordinator {
@@ -75,20 +68,12 @@ struct PageTextView: UIViewRepresentable {
         context.coordinator.parent = self
 
         // ⚠️ 这两项**先于**下面的内容比较写：盒不匹配的回写恰恰要覆盖「内容没变、只是盒还没落定」
-        // 那条路径（`guard contentChanged` 之后才写就会漏掉它）。
+        // 那条路径（缓存早退 之后才写就会漏掉它）。
         uiView.paginatedBoxSize = configuration.containerSize
         uiView.onBoxMismatch = onBoxMismatch
 
-        let contentChanged = context.coordinator.appliedText != text
-            || context.coordinator.appliedConfiguration != configuration
-            // 它由 `text` + 分页决定，正常不会单独变；但它是**渲染输出**的一个输入，
-            // 漏比就会出现「正文没变、缩进却是上一页口径」的陈旧渲染。
-            || context.coordinator.appliedStartsAtParagraphStart != startsAtParagraphStart
-        guard contentChanged else { return }
-
-        context.coordinator.appliedText = text
-        context.coordinator.appliedConfiguration = configuration
-        context.coordinator.appliedStartsAtParagraphStart = startsAtParagraphStart
+        // 在正文归一化、切片和富文本构造之前短路，盒尺寸回写仍逐次更新。
+        guard context.coordinator.renderCache.update(content: content, configuration: configuration) else { return }
 
         // `PageTurnMode` 只剩 `.slide`：永远是单页渲染，滚动恒关闭。
         uiView.isScrollEnabled = false
@@ -123,7 +108,7 @@ struct PageTextView: UIViewRepresentable {
             custom: configuration.customBackgroundColor,
             customDark: configuration.customBackgroundColorDark
         )
-        uiView.attributedText = makeAttributedString()
+        uiView.attributedText = makeAttributedString(slice: context.coordinator.renderCache.slice)
     }
 
     /// 把渲染盒钉死在**父级提案**（可用盒）上，而不是让 SwiftUI 按 `UITextView` 自己的尺寸协商定 frame 宽。
@@ -152,7 +137,8 @@ struct PageTextView: UIViewRepresentable {
     /// 是**同一条口径**（段落样式逐字段同值 + 首行缩进的抑制规则同源，都调 `ParagraphBoundary`）：
     /// 改一处必须改另一处，否则度量盒与渲染盒错位 —— 每页多塞 / 少塞正文，正文被裁
     /// （B0-2 几何契约）。
-    private func makeAttributedString() -> NSAttributedString {
+    private func makeAttributedString(slice: ReaderPageSlice) -> NSAttributedString {
+        let text = slice.text
         let backgroundColor = configuration.backgroundStyle.uiColor(
             custom: configuration.customBackgroundColor,
             customDark: configuration.customBackgroundColorDark
@@ -172,7 +158,7 @@ struct PageTextView: UIViewRepresentable {
 
         // 本页从**段落中间**开始时，第一行是续行，不该有首行缩进。
         // ⚠️ 只换掉切片**第一个段落**那一份样式；本页后续段落照旧带缩进。
-        if !startsAtParagraphStart {
+        if !slice.startsAtParagraphStart {
             attributed.addAttribute(
                 .paragraphStyle,
                 value: makeParagraphStyle(firstLineHeadIndent: 0),
@@ -200,9 +186,7 @@ struct PageTextView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         var parent: PageTextView
-        var appliedText: String?
-        var appliedConfiguration: PaginationConfiguration?
-        var appliedStartsAtParagraphStart: Bool?
+        var renderCache = ReaderTextRenderCache()
 
         init(parent: PageTextView) {
             self.parent = parent
@@ -228,7 +212,7 @@ struct PageTextView: UIViewRepresentable {
 ///   `ReaderView.readerContent` 的 `.clipped()` 只作**最后兜底**。
 ///
 /// ## 为什么在 `layoutSubviews` 里钉（而不是只在 `updateUIView` 里设一次）
-/// `updateUIView` 在**内容未变**时直接 return（见它的 `guard contentChanged`），而 frame 会随
+/// `updateUIView` 在**内容未变**时直接 return（见它的 缓存早退），而 frame 会随
 /// 字号 / 边距 / 容器尺寸变化 —— 这条「只变尺寸、不变内容」的路径不经过它。`layoutSubviews`
 /// 是 frame 落定后 UIKit 必然调用的钩子，两条路径都由它兜住；`updateUIView` 里也在
 /// `textContainerInset` 之后显式调一次，让「内容变化」那条路径不依赖后续的布局回调。
