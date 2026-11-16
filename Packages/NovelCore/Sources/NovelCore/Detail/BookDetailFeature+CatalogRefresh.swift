@@ -13,7 +13,8 @@ extension BookDetailFeature {
             let loader = chapterListLoader
             return .run { send in
                 do {
-                    await send(.chaptersLoaded(try await loader.load(bookPath)))
+                    let chapters = try await loader.load(bookPath)
+                    await send(.chaptersLoaded(chapters))
                 } catch {
                     await send(.chaptersFailed(error.localizedDescription))
                 }
@@ -33,7 +34,9 @@ extension BookDetailFeature {
 
         case let .chapterRefreshFailed(message):
             state.isRefreshingChapters = false
-            if state.isOnShelf { state.catalogRefreshError = message }
+            if state.isOnShelf {
+                state.catalogRefreshError = message
+            }
             return .none
 
         default:
@@ -52,7 +55,8 @@ extension BookDetailFeature {
         let refresh = refresher.refresh
         return .run { send in
             do {
-                await send(.chaptersRefreshed(try await refresh(bookPath)))
+                let chapters = try await refresh(bookPath)
+                await send(.chaptersRefreshed(chapters))
             } catch {
                 await send(.chapterRefreshFailed(error.localizedDescription))
             }

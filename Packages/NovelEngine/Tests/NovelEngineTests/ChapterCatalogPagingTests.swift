@@ -106,8 +106,7 @@ final class ChapterCatalogPagingTests: XCTestCase {
         do {
             _ = try await engine.chapters(bookPath: "/42/420/")
             XCTFail("Expected the second page failure to propagate")
-        } catch NetworkError.httpStatus(404) {
-        }
+        } catch NetworkError.httpStatus(404) {}
     }
 
     func testEmptyLaterPageIsNotAcceptedAsCompleteCatalog() async throws {
@@ -118,8 +117,7 @@ final class ChapterCatalogPagingTests: XCTestCase {
         do {
             _ = try await engine.chapters(bookPath: "/42/420/")
             XCTFail("Expected an error for an unparseable page")
-        } catch ChapterCatalogError.emptyPage {
-        }
+        } catch ChapterCatalogError.emptyPage {}
     }
 
     func testExternalAndOtherBookPaginationAreRejected() async throws {
@@ -130,8 +128,7 @@ final class ChapterCatalogPagingTests: XCTestCase {
             do {
                 _ = try await engine.chapters(bookPath: "/42/420/")
                 XCTFail("Expected an invalid pagination link error")
-            } catch ChapterCatalogError.invalidPageLink {
-            }
+            } catch ChapterCatalogError.invalidPageLink {}
             let paths = await transport.requestedPaths()
             XCTAssertEqual(paths.count, 1)
         }
@@ -147,8 +144,7 @@ final class ChapterCatalogPagingTests: XCTestCase {
         do {
             _ = try await engine.chapters(bookPath: "/42/420/index_1.html")
             XCTFail("Expected a page limit error")
-        } catch ChapterCatalogError.pageLimitExceeded {
-        }
+        } catch ChapterCatalogError.pageLimitExceeded {}
         let paths = await transport.requestedPaths()
         XCTAssertEqual(paths.count, NovelEngine.maxCatalogPages)
     }
@@ -168,8 +164,7 @@ final class ChapterCatalogPagingTests: XCTestCase {
         do {
             _ = try await engine.chapters(bookPath: "/42/420/")
             XCTFail("Expected incomplete catalog error")
-        } catch ChapterCatalogError.invalidPageLink {
-        }
+        } catch ChapterCatalogError.invalidPageLink {}
     }
 
     func testRelativeChapterLinksKeepStableIdentifiers() throws {

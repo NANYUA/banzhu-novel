@@ -38,9 +38,9 @@ final class ChapterCatalogRefreshTests: XCTestCase {
 
     func test补全后阅读器相邻章不再跨过缺页() throws {
         let fixture = try CatalogRefreshFixture()
-        var reader = ReaderFeature.State(
+        var reader = try ReaderFeature.State(
             chapterPath: fixture.path(25),
-            chapters: try fixture.storedChapters().map { ChapterItem(record: $0) }
+            chapters: fixture.storedChapters().map { ChapterItem(record: $0) }
         )
         XCTAssertEqual(reader.nextChapter?.path, fixture.path(100))
 

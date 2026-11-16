@@ -112,7 +112,6 @@ extension ReaderView {
     ///   动画，见 `panPages`，叠上来会打架）；为假时挂 `slideSettleAnimation()`
     ///   —— 与平移翻页的吸附回位**同一条曲线、同一个时长**。Reduce Motion 下 `settlePan`
     ///   不动偏移（它按「能不能跟手」判），退化由 `pageAnimation()` 那条淡入淡出负责。
-    @ViewBuilder
     func singlePage(
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>,
         configuration: PaginationConfiguration,

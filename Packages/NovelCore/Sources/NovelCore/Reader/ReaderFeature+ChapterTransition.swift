@@ -482,8 +482,12 @@ extension ReaderFeature {
         state.chapters = chapters
         let nextChanged = next?.path != state.nextChapter?.path || next?.name != state.nextChapter?.name
         let previousChanged = previous?.path != state.previousChapter?.path || previous?.name != state.previousChapter?.name
-        if nextChanged { invalidateNextChapter(&state) }
-        if previousChanged { invalidatePreviousChapter(&state) }
+        if nextChanged {
+            invalidateNextChapter(&state)
+        }
+        if previousChanged {
+            invalidatePreviousChapter(&state)
+        }
         guard !state.isLoading, !state.text.isEmpty else { return .none }
         return .concatenate(
             nextChanged ? preloadNextChapter(state, loader: readerLoader) : .none,

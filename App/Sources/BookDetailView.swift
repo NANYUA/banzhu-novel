@@ -137,7 +137,9 @@ struct BookDetailView: View {
             // （不重读目录 —— 500 章批量下载那样会退化成 O(n²)，见 `BookDetailView+DownloadRefresh`）。
             .background { downloadCompletionObserver(viewStore) }
             .onChange(of: viewStore.chapters) { _, chapters in
-                if !chapters.isEmpty { onCatalogRefreshed(chapters) }
+                if !chapters.isEmpty {
+                    onCatalogRefreshed(chapters)
+                }
             }
             .onChange(of: viewStore.lastAddedRow) { _, row in
                 if let row {
