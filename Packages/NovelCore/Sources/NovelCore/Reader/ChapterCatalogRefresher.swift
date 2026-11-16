@@ -95,6 +95,8 @@ enum ChapterCatalogRefresherLive {
         book.latestChapterName = merged.last?.name
         book.latestChapterCount = merged.count
         book.lastCheckedAt = Date()
+        // 登记模型属性的待处理变更，使保存失败后的回滚同步已持有的对象。
+        context.processPendingChanges()
         do {
             try save(context)
         } catch {
