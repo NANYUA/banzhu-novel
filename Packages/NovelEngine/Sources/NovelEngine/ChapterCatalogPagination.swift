@@ -124,7 +124,8 @@ enum ChapterCatalogPagination {
               url.port == bookURL.port, url.user == nil, url.password == nil else { return nil }
         let directory = bookURL.hasDirectoryPath ? bookURL : bookURL.deletingLastPathComponent()
         guard url.path == bookURL.path || url.deletingLastPathComponent().path == directory.path
-            || isSiblingPage(url, bookURL: bookURL) else { return nil }
+            || isSiblingPage(url, bookURL: bookURL)
+            || isQueryPage(url, bookURL: bookURL) else { return nil }
         return url
     }
 
@@ -137,8 +138,14 @@ enum ChapterCatalogPagination {
         return page > 0
     }
 
+    private static func isQueryPage(_ url: URL, bookURL: URL) -> Bool {
+        url.path == bookURL.path && URLComponents(url: url, resolvingAgainstBaseURL: true)?.queryItems?.contains {
+            ["page", "p", "pageno", "pageindex"].contains($0.name.lowercased()) && Int($0.value ?? "") != nil
+        } == true
+    }
+
     private static func isNumberedPage(_ url: URL, bookURL: URL) -> Bool {
-        if isSiblingPage(url, bookURL: bookURL) { return true }
+        if isSiblingPage(url, bookURL: bookURL) || isQueryPage(url, bookURL: bookURL) { return true }
         let name = url.lastPathComponent.lowercased()
         if name.range(of: #"^(?:index|list|catalog|toc)(?:[_-]?\d+)?\.(?:html?|php)$"#, options: .regularExpression) != nil {
             return true

@@ -91,6 +91,7 @@ enum ChapterCatalogRefresherLive {
         let existing = try context.fetch(descriptor)
         try validate(chapters: chapters, existing: existing)
 
+        let previous = CatalogRollbackState(book: book, chapters: existing)
         let merged = apply(chapters: chapters, existing: existing, bookPath: bookPath, context: context)
         book.latestChapterName = merged.last?.name
         book.latestChapterCount = merged.count
@@ -100,6 +101,8 @@ enum ChapterCatalogRefresherLive {
         do {
             try save(context)
         } catch {
+            previous.restore(book: book, chapters: existing)
+            context.processPendingChanges()
             context.rollback()
             throw error
         }
@@ -145,8 +148,30 @@ enum ChapterCatalogRefresherLive {
     }
 }
 
-/// 校验本地及远端的编号与路径一一对应，不按数组位置重编号。
-private struct CatalogIdentityIndex {
+private struct CatalogRollbackState {
+    let latestName: String?
+    let latestCount: Int
+    let checkedAt: Date?
+    let chapterNames: [String: String]
+
+    init(book: BookRecord, chapters: [ChapterRecord]) {
+        latestName = book.latestChapterName
+        latestCount = book.latestChapterCount
+        checkedAt = book.lastCheckedAt
+        chapterNames = Dictionary(uniqueKeysWithValues: chapters.map { ($0.path, $0.name) })
+    }
+
+    func restore(book: BookRecord, chapters: [ChapterRecord]) {
+        book.latestChapterName = latestName
+        book.latestChapterCount = latestCount
+        book.lastCheckedAt = checkedAt
+        for chapter in chapters where chapterNames[chapter.path] != nil {
+            chapter.name = chapterNames[chapter.path] ?? chapter.name
+        }
+    }
+}
+
+
     var pathByNumber: [Int: String] = [:]
     var numberByPath: [String: Int] = [:]
 
