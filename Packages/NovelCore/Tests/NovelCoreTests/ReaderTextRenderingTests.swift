@@ -209,7 +209,6 @@ final class ReaderTextRenderingTests: XCTestCase {
     }
 }
 
-
 @MainActor
 final class ReaderPageIndexTests: XCTestCase {
     func testBinaryLookupPageStartsMiddleAndEndBoundaries() {

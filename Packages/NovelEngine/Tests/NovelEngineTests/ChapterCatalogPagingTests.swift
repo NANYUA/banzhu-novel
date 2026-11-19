@@ -173,7 +173,7 @@ final class ChapterCatalogPagingTests: XCTestCase {
         <select><option value="/42/420_1/">1</option><option value="/42/420_3/">3</option></select>
         <a href="/42/420_3/">下页</a>
         """
-        let lastPage = chapterLinks(41 ... 60) + "(第3/3页)<a href="/42/420_3/">下页</a>"
+        let lastPage = chapterLinks(41 ... 60) + #"(第3/3页)<a href="/42/420_3/">下页</a>"#
         let (engine, transport) = await makeEngine(pages: [
             "/42/420/": firstPage,
             "/42/420_1/": firstPage,

@@ -70,9 +70,9 @@ struct NumberInputRow: View {
     /// AnyLayout 切换方向时保留输入框身份，避免改变字号丢失正在编辑的草稿。
     private var rowLayout: AnyLayout {
         if dynamicTypeSize >= .xxxLarge {
-            return AnyLayout(VStackLayout(alignment: .leading, spacing: DesignTokens.Spacing.xs))
+            AnyLayout(VStackLayout(alignment: .leading, spacing: DesignTokens.Spacing.xs))
         } else {
-            return AnyLayout(HStackLayout(spacing: DesignTokens.Spacing.xs))
+            AnyLayout(HStackLayout(spacing: DesignTokens.Spacing.xs))
         }
     }
 

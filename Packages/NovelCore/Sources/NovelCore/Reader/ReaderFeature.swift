@@ -540,7 +540,7 @@ public extension ReaderFeature.State {
     }
 
     /// 按 location 升序二分定位偏移所在页；页范围须相邻且不重叠。未命中返回 nil.
-    public func pageIndex(containing offset: Int) -> Int? {
+    func pageIndex(containing offset: Int) -> Int? {
         var lower = 0
         var upper = pages.count
         while lower < upper {
