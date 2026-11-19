@@ -171,7 +171,8 @@ private struct CatalogRollbackState {
     }
 }
 
-
+/// 校验本地及远端的编号与路径一一对应，不按数组位置重编号。
+private struct CatalogIdentityIndex {
     var pathByNumber: [Int: String] = [:]
     var numberByPath: [String: Int] = [:]
 
