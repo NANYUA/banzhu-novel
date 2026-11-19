@@ -144,6 +144,25 @@ enum ChapterCatalogPagination {
         } == true
     }
 
+    static func pageNumber(_ url: URL, bookURL: URL) -> Int? {
+        if let items = URLComponents(url: url, resolvingAgainstBaseURL: true)?.queryItems {
+            for item in items where ["page", "p", "pageno", "pageindex"].contains(item.name.lowercased()) {
+                if let number = Int(item.value ?? ""), number > 0 { return number }
+            }
+        }
+        if url.path == bookURL.path { return 1 }
+        if isSiblingPage(url, bookURL: bookURL) {
+            let prefix = bookURL.lastPathComponent + "_"
+            return Int(url.lastPathComponent.dropFirst(prefix.count))
+        }
+        let name = url.lastPathComponent.lowercased()
+        if let regex = try? NSRegularExpression(pattern: #"^(?:index|list|catalog|toc)[_-]?(\d+)\.(?:html?|php)$"#),
+           let match = regex.firstMatch(in: name, range: NSRange(location: 0, length: (name as NSString).length)) {
+            return Int((name as NSString).substring(with: match.range(at: 1)))
+        }
+        return nil
+    }
+
     private static func isNumberedPage(_ url: URL, bookURL: URL) -> Bool {
         if isSiblingPage(url, bookURL: bookURL) || isQueryPage(url, bookURL: bookURL) { return true }
         let name = url.lastPathComponent.lowercased()

@@ -60,15 +60,37 @@ struct NumberInputRow: View {
         focus.wrappedValue == title
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     /// 数字框宽度：基础值（算式见 `NumberInputMetrics.fieldWidthBase`）随 `.body` 字号缩放
     /// —— 先例 `DownloadSummaryCard.progressColumnWidth`。钉死基础值的话，
     /// 大字号下框里那 4 位数字会被裁掉。
     @ScaledMetric(relativeTo: .body) private var fieldWidth = NumberInputMetrics.fieldWidthBase
 
+    /// AnyLayout 切换方向时保留输入框身份，避免改变字号丢失正在编辑的草稿。
+    private var rowLayout: AnyLayout {
+        if dynamicTypeSize >= .xxxLarge {
+            return AnyLayout(VStackLayout(alignment: .leading, spacing: DesignTokens.Spacing.xs))
+        } else {
+            return AnyLayout(HStackLayout(spacing: DesignTokens.Spacing.xs))
+        }
+    }
+
     var body: some View {
-        HStack(spacing: DesignTokens.Spacing.xs) {
+        rowLayout {
             Text(title)
-            Spacer(minLength: DesignTokens.Spacing.sm)
+                .fixedSize(horizontal: false, vertical: true)
+            if dynamicTypeSize < .xxxLarge {
+                Spacer(minLength: DesignTokens.Spacing.sm)
+            }
+            valueControls
+        }
+        .padding(.vertical, DesignTokens.Spacing.xxs)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var valueControls: some View {
+        HStack(spacing: DesignTokens.Spacing.xs) {
             stepButton(
                 systemImage: "minus",
                 label: "减小 \(title)",
@@ -115,7 +137,7 @@ struct NumberInputRow: View {
                 }
             }
             .accessibilityLabel(title)
-            .accessibilityValue(formattedValue)
+            .accessibilityValue(draft ?? formattedValue)
     }
 
     /// 一个 `−` / `+` 按钮：44pt 命中区 + 按下反馈（复用栏内按钮那套）+ 到端点置灰。

@@ -26,6 +26,7 @@ struct ReaderSettingsView: View {
     /// `.preferredColorScheme` 传到这个 sheet，所以这里拿到的是阅读页**实际生效**的外观，
     /// 而不是裸的系统外观。
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// 当前聚焦的数值行（身份 = `NumberInputRow.title`，本页 11 处标题互不相同）。
     ///
@@ -55,24 +56,30 @@ struct ReaderSettingsView: View {
         NavigationStack {
             Form {
                 textSection
-                appearanceSection
+                Section("更多设置") {
+                    NavigationLink("排版与边距") {
+                        layoutSettingsPage
+                    }
+                    NavigationLink("外观") {
+                        appearanceSettingsPage
+                    }
+                }
                 readingSection
             }
             .navigationTitle("阅读设置")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
-                        dismiss()
-                    }
+        }
+        // 整个导航栈共用一份工具栏，子页的数值框也只显示一个键盘「完成」。
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") {
+                    focusedField = nil
+                    dismiss()
                 }
-                // 数字键盘（`.numberPad` / `.decimalPad`）**没有 return 键** ⇒ 失焦是唯一的提交
-                // 路径，键盘上必须给一个「完成」。**只有这一处**：焦点置 `nil`，正在编辑的那一行
-                // 由 `NumberInputRow` 的 `.onChange(of: isEditing)` 提交草稿（不是每敲一个字符就写设置）。
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("完成") { focusedField = nil }
-                }
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { focusedField = nil }
             }
         }
     }
@@ -88,46 +95,79 @@ struct ReaderSettingsView: View {
                 }
             }
 
-            // 四条数值项改输入式控件（`NumberInputRow`）：可点 `−` / `+` 微调、也可直接键入。
-            // 「字间距」步长 0.5 ⇒ 该控件按**带小数**处理：`.decimalPad` 键盘 + 保留一位小数
-            // （旧写法 `Int(...)` 会把小数截断，显示与设置值不符）。
             NumberInputRow(title: "字号", value: binding(\.fontSize), range: 12 ... 30, step: 1, focus: $focusedField)
-            NumberInputRow(title: "行距", value: binding(\.lineSpacing), range: 0 ... 20, step: 1, focus: $focusedField)
-            NumberInputRow(title: "段间距", value: binding(\.paragraphSpacing), range: 0 ... 30, step: 2, focus: $focusedField)
-            NumberInputRow(title: "字间距", value: binding(\.characterSpacing), range: -1 ... 5, step: 0.5, focus: $focusedField)
 
             Toggle("字体加粗", isOn: binding(\.isBold))
             Toggle("字体倾斜", isOn: binding(\.isItalic))
         }
     }
+}
+
+private extension ReaderSettingsView {
+    // MARK: - 排版
+
+    var layoutSettingsPage: some View {
+        Form {
+            Section("文字间距") {
+                NumberInputRow(title: "行距", value: binding(\.lineSpacing), range: 0 ... 20, step: 1, focus: $focusedField)
+                NumberInputRow(title: "段间距", value: binding(\.paragraphSpacing), range: 0 ... 30, step: 2, focus: $focusedField)
+                NumberInputRow(title: "字间距", value: binding(\.characterSpacing), range: -1 ... 5, step: 0.5, focus: $focusedField)
+            }
+            Section("正文边距") {
+                textInsets
+            }
+            Section("标签与面板边距") {
+                labelInsets
+            }
+        }
+        .navigationTitle("排版与边距")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear { focusedField = nil }
+    }
 
     // MARK: - 外观
 
+    var appearanceSettingsPage: some View {
+        Form {
+            appearanceSection
+            Section("显示") {
+                appearanceModePicker
+                Toggle("亮度跟随系统", isOn: binding(\.followsSystemBrightness))
+            }
+        }
+        .navigationTitle("外观")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
     private var appearanceSection: some View {
-        Section("外观") {
-            VStack(alignment: .leading, spacing: 10) {
+        Section("颜色") {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 Text("背景色")
-                HStack(spacing: 14) {
+                HStack(alignment: .top, spacing: DesignTokens.Spacing.xs) {
                     ForEach(ReadingBackgroundStyle.allCases.filter { $0 != .custom }, id: \.self) { style in
-                        backgroundSwatch(style)
+                        VStack(spacing: DesignTokens.Spacing.xxs) {
+                            backgroundSwatch(style)
+                            Text(style.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                 }
-                // 第二行：亮 / 暗两个自定义背景色色卡 —— 色卡**本身就是 `ColorPicker` 的色块**，
-                // 点左卡直接开系统取色器改亮色、点右卡直接开系统取色器改暗色，各改各的。
-                // 改任一个色都会自动切到「自定义」——第一行已过滤掉 `.custom`，
-                // 第二行是进入自定义模式的唯一入口。
-                HStack(spacing: 14) {
-                    customBackgroundPicker(isLight: true)
-                    customBackgroundPicker(isLight: false)
-                }
+            }
+            .padding(.vertical, DesignTokens.Spacing.xxs)
+
+            LabeledContent("自定义亮色背景") {
+                customBackgroundPicker(isLight: true)
+            }
+            LabeledContent("自定义暗色背景") {
+                customBackgroundPicker(isLight: false)
             }
 
-            Picker("文字颜色", selection: binding(\.textColorMode)) {
-                ForEach(ReadingTextColorMode.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            adaptiveTextColorPicker
 
             if configuration.textColorMode == .custom {
                 ColorPicker(
@@ -136,20 +176,12 @@ struct ReaderSettingsView: View {
                     supportsOpacity: false
                 )
             }
-
-            insetSliders
-
-            Toggle("亮度跟随系统", isOn: binding(\.followsSystemBrightness))
         }
     }
 
-    /// 「外观」里的 6 条边距输入行（正文上 / 下 / 左右 + 标签边距 + 上标签上 / 下标签下边距）。
-    ///
-    /// 抽出来只为 `function_body_length`：内联在 `appearanceSection` 里会顶穿 50 行门槛
-    /// （warning 即 CI 红）。`@ViewBuilder` 展开成 `TupleView` ⇒ 每一行仍是 `Section` 的
-    /// **直接子视图**，`Form` 里逐行渲染的版式与内联写法逐值相同（没有多套一层容器）。
+    /// 正文边距与边框标识相邻，读写仍直接使用原有绑定。
     @ViewBuilder
-    private var insetSliders: some View {
+    private var textInsets: some View {
         // 上下边距**拆成两个控件**（owner 2026-10-11）：语义是「距**屏幕边缘**的绝对距离」，
         // `0` = 正文贴到屏幕最边缘（**不自己适配刘海**），上 `0…200`、下 `0…120`。
         // 两个控件**各改各的**（旧实现那一个滑杆同时写 `top` 与 `bottom`，已删）。
@@ -165,6 +197,10 @@ struct ReaderSettingsView: View {
         // 就要来回翻两段才能对照，失去「边调边看」的意义。
         // ⚠️ 刻意**不做**设置页内的迷你预览：正文盒的真实极限要对着刘海 / 上下栏看才有意义（owner 口径）。
         Toggle("正文边框标识", isOn: binding(\.showsTextAreaBorder))
+    }
+
+    @ViewBuilder
+    private var labelInsets: some View {
         // 标签边距（owner 2026-10-11）：三个角落标签（左上书名 / 章节名、左下电量、右下页码）
         // **共用**这一个值，只调它们距屏幕左 / 右边缘的距离 —— 垂直位置不受它影响。
         NumberInputRow(title: "标签边距", value: hudInsetBinding, range: 0 ... 64, step: 2, focus: $focusedField)
@@ -201,13 +237,40 @@ struct ReaderSettingsView: View {
                 step: 1,
                 focus: $focusedField
             )
+        }
+    }
 
-            Picker("夜间模式", selection: binding(\.appearanceMode)) {
-                ForEach(ReadingAppearanceMode.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
+    @ViewBuilder
+    private var adaptiveTextColorPicker: some View {
+        if dynamicTypeSize >= .xxxLarge {
+            textColorPicker.pickerStyle(.menu)
+        } else {
+            textColorPicker.pickerStyle(.segmented)
+        }
+    }
+
+    private var textColorPicker: some View {
+        Picker("文字颜色", selection: binding(\.textColorMode)) {
+            ForEach(ReadingTextColorMode.allCases, id: \.self) { mode in
+                Text(mode.displayName).tag(mode)
             }
-            .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var appearanceModePicker: some View {
+        if dynamicTypeSize >= .xxxLarge {
+            nightModePicker.pickerStyle(.menu)
+        } else {
+            nightModePicker.pickerStyle(.segmented)
+        }
+    }
+
+    private var nightModePicker: some View {
+        Picker("夜间模式", selection: binding(\.appearanceMode)) {
+            ForEach(ReadingAppearanceMode.allCases, id: \.self) { mode in
+                Text(mode.displayName).tag(mode)
+            }
         }
     }
 

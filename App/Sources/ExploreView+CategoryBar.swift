@@ -47,7 +47,6 @@ extension ExploreView {
                 viewStore.send(.groupBarExpansionChanged(true))
             }
         )
-        .modifier(ExploreFloatingBarSurface())
     }
 
     /// 原地弹出的完整分组栏（点吸顶收缩栏的三个胶囊后展开，列表停在原地）。
@@ -67,40 +66,6 @@ extension ExploreView {
                 viewStore.send(.categorySelected(category))
             }
         )
-        .modifier(ExploreFloatingBarSurface())
-    }
-}
-
-private struct ExploreFloatingBarSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    private let fadeHeight: CGFloat = 24
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.bottom, reduceTransparency ? 0 : fadeHeight)
-            .background {
-                Group {
-                    if reduceTransparency {
-                        AppTheme.Surface.page
-                    } else {
-                        Rectangle()
-                            .fill(.regularMaterial)
-                            .mask {
-                                VStack(spacing: 0) {
-                                    Rectangle()
-                                    LinearGradient(
-                                        colors: [.black, .clear],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                    .frame(height: fadeHeight)
-                                }
-                            }
-                    }
-                }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
     }
 }
 

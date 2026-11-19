@@ -146,7 +146,13 @@ extension ReaderView {
         _ viewStore: ViewStore<ReaderFeature.State, ReaderFeature.Action>
     ) -> ReaderPageContent {
         let offset = viewStore.currentOffset
-        let page = viewStore.pages.first { offset >= $0.location && offset < $0.location + $0.length }
-        return ReaderPageContent(text: viewStore.text, chapterName: viewStore.chapterName, page: page)
+        guard let pageIndex = viewStore.state.pageIndex(containing: offset), viewStore.pages.indices.contains(pageIndex) else {
+            return ReaderPageContent(text: viewStore.text, chapterName: viewStore.chapterName)
+        }
+        return ReaderPageContent(
+            text: viewStore.text,
+            chapterName: viewStore.chapterName,
+            page: viewStore.pages[pageIndex]
+        )
     }
 }

@@ -167,6 +167,26 @@ final class ChapterCatalogPagingTests: XCTestCase {
         } catch ChapterCatalogError.invalidPageLink {}
     }
 
+    func testMissingLogicalPageCannotBeHiddenByFirstPageAlias() async throws {
+        let firstPage = chapterLinks(1 ... 20) + """
+        (第1/3页)
+        <select><option value="/42/420_1/">1</option><option value="/42/420_3/">3</option></select>
+        <a href="/42/420_3/">下页</a>
+        """
+        let lastPage = chapterLinks(41 ... 60) + "(第3/3页)<a href="/42/420_3/">下页</a>"
+        let (engine, transport) = await makeEngine(pages: [
+            "/42/420/": firstPage,
+            "/42/420_1/": firstPage,
+            "/42/420_3/": lastPage,
+        ])
+        do {
+            _ = try await engine.chapters(bookPath: "/42/420/")
+            XCTFail("Logical page 2 is missing and must not be reported as a complete catalog")
+        } catch ChapterCatalogError.invalidPageLink {}
+        let requestedPaths = await transport.requestedPaths()
+        XCTAssertEqual(requestedPaths.count, 2)
+    }
+
     func testRelativeChapterLinksKeepStableIdentifiers() throws {
         let base = try XCTUnwrap(URL(string: "https://example.com/42/420/index_2.html"))
         let html = """

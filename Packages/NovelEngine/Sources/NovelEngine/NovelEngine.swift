@@ -173,7 +173,9 @@ public actor NovelEngine {
             throw NetworkError.invalidURL(bookPath)
         }
         var pending = [bookURL]
-        var scheduled: Set<URL> = [bookURL]
+        var scheduledURLs: Set<URL> = [bookURL]
+        var scheduledPageNumbers: Set<Int> = [1]
+        var crawledPageNumbers: Set<Int> = []
         var chaptersByPath: [String: Chapter] = [:]
         var expectedPages = 1
         var cursor = 0
@@ -182,8 +184,12 @@ public actor NovelEngine {
             guard cursor < Self.maxCatalogPages else { throw ChapterCatalogError.pageLimitExceeded }
             let pageURL = pending[cursor]
             cursor += 1
+            let pageNumber = ChapterCatalogPagination.pageNumber(pageURL, bookURL: bookURL)
+                ?? (crawledPageNumbers.max() ?? 0) + 1
+            guard crawledPageNumbers.insert(pageNumber).inserted else { continue }
             let html = try await performWithGuard(url: pageURL, body: nil)
             expectedPages = max(expectedPages, ChapterCatalogPagination.expectedPageCount(in: html) ?? 1)
+            expectedPages = max(expectedPages, pageNumber)
             guard expectedPages <= Self.maxCatalogPages else { throw ChapterCatalogError.pageLimitExceeded }
             let chapters = HTMLParser.parseChapters(html, baseURL: pageURL, bookURL: bookURL)
             guard !chapters.isEmpty else { throw ChapterCatalogError.emptyPage }
@@ -191,12 +197,23 @@ public actor NovelEngine {
                 chaptersByPath[chapter.path] = chapter
             }
             let pages = try ChapterCatalogPagination.pages(in: html, currentURL: pageURL, bookURL: bookURL)
-            for next in pages where scheduled.insert(next).inserted {
-                guard scheduled.count <= Self.maxCatalogPages else { throw ChapterCatalogError.pageLimitExceeded }
-                pending.append(next)
+            for next in pages {
+                guard let nextPage = ChapterCatalogPagination.pageNumber(next, bookURL: bookURL) else {
+                    throw ChapterCatalogError.invalidPageLink
+                }
+                expectedPages = max(expectedPages, nextPage)
+                if scheduledPageNumbers.insert(nextPage).inserted, scheduledURLs.insert(next).inserted {
+                    guard scheduledURLs.count <= Self.maxCatalogPages else {
+                        throw ChapterCatalogError.pageLimitExceeded
+                    }
+                    pending.append(next)
+                }
             }
         }
-        guard cursor >= expectedPages else { throw ChapterCatalogError.invalidPageLink }
+        let expectedPageSet = Set(1 ... expectedPages)
+        guard expectedPageSet.isSubset(of: crawledPageNumbers) else {
+            throw ChapterCatalogError.invalidPageLink
+        }
         return chaptersByPath.values.sorted {
             $0.number == $1.number ? $0.path < $1.path : $0.number < $1.number
         }

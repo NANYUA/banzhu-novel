@@ -37,7 +37,7 @@ struct SiteSettingsView: View {
                         }
                     }
                 }
-                .navigationTitle("站点入口")
+                .navigationTitle("站点设置")
                 .onAppear { viewStore.send(.task) }
                 // H5：离开本页时把编辑中的导航地址落盘（返回上一页 / 切 Tab 都会走这里）。
                 .onDisappear { viewStore.send(.commitNavigationURL) }
@@ -164,7 +164,7 @@ struct SiteSettingsView: View {
             Text("验证")
         } footer: {
             if viewStore.settings.currentHostValue == nil {
-                Text("请先在下方配置并选择一个域名。")
+                Text("请先在上方配置并选择一个域名。")
             } else if let outcome = lastGuardOutcome {
                 Text(outcome ? "验证已通过。" : "验证未通过。")
             }

@@ -539,17 +539,29 @@ public extension ReaderFeature.State {
         return Self.displayText(chapterName: previous.name, text: previousText)
     }
 
-    /// 当前 offset 落在第几页。`-1` 表示还没分页（空文本）
-    var currentPageIndex: Int {
-        guard !pages.isEmpty else { return -1 }
-        // pages 按 location 升序，二分或线性找 currentOffset 落在哪页
-        for (index, page) in pages.enumerated() {
-            if currentOffset >= page.location, currentOffset < page.location + page.length {
-                return index
+    /// 按 location 升序二分定位偏移所在页；页范围须相邻且不重叠。未命中返回 nil.
+    public func pageIndex(containing offset: Int) -> Int? {
+        var lower = 0
+        var upper = pages.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            let page = pages[middle]
+            if offset >= page.location, offset - page.location >= page.length {
+                lower = middle + 1
+            } else {
+                upper = middle
             }
         }
-        // 兜底：currentOffset 在末尾边界，归最后一页
-        return pages.count - 1
+        guard lower < pages.count else { return nil }
+        let page = pages[lower]
+        guard offset >= page.location, offset - page.location < page.length else { return nil }
+        return lower
+    }
+
+    /// 当前 offset 落在第几页。异常 offset 延续旧行为兜底末页。
+    var currentPageIndex: Int {
+        guard !pages.isEmpty else { return -1 }
+        return pageIndex(containing: currentOffset) ?? (pages.count - 1)
     }
 }
 

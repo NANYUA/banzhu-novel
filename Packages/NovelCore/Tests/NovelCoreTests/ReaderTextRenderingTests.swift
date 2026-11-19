@@ -208,3 +208,29 @@ final class ReaderTextRenderingTests: XCTestCase {
         XCTAssertEqual(store.state.currentPageIndex, 0)
     }
 }
+
+
+@MainActor
+final class ReaderPageIndexTests: XCTestCase {
+    func testBinaryLookupPageStartsMiddleAndEndBoundaries() {
+        let pages = [
+            PageRange(location: 0, length: 4),
+            PageRange(location: 4, length: 3),
+            PageRange(location: 7, length: 2),
+        ]
+        var state = ReaderFeature.State(chapterPath: "/reading", text: "abcdefghi")
+        state.pages = pages
+        let cases: [(Int, Int?)] = [
+            (0, 0), (3, 0), (4, 1), (6, 1), (7, 2), (8, 2),
+            (-1, nil), (9, nil), (Int.max, nil),
+        ]
+        for (offset, expected) in cases {
+            XCTAssertEqual(state.pageIndex(containing: offset), expected, "offset \(offset)")
+        }
+        XCTAssertEqual(state.currentPageIndex, 0)
+        state.currentOffset = Int.max
+        XCTAssertEqual(state.currentPageIndex, 2, "异常 offset 保持原有末页兜底语义")
+        state.pages = []
+        XCTAssertEqual(state.currentPageIndex, -1)
+    }
+}
